@@ -33,14 +33,13 @@ restore = build_restorer(t2r)
 back, n = restore(red)
 print("\n--- RESTORED (", n, "hits) --- John Smith back:", "John Smith" in back, "| Acme back:", "Acme" in back)
 
-# vault round-trip
-path = vault.save_job("test-job", t2r, "hunter2", meta={"x": 1})
-loaded = vault.load_job("test-job", "hunter2")
-print("\nVault OK:", loaded["mapping"] == t2r)
+# legacy vault codec round-trip (steady-state storage is in the browser now;
+# this codec survives only for the one-time DATA_DIR migration)
+record = vault.encrypt_record("test-job", t2r, "hunter2", meta={"x": 1})
+loaded = vault.decrypt_record(record, "hunter2")
+print("\nVault codec OK:", loaded["mapping"] == t2r)
 try:
-    vault.load_job("test-job", "wrongpw")
+    vault.decrypt_record(record, "wrongpw")
     print("Vault wrong-pw guard: FAILED")
 except ValueError:
     print("Vault wrong-pw guard: OK")
-import os
-os.remove(path)
