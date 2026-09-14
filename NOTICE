@@ -20,7 +20,8 @@ convenience — consult each project for the authoritative terms.
   - Microsoft Presidio .............. MIT License
       (presidio-analyzer, presidio-anonymizer)
   - spaCy ........................... MIT License
-  - spaCy model en_core_web_sm ...... MIT License
+  - spaCy models (en_core_web_sm/md/lg/trf, zh_core_web, ja_core_news,
+    ko_core_news) .................. MIT License
   - python-docx ..................... MIT License
   - openpyxl ........................ MIT License
   - pypdf ........................... BSD-3-Clause License

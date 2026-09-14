@@ -120,9 +120,12 @@ with a passphrase and stored only on your computer.
 - **Review before anything is written:** Lethe shows every proposed redaction,
   highlighted in the document — nothing is changed until you confirm.
 - **Multi-language (detection + OCR):** adding a language in Settings (Chinese, Japanese,
-  Korean, …) installs both its name-detection model *and* its OCR model, so scanned
-  documents in that script are read too. English works offline out of the box; extra
-  languages are a one-off online download. Your dictionary works in every language regardless.
+  Korean, …) installs its OCR model, so scanned documents in that script are read too.
+  Each language offers several name-detection **spaCy models** — small through large, plus
+  an English transformer — downloadable and switchable from Settings at any time; bigger
+  models catch more names but download more data. English works offline out of the box;
+  every other model is a one-off online download. Your dictionary works in every language
+  regardless.
 - **Themed desktop UI:** a NiceGUI app with a classical light/dark "river of oblivion"
   skin.
 - **Ships everywhere:** a Windows installer and portable bundle (no Python needed), or
@@ -143,6 +146,9 @@ model (otherwise Lethe falls back to a built-in regex name-guesser), `[ocr]` add
 fully-local OCR so scanned/image PDF pages are read (otherwise they're flagged, not read),
 and `[email]` adds Outlook `.msg` support (`.eml`/`.html` always work; without the extra,
 `.msg` is flagged). Either way, running `lethe` opens the app at `http://localhost:8731`.
+A fourth, optional extra — `[nlp-models]` — pre-installs the **larger** name-detection
+models (English md/lg, Chinese md/lg, Japanese md/lg, Korean md/lg, ~2.8 GB). You don't
+need it: Settings downloads and switches between those models on demand, per language.
 
 > spaCy/Presidio have no Python 3.14 wheels yet, so the `[nlp]` extra requires Python ≤ 3.13.
 
