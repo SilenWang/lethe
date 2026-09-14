@@ -115,8 +115,10 @@ with a passphrase and stored only on your computer.
   for careful review since OCR isn't perfect. The Windows build **bundles the English
   model so OCR runs fully offline**; any page OCR still can't read is flagged rather than
   silently dropped.
-- **Encrypted vault:** each job's token→name map is sealed with your passphrase
-  (PBKDF2 → Fernet). Lose the passphrase and that job is unrecoverable *by design*.
+- **Encrypted mappings, stored in your browser:** each job's token→name map is sealed
+  with your passphrase in the browser (PBKDF2-SHA-256 480k → AES-GCM-256) and kept in
+  IndexedDB — never uploaded to the server. Lose the passphrase and that job is
+  unrecoverable *by design*. Export a JSON backup from Settings → Browser data.
 - **Review before anything is written:** Lethe shows every proposed redaction,
   highlighted in the document — nothing is changed until you confirm.
 - **Multi-language (detection + OCR):** adding a language in Settings (Chinese, Japanese,
@@ -190,17 +192,19 @@ app.py  (NiceGUI UI)
           core.py            detection + tokenisation + replace / restore
           docio.py           Word / PDF / Excel read & write
           nlp_suggester.py   Presidio + spaCy suggestions (optional)
-          vault.py           encrypted, reversible token → name store
-          store.py           entity dictionary (entities.json)
-          web_static/        bundled theme assets (Cinzel font, favicon)
+          vault.py           legacy vault codec (one-time DATA_DIR migration)
+          store.py           dictionary logic (pure; data lives in the browser)
+          web_static/        theme assets + client-store.js (IndexedDB/WebCrypto)
 ```
 
 The UI is a thin layer over the `lethe` package; all detection, redaction and storage
-logic lives there with no UI coupling. User data — your `entities.json` dictionary,
-custom token types and the encrypted `vault/` — lives in a per-user data directory
-(`%APPDATA%\Lethe` on Windows, `~/Library/Application Support/Lethe` on macOS,
-`~/.local/share/Lethe` on Linux), or wherever `$LETHE_DATA_DIR` points (the Windows
-portable bundle sets it to keep data in-folder). It never goes inside the package.
+logic lives there with no UI coupling. User data — your dictionary, custom token types,
+conversion history and the encrypted token→name mappings — lives in **the browser**
+(IndexedDB, isolated per browser profile) and never goes inside the package or on the
+server. The per-user data directory (`DATA_DIR`) only holds program resources such as
+the OCR models and the NiceGUI session secret; a legacy install's `entities.json`,
+`token_types.json` and `vault/` are imported into the browser once via
+Settings → Migrate old server-side data and then archived in place.
 
 ## Limitations
 

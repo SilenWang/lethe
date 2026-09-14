@@ -18,8 +18,15 @@ WEB_STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web_stati
 
 
 def _resolve_data_dir() -> str:
-    """Where the user's data lives — the entity dictionary (entities.json),
-    custom token types and the encrypted vault/ folder.
+    """Where the *server-side* Lethe data lives.
+
+    Since the client-side storage migration the user's dictionary, custom token
+    types, conversion history and token -> real value mappings live in the
+    browser (IndexedDB) — this folder now only holds program resources such as
+    the OCR models (``tessdata/``) and the NiceGUI session secret. Legacy
+    installs may still contain the pre-migration ``entities.json``,
+    ``token_types.json`` and ``vault/``, which the one-time migration imports
+    into the browser and then archives.
 
     Order: $LETHE_DATA_DIR (the Windows portable bundle sets this to keep data
     in-folder), else the per-user application-data directory for the OS — so a
@@ -62,11 +69,9 @@ from .docio import (  # noqa: E402
     remove_ocr_language,
 )
 from .store import (  # noqa: E402
-    load_entities,
-    load_token_types,
+    entities_to_dicts,
     merge_entities,
-    save_entities,
-    save_token_types,
+    rows_to_entities,
 )
 
 __all__ = [
@@ -81,8 +86,6 @@ __all__ = [
     "read_xlsx_grid", "redact_document",
     # offline OCR language data
     "download_ocr_language", "installed_ocr_languages", "remove_ocr_language",
-    # entity dictionary
-    "load_entities", "merge_entities", "save_entities",
-    # user-defined token types
-    "load_token_types", "save_token_types",
+    # entity dictionary (pure data logic; persistence lives in the browser)
+    "entities_to_dicts", "merge_entities", "rows_to_entities",
 ]

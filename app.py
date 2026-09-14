@@ -23,12 +23,15 @@ if _HERE not in sys.path:
 
 import html as _html
 import io
+import json
 import re
 import secrets
 import urllib.parse
 import zipfile
 from datetime import datetime, timezone
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
 from nicegui import app, run, ui
 
 from lethe import (
@@ -42,17 +45,15 @@ from lethe import (
     clear_pdf_cache,
     detect,
     docio,
+    entities_to_dicts,
     extract_text,
     file_kind,
-    load_entities,
-    load_token_types,
-    merge_entities,
     nlp_suggester,
     pdf_warnings,
     read_xlsx_grid,
     redact_document,
-    save_entities,
-    save_token_types,
+    rows_to_entities,
+    store,
     vault,
 )
 
@@ -372,18 +373,20 @@ Your curated list of people & counterparties — this is what makes detection
 reliable. Add **aliases** (short / legal / trading names) so every variant maps
 to the same token. Newly-found names you redact are added here automatically.
 
-### What's saved on this computer
-Everything stays in the app's own folder — nothing is uploaded:
-- **Entity dictionary** (`entities.json`) — your people & counterparties, in plain text.
-- **Reversal keys** (`vault` folder) — one **encrypted** file per job, holding the
-  token → real-name mapping, locked by the passphrase you set (blank = unprotected).
-  This is the *only* way to re-identify a job; delete it or lose the passphrase and
-  that job can no longer be reversed.
-- **History index** (`vault\\index.json`) — the *Past conversions* list (date, file
-  name, redaction count) in plain text. It does **not** contain the real names.
+### Where your data lives
+Your data is stored in **this browser** (IndexedDB), isolated per browser — not on the
+server, and never uploaded:
+- **Entity dictionary** — your people & counterparties, plain text.
+- **Reversal keys** — one record per job holding the token → real-name mapping,
+  **encrypted in the browser** (PBKDF2 480k → AES-GCM) with the passphrase you set
+  (blank = unprotected). This is the *only* way to re-identify a job; delete it or lose
+  the passphrase and that job can no longer be reversed.
+- **History index** — the *Past conversions* list (date, file name, redaction count)
+  in plain text. It does **not** contain the real names.
 
-**Settings → Files & folders** shows exactly where this folder is (and where Lethe runs
-from), each with an **Open** button — handy for backing up your dictionary and vault.
+It survives refreshing and reopening the app. Clearing the browser's site data for Lethe
+erases it — **Settings → Browser data** lets you export/import a JSON backup and shows
+your stored counts, so keep a backup somewhere safe.
 
 ### What it can't remove
 The tool reads the **text** of your files. It does **not** touch:
@@ -465,9 +468,10 @@ ABOUT_HTML = f"""
     </div>
     <div class="about-col">
       <h4>Privacy &amp; storage</h4>
-      <p>Your entity dictionary (<code>entities.json</code>) and the encrypted, reversible
-      mappings (the <code>vault</code> folder) never leave this folder. Each job's reversal key
-      is encrypted with your passphrase; lose the passphrase and that job can no longer be reversed.</p>
+      <p>Your entity dictionary and the encrypted, reversible mappings are stored in <b>your
+      browser only</b> (IndexedDB, isolated per browser) and never uploaded to the server. Each
+      job's reversal key is encrypted in the browser with your passphrase; lose the passphrase and
+      that job can no longer be reversed. Export a backup from Settings → Browser data.</p>
       <h4>License</h4>
       <p>Lethe is released under the
       <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noreferrer">Apache
@@ -593,6 +597,152 @@ def _redact_files(payloads, replace_fn):
     return outputs, total
 
 
+# ============================================================================
+# Browser storage bridge — the user's data lives in the browser (IndexedDB),
+# never on the server. These helpers call into web_static/client-store.js.
+# ============================================================================
+_JS_TIMEOUT = 30.0
+
+
+class BrowserStoreError(RuntimeError):
+    """The browser-side store is unreachable or refused an operation."""
+
+
+def _fire_soon(coro_func) -> None:
+    """Run an async loader shortly after the page is attached, without blocking
+    the caller (used for one-shot refreshes of browser-backed panels)."""
+    ui.timer(0.01, coro_func, once=True)
+
+
+async def _store_call(expr: str, *, timeout: float = _JS_TIMEOUT):
+    """Evaluate an async JavaScript expression against window.lethStore and
+    unwrap its {ok, value} envelope. Raises BrowserStoreError on any failure
+    (missing store, blocked IndexedDB, thrown error) so callers can show the
+    user a clear message instead of silently losing their data."""
+    script = ("(async () => { try { const value = await (" + expr + ");"
+              " return JSON.stringify({ok: true, value: value === undefined ? null : value}); }"
+              " catch (err) { return JSON.stringify({ok: false,"
+              " error: (err && err.message) || String(err)}); } })()")
+    try:
+        raw = await ui.run_javascript(script, timeout=timeout)
+    except Exception as exc:  # noqa: BLE001 — surfaced to the user
+        raise BrowserStoreError(f"Couldn't reach browser storage: {exc}") from exc
+    try:
+        result = json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        result = None
+    if not isinstance(result, dict) or not result.get("ok"):
+        detail = (result or {}).get("error") or "browser storage returned an unexpected response"
+        raise BrowserStoreError(str(detail))
+    return result.get("value")
+
+
+async def client_entities() -> list[Entity]:
+    """The user's dictionary, read from the browser."""
+    rows = await _store_call("window.lethStore.getEntities()")
+    return rows_to_entities(rows or [])
+
+
+async def client_token_types() -> list[str]:
+    types = await _store_call("window.lethStore.getTokenTypes()")
+    return [str(t) for t in (types or []) if str(t).strip()]
+
+
+async def client_save_entities(entities: list[Entity]) -> int:
+    payload = json.dumps(entities_to_dicts(entities))
+    return int(await _store_call(f"window.lethStore.saveEntities({payload})") or 0)
+
+
+async def client_merge_entities(new_entities: list[Entity]) -> int:
+    payload = json.dumps(entities_to_dicts(new_entities))
+    return int(await _store_call(f"window.lethStore.mergeEntities({payload})") or 0)
+
+
+async def client_save_token_types(types: list[str]) -> list[str]:
+    return await _store_call(f"window.lethStore.saveTokenTypes({json.dumps(types)})") or []
+
+
+async def client_jobs() -> list[dict]:
+    return await _store_call("window.lethStore.listJobs()") or []
+
+
+async def client_delete_job(job_id: str) -> None:
+    await _store_call(f"window.lethStore.deleteJob({json.dumps(job_id)})")
+
+
+async def client_mapping(job_id: str, passphrase: str) -> dict:
+    """Decrypt (in the browser) and return a stored job's token -> real map."""
+    return await _store_call(
+        f"window.lethStore.getMapping({json.dumps(job_id)}, {json.dumps(passphrase)})") or {}
+
+
+async def client_save_job(job: dict) -> str:
+    """Encrypt (in the browser) and store a new conversion + its mapping."""
+    return await _store_call(f"window.lethStore.saveJob({json.dumps(job)})")
+
+
+async def storage_init() -> dict:
+    """Initialise the browser store and report its health. Never raises — the
+    UI shows a clear banner when browser storage is unavailable."""
+    try:
+        return await _store_call("window.lethStore.init()") or {}
+    except BrowserStoreError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ============================================================================
+# One-time migration of a legacy server-side DATA_DIR (read-only, local only)
+# ============================================================================
+def _loopback_only(request) -> bool:
+    host = (request.client.host if request and request.client else "") or ""
+    return host in {"127.0.0.1", "::1", "localhost"} or os.environ.get("LETHE_ALLOW_REMOTE_MIGRATION") == "1"
+
+
+def _legacy_status() -> dict:
+    return {
+        "present": store.legacy_user_data_present(DATA_DIR),
+        "entities": len(store.legacy_load_entities(DATA_DIR)),
+        "token_types": len(store.legacy_load_token_types(DATA_DIR)),
+        "jobs": len(vault.legacy_list_jobs(DATA_DIR)),
+        "data_dir": DATA_DIR,
+    }
+
+
+def register_api() -> None:
+    """Register the small local HTTP surface used by the browser store: the
+    one-time legacy migration. Everything else runs over the NiceGUI channel."""
+    def _json(payload: dict, status: int = 200) -> JSONResponse:
+        return JSONResponse(payload, status_code=status, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/migrate/status")
+    async def migrate_status() -> JSONResponse:
+        return _json(_legacy_status())
+
+    @app.post("/api/migrate/export")
+    async def migrate_export(request: Request) -> JSONResponse:
+        if not _loopback_only(request):
+            return _json({"error": "Migration is only available from this machine."}, 403)
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001 — an empty body means "blank passphrase"
+            body = {}
+        passphrase = str((body or {}).get("passphrase") or "")
+        jobs, errors = vault.legacy_export(DATA_DIR, passphrase)
+        return _json({
+            "entities": entities_to_dicts(store.legacy_load_entities(DATA_DIR)),
+            "token_types": store.legacy_load_token_types(DATA_DIR),
+            "jobs": jobs,
+            "errors": errors,
+        })
+
+    @app.post("/api/migrate/finalize")
+    async def migrate_finalize(request: Request) -> JSONResponse:
+        if not _loopback_only(request):
+            return _json({"error": "Migration is only available from this machine."}, 403)
+        archived = vault.legacy_archive(DATA_DIR)
+        return _json({"archived": archived is not None, "archived_to": archived})
+
+
 def _guide_dialog():
     with ui.dialog() as dlg, ui.card().classes("max-w-2xl").style("max-height:85vh;overflow:auto"):
         with ui.row().classes("items-center justify-between w-full"):
@@ -609,13 +759,43 @@ def main() -> None:
     elements) means it is served correctly whether Lethe is launched as a script
     or via the `lethe` console entry point."""
     app.add_static_files("/static", WEB_STATIC)
+    register_api()
     ui.page("/")(_build_index)
 
 
-def _build_index() -> None:
-    """Build the single-page UI for one client connection."""
+def _storage_banner(error: str | None = None, *, cleared: bool = False) -> None:
+    """A prominent, non-dismissable warning when the browser-side store can't be
+    used — so nobody keeps working under the illusion their dictionary or
+    re-identification mappings are being saved."""
+    if error:
+        msg = (f"Browser storage is unavailable ({error}). Your dictionary, custom token types, "
+               "conversion history and re-identification mappings can NOT be saved in this browser. "
+               "If you are in a private/incognito window, open Lethe in a normal window; otherwise "
+               "check that site data (cookies/IndexedDB) is allowed for this page.")
+        icon, color = "error", "negative"
+    else:
+        msg = ("Your browser data for Lethe looks cleared: the dictionary, custom token types and "
+               "re-identification mappings that were stored in this browser are gone. Restore a "
+               "backup from Settings → Browser data, or import your dictionary again.")
+        icon, color = "warning", "warning"
+    with ui.card().classes("w-full max-w-6xl mx-auto rounded-xl").style(
+            "border-color:var(--danger)" if error else "border-color:var(--warn)"):
+        with ui.row().classes("items-center gap-3 no-wrap"):
+            ui.icon(icon, color=color, size="20px")
+            ui.label(msg).classes("text-sm")
+
+
+async def _build_index() -> None:
+    """Build the single-page UI for one client connection.
+
+    Awaiting browser storage here is safe: NiceGUI delivers the page as soon as
+    the client connects and continues the build over the socket. The user data
+    (dictionary, custom token types, history, mappings) is read from the
+    browser's IndexedDB — the server keeps none of it."""
     ui.colors(**_BRAND_COLORS)
     ui.add_head_html(THEME_CSS)
+    ui.add_head_html('<script src="/static/client-store.js"></script>')
+    ui.add_head_html('<script src="/static/migration.js"></script>')
     # remember the last text selection inside the preview, even after a click
     ui.add_body_html("<script>document.addEventListener('mouseup',function(){"
                      "try{var s=window.getSelection().toString();"
@@ -643,6 +823,21 @@ def _build_index() -> None:
 
     ui.html('<div class="meander w-full"></div>')
 
+    # ---- browser storage: initialise, warn when unavailable/cleared --------
+    storage = await storage_init()
+    try:
+        token_types = await client_token_types()
+    except BrowserStoreError:
+        token_types = []
+    if not storage.get("ok"):
+        _storage_banner(storage.get("error") or "unavailable")
+    elif storage.get("cleared"):
+        _storage_banner(cleared=True)
+    elif storage.get("fresh"):
+        # Ask for persistent storage once, so the browser is less likely to
+        # evict the dictionary/mappings under disk pressure.
+        ui.run_javascript("window.lethStore.requestPersist && window.lethStore.requestPersist();")
+
     with ui.tabs().classes("w-full max-w-6xl mx-auto").props(
             "align=left active-color=primary indicator-color=primary no-caps") as tabs:
         t_deid = ui.tab("De-identify", icon="lock")
@@ -653,27 +848,40 @@ def _build_index() -> None:
 
     with ui.tab_panels(tabs, value=t_deid).classes("w-full max-w-6xl mx-auto bg-transparent"):
         with ui.tab_panel(t_deid).classes("p-0"):
-            build_deidentify_panel()
+            build_deidentify_panel(token_types)
         with ui.tab_panel(t_reid).classes("p-0"):
-            build_reidentify_panel()
+            refresh_history = build_reidentify_panel()
         with ui.tab_panel(t_restore).classes("p-0"):
-            build_restore_panel()
+            build_restore_panel(token_types)
         with ui.tab_panel(t_dict).classes("p-0"):
-            build_dictionary_panel()
+            refresh_dictionary = build_dictionary_panel(token_types)
         with ui.tab_panel(t_set).classes("p-0"):
-            build_settings_panel()
+            build_settings_panel(token_types, storage)
+
+    # Keep the browser-backed tables fresh: when the tab is opened and when the
+    # store changes in this tab or another tab (BroadcastChannel).
+    def _on_tab_change(e) -> None:
+        if e.value == t_reid:
+            refresh_history.refresh()
+        elif e.value == t_dict:
+            _fire_soon(refresh_dictionary)
+
+    tabs.on_value_change(_on_tab_change)
+    ui.on("leth-data-changed",
+          lambda _e: (refresh_history.refresh(), _fire_soon(refresh_dictionary)))
 
 
 # ============================================================================
 # 1 · DE-IDENTIFY
 # ============================================================================
-def build_deidentify_panel():
+def build_deidentify_panel(custom_types: list[str] | None = None):
     files: list[dict] = []          # [{name, kind, data}]
     manual_entities: list[Entity] = []
     state: dict = {"items": [], "preview_idx": 0}
 
-    # Built-in name types + any user-defined ones (Settings → Token types).
-    name_types = NAME_TYPES + load_token_types()
+    # Built-in name types + any user-defined ones (Settings → Token types),
+    # loaded from the browser store when the page was built.
+    name_types = NAME_TYPES + [t for t in (custom_types or []) if t not in NAME_TYPES]
     opts_js = "[" + ",".join(f"'{t}'" for t in name_types) + "]"
 
     with ui.column().classes("w-full gap-5 pt-5"):
@@ -879,9 +1087,17 @@ def build_deidentify_panel():
                 refresh_table()
                 return
             combined = "\n\n".join(f.get("text", "") for f in files)
-            ents = load_entities() + manual_entities
             note = ui.notification("Scanning for names…  (large documents take a few seconds)",
                                    spinner=True, timeout=None)
+            # The dictionary lives in the browser (IndexedDB), not on the server.
+            try:
+                ents = await client_entities()
+            except BrowserStoreError as exc:
+                note.dismiss()
+                ui.notify(f"Couldn't read your dictionary from this browser: {exc}", color="negative",
+                          multi_line=True)
+                ents = []
+            ents = ents + manual_entities
             try:
                 items = await run.io_bound(_detect_text, combined, ents)
             except Exception as exc:  # noqa: BLE001
@@ -1012,8 +1228,20 @@ def build_deidentify_panel():
             note.dismiss()
             ref_bytes = _reference_text(job_id, created, sources, token_to_real)
 
-            vault.save_job(job_id, token_to_real, passphrase,
-                           meta={"source_file": ", ".join(sources), "replacements": total_hits})
+            # The reversal key is encrypted and stored in THIS browser only
+            # (IndexedDB + WebCrypto) — the server never keeps it.
+            save_error = ""
+            try:
+                await client_save_job({
+                    "jobId": job_id,
+                    "createdAt": created,
+                    "sourceFiles": sources,
+                    "replacements": total_hits,
+                    "mapping": token_to_real,
+                    "passphrase": passphrase,
+                })
+            except BrowserStoreError as exc:
+                save_error = str(exc)
 
             added = 0
             if add_dict.value:
@@ -1023,7 +1251,11 @@ def build_deidentify_panel():
                             if it.include and it.source in ("suggestion", "manual")
                             and it.type in ("PERSON", "COUNTERPARTY")]
                 if new_ents:
-                    added = merge_entities(new_ents)
+                    try:
+                        added = await client_merge_entities(new_ents)
+                    except BrowserStoreError as exc:
+                        ui.notify(f"Couldn't add the new names to your dictionary: {exc}",
+                                  color="negative", multi_line=True)
 
             result.clear()
             with result:
@@ -1034,6 +1266,16 @@ def build_deidentify_panel():
                     ui.badge(job_id).props("color=primary")
                     if added:
                         ui.badge(f"+{added} to dictionary").props("color=teal-7")
+                if save_error:
+                    with ui.row().classes("items-center gap-2 flex-wrap"):
+                        ui.icon("warning", color="negative", size="18px")
+                        ui.label(f"The reversal key could NOT be saved in this browser ({save_error}). "
+                                 "Download the reference file below — it is the only copy of the "
+                                 "token → name mapping.").classes("text-xs").style("color:var(--danger)")
+                else:
+                    ui.label("Saved in this browser (IndexedDB) — it will be listed under Re-identify. "
+                             "Use Settings → Browser data to export a backup.").classes(
+                        "text-xs text-slate-500")
                 with ui.row().classes("items-center gap-2 flex-wrap"):
                     if len(outputs) == 1:
                         name, data = next(iter(outputs.items()))
@@ -1091,13 +1333,20 @@ def build_reidentify_panel():
                 </q-td>''')
 
             @ui.refreshable
-            def render_history():
+            async def render_history():
+                try:
+                    jobs = await client_jobs()
+                except BrowserStoreError as exc:
+                    ui.notify(f"Couldn't read the conversion history from this browser: {exc}",
+                              color="negative", multi_line=True)
+                    jobs = []
                 rows = []
-                for h in vault.history():
-                    rows.append({"job_id": h["job_id"],
-                                 "created": (h["created"] or "").replace("T", " ")[:16],
-                                 "source_file": h["source_file"] or "—",
-                                 "replacements": h["replacements"]})
+                for h in jobs:
+                    src = ", ".join(h.get("sourceFiles") or [])
+                    rows.append({"job_id": h.get("jobId", ""),
+                                 "created": (h.get("createdAt") or "").replace("T", " ")[:16],
+                                 "source_file": src or "—",
+                                 "replacements": h.get("replacements", 0)})
                 htable.rows = rows
                 htable.selected = [r for r in rows if r["job_id"] == sel["job_id"]]
                 htable.update()
@@ -1124,11 +1373,15 @@ def build_reidentify_panel():
                         ui.button("Delete", color="negative",
                                   on_click=lambda: dlg.submit(True)).props("unelevated no-caps")
                 if await dlg:
-                    vault.delete_job(jid)
+                    try:
+                        await client_delete_job(jid)
+                    except BrowserStoreError as exc:
+                        ui.notify(f"Couldn't delete {jid} from this browser: {exc}",
+                                  color="negative", multi_line=True)
                     if sel["job_id"] == jid:
                         sel["job_id"] = None
                         selected_label.text = "Selected: none — click a row above."
-                    render_history.refresh()
+                    await render_history.refresh()
                     ui.notify(f"Deleted conversion {jid}", color="primary")
 
             htable.on("deletejob", on_delete)
@@ -1168,19 +1421,21 @@ def build_reidentify_panel():
             clear_btn.visible = False
             ui.notify("Cleared uploaded file — will use pasted text", color="primary")
 
-        def on_restore():
+        async def on_restore():
             if not sel["job_id"]:
                 ui.notify("Select a conversion from the list above", color="warning")
                 return
             if upload["data"] is None and not (ai_text.value or "").strip():
                 ui.notify("Upload the AI's file or paste its text", color="warning")
                 return
+            # The mapping is stored (encrypted) in this browser only — decrypt it
+            # there with WebCrypto; the server never sees the passphrase.
             try:
-                job = vault.load_job(sel["job_id"], pw.value or "")
-            except (ValueError, FileNotFoundError) as exc:
-                ui.notify(str(exc), color="negative")
+                mapping = await client_mapping(sel["job_id"], pw.value or "")
+            except BrowserStoreError as exc:
+                ui.notify(f"Couldn't restore: {exc}", color="negative", multi_line=True)
                 return
-            restore = build_restorer(job["mapping"])
+            restore = build_restorer(mapping)
             result.clear()
             if upload["data"] is not None:
                 out_bytes, ext, hits = redact_document(upload["data"], upload["kind"], restore)
@@ -1205,8 +1460,8 @@ def build_reidentify_panel():
                                                                       f"{sel['job_id']}__reidentified.txt")).props(
                         "unelevated no-caps")
             ui.notify("Re-identified", color="positive")
-
         render_history()
+    return render_history
 
 
 # ============================================================================
@@ -1254,10 +1509,10 @@ def _restore_defaults(token: str, custom_types: list[str]) -> tuple[str, bool]:
     return "COUNTERPARTY", True
 
 
-def build_restore_panel():
+def build_restore_panel(custom_types: list[str] | None = None):
     state: dict = {"data": None, "kind": None, "name": None}
     rows: list[dict] = []   # [{token, count, cb, inp, tsel, save}]
-    custom_types = load_token_types()
+    custom_types = [t for t in (custom_types or []) if t not in BUILTIN_TYPES]
 
     with ui.column().classes("w-full gap-5 pt-5"):
         # ---- input: a tokenised document or pasted text ----
@@ -1365,7 +1620,7 @@ def build_restore_panel():
             token_card.visible = True
             ui.notify(f"Found {len(ordered)} distinct token(s)", color="primary")
 
-        def on_restore():
+        async def on_restore():
             mapping = {r["token"]: (r["inp"].value or "").strip()
                        for r in rows if r["cb"].value and (r["inp"].value or "").strip()}
             if not mapping:
@@ -1409,7 +1664,12 @@ def build_restore_panel():
                         for r in rows
                         if r["save"].value and (r["inp"].value or "").strip()]
             if new_ents:
-                added = merge_entities(new_ents)
+                try:
+                    added = await client_merge_entities(new_ents)
+                except BrowserStoreError as exc:
+                    ui.notify(f"Couldn't save the new name(s) to your dictionary: {exc}",
+                              color="negative", multi_line=True)
+                    added = 0
                 dup = len(new_ents) - added
                 msg = f"Saved {added} name(s) to your dictionary"
                 if dup:
@@ -1421,16 +1681,18 @@ def build_restore_panel():
 # ============================================================================
 # 3 · ENTITY DICTIONARY
 # ============================================================================
-def build_dictionary_panel():
-    rows: list[dict] = [{"canonical": e.canonical, "type": e.type, "aliases": ", ".join(e.aliases)}
-                        for e in load_entities()]
-    dict_types = ["PERSON", "COUNTERPARTY"] + load_token_types()
+def build_dictionary_panel(custom_types: list[str] | None = None):
+    rows: list[dict] = []          # loaded from the browser store after page load
+    dict_types = ["PERSON", "COUNTERPARTY"] + [t for t in (custom_types or [])
+                                               if t not in ("PERSON", "COUNTERPARTY")]
 
     with ui.column().classes("w-full gap-5 pt-5"):
         with ui.card().classes("w-full rounded-xl shadow-sm"):
             ui.label("Your known people & counterparties").classes("text-base font-medium")
             ui.label("A curated list is what makes detection reliable. Add aliases (short / legal / trading "
                      "names) so every variant maps to the same token.").classes("text-sm text-slate-500")
+            ui.label("This dictionary is kept in this browser only (IndexedDB) — export a backup from "
+                     "Settings → Browser data.").classes("text-xs").style(f"color:{PRIMARY}")
             editor = ui.column().classes("w-full gap-2 mt-2")
 
             @ui.refreshable
@@ -1469,7 +1731,7 @@ def build_dictionary_panel():
                 rows.append({"canonical": "", "type": "COUNTERPARTY", "aliases": ""})
                 render_rows.refresh()
 
-            def save():
+            async def save():
                 ents, seen = [], set()
                 for r in rows:
                     name = (r["canonical"] or "").strip()
@@ -1478,15 +1740,26 @@ def build_dictionary_panel():
                     seen.add(name.lower())
                     aliases = [a.strip() for a in (r["aliases"] or "").split(",") if a.strip()]
                     ents.append(Entity(canonical=name, type=(r["type"] or "COUNTERPARTY"), aliases=aliases))
-                save_entities(ents)
-                ui.notify(f"Saved {len(ents)} entit(ies)", color="positive")
+                try:
+                    await client_save_entities(ents)
+                except BrowserStoreError as exc:
+                    ui.notify(f"Couldn't save the dictionary in this browser: {exc}",
+                              color="negative", multi_line=True)
+                    return
+                ui.notify(f"Saved {len(ents)} entit(ies) in this browser", color="positive")
 
-            def reload_dict():
+            async def reload_dict():
+                try:
+                    ents = await client_entities()
+                except BrowserStoreError as exc:
+                    ui.notify(f"Couldn't read the dictionary from this browser: {exc}",
+                              color="negative", multi_line=True)
+                    return
                 rows.clear()
                 rows.extend({"canonical": e.canonical, "type": e.type, "aliases": ", ".join(e.aliases)}
-                            for e in load_entities())
+                            for e in ents)
                 render_rows.refresh()
-                ui.notify("Reloaded from disk", color="primary")
+                ui.notify("Reloaded from this browser", color="primary")
 
             render_rows()
             with ui.row().classes("gap-2 mt-2"):
@@ -1498,7 +1771,7 @@ def build_dictionary_panel():
                 ui.label("Paste one name per line (e.g. your counterparty master list).").classes(
                     "text-sm text-slate-500")
                 bulk = ui.textarea(label="Names").props("outlined").classes("w-full")
-                btype = ui.select(options=["COUNTERPARTY", "PERSON"] + load_token_types(),
+                btype = ui.select(options=["COUNTERPARTY", "PERSON"] + [t for t in (custom_types or []) if t not in ("PERSON", "COUNTERPARTY")],
                                   value="COUNTERPARTY",
                                   label="Add as type").props("outlined dense").style("width:200px")
 
@@ -1516,6 +1789,22 @@ def build_dictionary_panel():
                     ui.notify(f"Added {added} name(s) — remember to Save", color="primary")
 
                 ui.button("Append to list", icon="playlist_add", on_click=append_bulk).props("outline no-caps")
+
+    async def load_from_browser():
+        """Read the dictionary from IndexedDB once the page is live."""
+        try:
+            ents = await client_entities()
+        except BrowserStoreError as exc:
+            ui.notify(f"Couldn't read your dictionary from this browser: {exc}",
+                      color="negative", multi_line=True)
+            return
+        rows.clear()
+        rows.extend({"canonical": e.canonical, "type": e.type, "aliases": ", ".join(e.aliases)}
+                    for e in ents)
+        render_rows.refresh()
+
+    ui.timer(0.1, load_from_browser, once=True)
+    return load_from_browser
 
 
 # ============================================================================
@@ -1539,7 +1828,7 @@ def _open_folder(path: str) -> bool:
         return False
 
 
-def build_settings_panel():
+def build_settings_panel(custom_types: list[str] | None = None, storage: dict | None = None):
     with ui.column().classes("w-full gap-5 pt-5"):
         with ui.card().classes("w-full rounded-xl shadow-sm"):
             ui.label("Detection & OCR languages").classes("text-base font-medium")
@@ -1644,7 +1933,7 @@ def build_settings_panel():
                      "(patterns). Add your own categories — they appear in the Type dropdowns on "
                      "the De-identify and Entity dictionary tabs, and tokenise as [PROJECT_001].").classes(
                 "text-sm text-slate-500")
-            custom_types = list(load_token_types())
+            custom_types = [t for t in (custom_types or []) if t not in BUILTIN_TYPES]
             types_box = ui.column().classes("w-full gap-1 mt-2")
             reload_row = ui.row().classes("items-center gap-2")
 
@@ -1671,7 +1960,7 @@ def build_settings_panel():
                               on_click=lambda: ui.run_javascript("location.reload()")).props(
                         "flat dense no-caps size=sm")
 
-            def add_type():
+            async def add_type():
                 t = _sanitize_type(new_type.value)
                 new_type.value = ""
                 if not t:
@@ -1684,15 +1973,27 @@ def build_settings_panel():
                     ui.notify(f"{t} already exists.", color="warning")
                     return
                 custom_types.append(t)
-                save_token_types(custom_types)
+                try:
+                    await client_save_token_types(custom_types)
+                except BrowserStoreError as exc:
+                    custom_types.remove(t)
+                    ui.notify(f"Couldn't save the token types in this browser: {exc}",
+                              color="negative", multi_line=True)
+                    return
                 render_types.refresh()
                 note_reload()
                 ui.notify(f"Added type {t}", color="positive")
 
-            def remove_type(t):
+            async def remove_type(t):
                 if t in custom_types:
                     custom_types.remove(t)
-                    save_token_types(custom_types)
+                    try:
+                        await client_save_token_types(custom_types)
+                    except BrowserStoreError as exc:
+                        custom_types.append(t)
+                        ui.notify(f"Couldn't save the token types in this browser: {exc}",
+                                  color="negative", multi_line=True)
+                        return
                     render_types.refresh()
                     note_reload()
                     ui.notify(f"Removed {t}", color="primary")
@@ -1704,10 +2005,162 @@ def build_settings_panel():
                 ui.button("Add type", icon="add", on_click=add_type).props("outline no-caps")
 
         with ui.card().classes("w-full rounded-xl shadow-sm"):
+            ui.label("Browser data (IndexedDB)").classes("text-base font-medium")
+            ui.label("Your entity dictionary, custom token types, conversion history and the encrypted "
+                     "token→name mappings are stored in THIS browser only and are never uploaded to the "
+                     "server. They survive refreshing and reopening the app; clearing the browser's site "
+                     "data for Lethe erases them — so keep a backup somewhere safe.").classes(
+                "text-sm text-slate-500")
+
+            counts_label = ui.label("Checking…").classes("text-sm").style(f"color:{PRIMARY}")
+            quota_label = ui.label("").classes("text-xs text-slate-400")
+
+            async def refresh_browser_summary():
+                try:
+                    ents = await client_entities()
+                    jobs = await client_jobs()
+                except BrowserStoreError as exc:
+                    counts_label.text = f"Browser storage unavailable: {exc}"
+                    counts_label.style("color:var(--danger)")
+                    return
+                counts_label.text = f"{len(ents)} entit(ies) · {len(jobs)} conversion(s) stored in this browser"
+                try:
+                    q = await _store_call("window.lethStore.quota()", timeout=5)
+                except BrowserStoreError:
+                    q = None
+                if q and q.get("quota"):
+                    used_mb = (q.get("usage") or 0) / 1024 / 1024
+                    quota_label.text = (f"Storage: {used_mb:.2f} MB used of "
+                                        f"{q['quota'] / 1024 / 1024:.0f} MB (browser-managed)")
+                else:
+                    quota_label.text = "Storage usage not exposed by this browser."
+
+            with ui.row().classes("items-center gap-2 mt-1"):
+                ui.button("Export backup (.json)", icon="download",
+                          on_click=lambda: ui.run_javascript("window.lethStore.downloadBackup()")).props(
+                    "outline no-caps")
+                ui.html('<input type="file" id="leth-backup-file" accept=".json,application/json" '
+                        'style="display:none">')
+                ui.button("Import backup (.json)", icon="upload",
+                          on_click=lambda: ui.run_javascript(
+                              "window.lethMigration.wireBackupImport('leth-backup-file');"
+                              'document.getElementById("leth-backup-file").click();')).props(
+                    "outline no-caps")
+                ui.button(icon="refresh", on_click=lambda: refresh_browser_summary()).props(
+                    "flat round dense").tooltip("Refresh counts")
+
+            def on_backup_imported(e):
+                data = e.args if isinstance(e.args, dict) else {}
+                if data.get("ok"):
+                    ui.notify(f"Backup imported — {data.get('entities', 0)} entit(ies), "
+                              f"{data.get('jobs', 0)} conversion(s) added to this browser",
+                              color="positive")
+                else:
+                    ui.notify(f"Backup couldn't be imported: {data.get('error')}",
+                              color="negative", multi_line=True)
+
+            ui.on("leth-backup-imported", on_backup_imported)
+
+            async def erase_all():
+                with ui.dialog() as dlg, ui.card():
+                    ui.label("Erase ALL browser data for Lethe?").classes("text-base font-medium")
+                    ui.label("This permanently deletes your dictionary, custom token types, conversion "
+                             "history and every re-identification mapping stored in this browser. "
+                             "Export a backup first if you might need any of it.").classes(
+                        "text-sm text-slate-600")
+                    with ui.row().classes("justify-end gap-2 w-full"):
+                        ui.button("Cancel", on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                        ui.button("Erase everything", color="negative",
+                                  on_click=lambda: dlg.submit(True)).props("unelevated no-caps")
+                if await dlg:
+                    ui.run_javascript("window.lethStore.clearAll().then(() => location.reload())")
+
+            ui.button("Erase all browser data", icon="delete_forever", on_click=erase_all).props(
+                "flat no-caps color=negative")
+            _fire_soon(refresh_browser_summary)
+
+        with ui.card().classes("w-full rounded-xl shadow-sm"):
+            ui.label("Migrate old server-side data").classes("text-base font-medium")
+            mig_desc = ui.label("Checking…").classes("text-sm text-slate-500")
+            mig_btn = ui.button("Migrate old data into this browser", icon="sync",
+                                on_click=lambda: run_migration()).props(
+                "unelevated no-caps mt-1")
+            mig_btn.visible = False
+
+            async def refresh_migration_status():
+                try:
+                    status = await _store_call("window.lethMigration.status()", timeout=10)
+                except BrowserStoreError as exc:
+                    mig_desc.text = f"Couldn't check the server data folder: {exc}"
+                    return
+                if not status or not status.get("present"):
+                    mig_desc.text = ("No legacy server-side user data is present — the server data "
+                                     "folder only holds program resources (OCR models, session secret).")
+                    mig_btn.visible = False
+                    return
+                mig_desc.text = (
+                    f"Found {status.get('entities', 0)} entit(ies), {status.get('token_types', 0)} "
+                    f"custom type(s) and {status.get('jobs', 0)} conversion(s) in the old data folder "
+                    f"({status.get('data_dir', '')}). Import them into this browser below; the server "
+                    "folder is archived, never deleted.")
+                mig_btn.visible = True
+
+            async def run_migration():
+                with ui.dialog() as dlg, ui.card().classes("w-full max-w-md"):
+                    ui.label("Import old data into this browser").classes("text-base font-medium")
+                    ui.label("The old vault mappings were encrypted with a passphrase. Enter it if you "
+                             "used one (leave blank if you didn't). Then choose a passphrase to encrypt "
+                             "the imported mappings in this browser.").classes("text-sm text-slate-500")
+                    old_pw = ui.input("Old passphrase (if any)", password=True,
+                                      password_toggle_button=True).props("outlined dense").classes("w-full")
+                    new_pw = ui.input("New passphrase for this browser (optional)", password=True,
+                                      password_toggle_button=True).props("outlined dense").classes("w-full")
+                    ui.label("A blank new passphrase stores the imported mappings unprotected in this "
+                             "browser — the same as the old app's blank passphrase.").classes(
+                        "text-xs text-slate-500")
+                    with ui.row().classes("justify-end gap-2 w-full"):
+                        ui.button("Cancel", on_click=lambda: dlg.submit(None)).props("flat no-caps")
+                        ui.button("Import", on_click=lambda: dlg.submit(
+                            (old_pw.value or "", new_pw.value or ""))).props("unelevated no-caps").classes(
+                            "text-white")
+                vals = await dlg
+                if vals is None:
+                    return
+                old_pw_v, new_pw_v = vals
+                ui.run_javascript(
+                    f"window.lethMigration.run({json.dumps(old_pw_v)}, {json.dumps(new_pw_v)})"
+                    ".then(r => { r.ok = true; "
+                    'if (typeof window.emitEvent === "function") window.emitEvent("leth-migration-done", r); })'
+                    ".catch(e => { if (typeof window.emitEvent === \"function\") "
+                    'window.emitEvent("leth-migration-done", {ok:false, error: e.message || String(e)}); })')
+
+            def on_migration_done(e):
+                data = e.args if isinstance(e.args, dict) else {}
+                if not data.get("ok"):
+                    ui.notify(f"Migration failed: {data.get('error')}", color="negative", multi_line=True)
+                    return
+                notes = data.get("notes") or []
+                msg = (f"Migrated {data.get('entitiesAdded', 0)} entit(ies), "
+                       f"{data.get('token_types', 0)} type(s), {data.get('jobs', 0)} conversion(s) into "
+                       "this browser")
+                if notes:
+                    msg += f"; {data.get('errors', len(notes))} job(s) need the right old passphrase"
+                if data.get("archivedTo"):
+                    msg += " · old server data archived (not deleted)"
+                ui.notify(msg, color="positive" if not notes else "warning",
+                          multi_line=bool(notes), timeout=8000)
+                if not notes:
+                    ui.timer(2.0, lambda: ui.run_javascript("location.reload()"), once=True)
+
+            ui.on("leth-migration-done", on_migration_done)
+            _fire_soon(refresh_migration_status)
+
+        with ui.card().classes("w-full rounded-xl shadow-sm"):
             ui.label("Files & folders").classes("text-base font-medium")
-            ui.label("Everything Lethe stores stays on this computer. The data folder holds your "
-                     "entity dictionary, your custom token types and the encrypted vault — back it "
-                     "up to keep your re-identification keys safe.").classes("text-sm text-slate-500")
+            ui.label("The server no longer keeps your dictionary, conversion history or mappings. The "
+                     "data folder below now only holds program resources (OCR models) and the NiceGUI "
+                     "session secret — you don't need to back it up for your data.").classes(
+                "text-sm text-slate-500")
 
             def reveal(p: str):
                 if _open_folder(p):
@@ -1728,8 +2181,8 @@ def build_settings_panel():
                                   on_click=lambda p=path: reveal(p)).props(
                             "outline no-caps").tooltip("Open this folder")
 
-            folder_row("Your data (dictionary, custom types, encrypted vault)",
-                       "entities.json, token_types.json and the vault/ folder live here — back this up.",
+            folder_row("Server-side data folder (program resources only)",
+                       "OCR models and the session secret — no user data, nothing to back up.",
                        DATA_DIR)
             folder_row("Program files (where Lethe runs from)", "",
                        os.path.dirname(os.path.abspath(__file__)))
@@ -1739,11 +2192,34 @@ def build_settings_panel():
             ui.html(ABOUT_HTML)
 
 
+def _session_secret() -> str:
+    """A random, per-install NiceGUI session secret (the old hard-coded value
+    was guessable). Persisted under DATA_DIR so restarts keep sessions valid;
+    it protects the UI session only and is not user data."""
+    path = os.path.join(DATA_DIR, ".session_secret")
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            secret = fh.read().strip()
+        if secret:
+            return secret
+    except OSError:
+        pass
+    secret = secrets.token_urlsafe(32)
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(secret)
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return secret
+
+
 def run_app() -> None:
     """Console entry point (`lethe`): build the UI and start the local server."""
     main()
-    ui.run(title="Lethe — Document De-identifier", port=8731, reload=False, show=True,
-           storage_secret="deident-local", favicon=os.path.join(WEB_STATIC, "favicon.svg"))
+    port = int(os.environ.get("LETHE_PORT", "8731"))
+    ui.run(title="Lethe — Document De-identifier", port=port, reload=False, show=True,
+           storage_secret=_session_secret(), favicon=os.path.join(WEB_STATIC, "favicon.svg"))
 
 
 if __name__ in {"__main__", "__mp_main__"}:
