@@ -65,4 +65,4 @@ packages = ["lethe"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-lethe = ["web_static/*", "web_static/fonts/*"]
+lethe = ["web_static/*", "web_static/fonts/*", "locales/*.json"]
