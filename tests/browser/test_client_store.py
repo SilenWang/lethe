@@ -230,6 +230,44 @@ def test_legacy_data_migration(server, tmp_path):
     assert archived, "legacy data should be archived, not deleted"
 
 
+def test_legacy_migration_preserves_vault_on_wrong_passphrase(server, tmp_path):
+    """A wrong old passphrase must NOT archive the legacy vault (D3): the job
+    stays retryable with the correct passphrase."""
+    sys.path.insert(0, REPO)
+    from lethe import vault as lethe_vault
+
+    data_dir = server["data_dir"]
+    jid = "20250101-000000-abcd"
+    record = lethe_vault.encrypt_record(jid, {"[PERSON_001]": "Jane Doe"}, "right-pw",
+                                        meta={"source_file": "letter.docx", "replacements": 1})
+    os.makedirs(os.path.join(data_dir, "vault"), exist_ok=True)
+    with open(os.path.join(data_dir, "vault", f"{jid}.vault.json"), "w", encoding="utf-8") as fh:
+        json.dump(record, fh)
+    with open(os.path.join(data_dir, "vault", "index.json"), "w", encoding="utf-8") as fh:
+        json.dump([{"job_id": jid, "created": "2025-01-01T00:00:00Z",
+                    "source_file": "letter.docx", "replacements": 1}], fh)
+
+    profile = str(tmp_path / "profile-migrate-wrong-pw")
+    with sync_playwright() as pw:
+        ctx, page = _open_profile(pw, profile)
+        page.on("pageerror", lambda e: pytest.fail(f"page error: {e}"))
+        _goto(page, server["url"])
+        _tab(page, "Settings")
+        page.get_by_text("Migrate old server-side data").wait_for(timeout=20000)
+        page.get_by_role("button", name="Migrate old data into this browser").click()
+        dlg = page.locator(".q-dialog")
+        dlg.locator("input").first.fill("wrong-pw")
+        dlg.locator("input").nth(1).fill("new-pw")
+        dlg.get_by_role("button", name="Import").click()
+        page.get_by_text("need the right old passphrase").wait_for(timeout=30000)
+        ctx.close()
+
+    # the legacy vault and its metadata are still in place for retry
+    assert os.path.isdir(os.path.join(data_dir, "vault"))
+    assert os.path.isfile(os.path.join(data_dir, "vault", f"{jid}.vault.json"))
+    assert not [d for d in os.listdir(data_dir) if d.startswith("migrated-")]
+
+
 def test_cleared_storage_banner(server, tmp_path):
     """A cleared/evicted browser store shows a clear warning instead of failing
     silently."""

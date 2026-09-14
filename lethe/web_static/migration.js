@@ -71,6 +71,10 @@
           counts.notes = errors.map(function (e) {
             return 'Job ' + e.job_id + ': ' + e.error;
           });
+          // Only archive the legacy DATA_DIR once EVERY job decrypted. If any
+          // job still needs the right old passphrase, keep vault/ in place so
+          // the user can retry; the imported ones are idempotent upserts.
+          if (errors.length) return counts;
           return post('/api/migrate/finalize', {}).then(function (fin) {
             counts.archivedTo = fin.archived_to || null;
             return counts;
