@@ -29,7 +29,8 @@ dependencies = [
 # (spaCy has no 3.14 wheels yet). Install with:  pipx install "lethe[nlp] @ git+..."
 # Bigger name-detection models (md/lg/trf, Chinese/Japanese/Korean) are NOT here:
 # the app's Settings page downloads and switches between them on demand, so the
-# default install stays small. Pre-install a whole bigger set with [nlp-models].
+# default install stays small. English and Chinese default to the lg models
+# (used automatically once installed); pre-install them with [nlp-models].
 nlp = [
     "presidio-analyzer",
     "presidio-anonymizer",
@@ -38,7 +39,8 @@ nlp = [
 ]
 # The larger name-detection models, pre-installed (opt-in: ~2.8 GB in total).
 # Same wheels the Settings page downloads on demand; a plain `lethe[nlp]`
-# install works the same as before, these just save the one-off downloads.
+# install works the same as before, these just save the one-off downloads and
+# make English/Chinese detection use lg out of the box (their default).
 nlp-models = [
     "en_core_web_md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl",
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl",

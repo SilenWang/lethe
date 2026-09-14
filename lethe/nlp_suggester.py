@@ -36,18 +36,20 @@ _SELECTION_PATH = os.path.join(DATA_DIR, "nlp_models.json")
 # language enables BOTH name detection and OCR ("ocr_size" is just that OCR
 # download), and the spaCy models offered with their download sizes.
 # Model entries: "name", "size", "builtin" (ships with the app, can't be
-# removed), "default" (the initially-active / recommended download),
+# removed), "default" (the preferred model: used as soon as it is installed,
+# so English and Chinese prefer the largest recall model, `lg`; falling back
+# to whatever is installed when it isn't),
 # "requires" (extra pip packages a model needs, e.g. Transformers for the
 # English transformer) and an optional "note".
 LANGUAGES = [
     {"code": "en", "label": "English", "ranges": None, "ocr": [], "ocr_size": None,
      "note": "Latin script — checked in every document",
      "models": [
-        {"name": "en_core_web_sm", "size": "~12 MB", "builtin": True, "default": True,
-         "note": "Bundled — works fully offline"},
+        {"name": "en_core_web_sm", "size": "~12 MB", "builtin": True,
+         "note": "Bundled — works fully offline (fallback until lg is installed)"},
         {"name": "en_core_web_md", "size": "~32 MB"},
-        {"name": "en_core_web_lg", "size": "~382 MB",
-         "note": "Best recall (word vectors)"},
+        {"name": "en_core_web_lg", "size": "~382 MB", "default": True,
+         "note": "Default — best recall (word vectors)"},
         {"name": "en_core_web_trf", "size": "~436 MB (+ PyTorch)",
          "requires": ["spacy-transformers"],
          "note": "Transformer — most accurate, heaviest"},
@@ -56,10 +58,10 @@ LANGUAGES = [
      "ocr": ["chi_sim", "chi_tra"], "ocr_size": "~24 MB",
      "note": "CJK script — run when Chinese characters appear",
      "models": [
-        {"name": "zh_core_web_sm", "size": "~48 MB", "default": True},
+        {"name": "zh_core_web_sm", "size": "~48 MB"},
         {"name": "zh_core_web_md", "size": "~74 MB"},
-        {"name": "zh_core_web_lg", "size": "~575 MB",
-         "note": "Best recall for Chinese names"},
+        {"name": "zh_core_web_lg", "size": "~575 MB", "default": True,
+         "note": "Default — best recall for Chinese names"},
      ]},
     {"code": "ja", "label": "Japanese", "ranges": [(0x3040, 0x30FF), (0x4E00, 0x9FFF), (0xFF66, 0xFF9F)],
      "ocr": ["jpn"], "ocr_size": "~14 MB",

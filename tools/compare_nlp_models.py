@@ -56,7 +56,8 @@ def _baseline_row(code: str, text: str, gold: list[str]):
                 f"{len(matched)}/{len(gold)} | {len(matched)/len(gold):.0%} | "
                 f"{fp} | — |", matched, surfaces)
     # v1.3.1 English was Presidio + en_core_web_sm — the same path and model as
-    # today's default, so the sm row below IS the before/after baseline.
+    # the bundled offline model, so the sm row below IS the before/after
+    # baseline.
     return None, None, None
 
 
@@ -91,8 +92,8 @@ def main() -> int:
         "same code path the app uses (`nlp_suggester.suggest()` — the **suggestion lane only**:",
         "candidate people/counterparties surfaced for the human reviewer, before the dictionary",
         "and pattern detectors). “Before” is the pre-expansion (v1.3.1) detection path: English",
-        "was Presidio + `en_core_web_sm` (the same model that is still the default, so the `sm`",
-        "row below is its before/after baseline), and Chinese was raw spaCy NER on",
+        "was Presidio + `en_core_web_sm` (still the bundled offline model, so the `sm` row",
+        "below is its before/after baseline), and Chinese was raw spaCy NER on",
         "`zh_core_web_sm` with no Chinese-name rules (shown as an explicit baseline row). The",
         "added `md`/`lg` rows are the expanded catalogue; Chinese rows also include the",
         "context-anchored Chinese-name rule layer (联系人：张三 / 张三先生 patterns).",
@@ -176,10 +177,13 @@ def main() -> int:
         "  `zh_core_web_md` and `zh_core_web_lg` recover 7/7 while producing *fewer* false",
         "  positives than sm (`lg`: 2 vs sm: 2 + the missed company). The context-anchored",
         "  Chinese-name rule layer is what makes short, form-embedded names",
-        "  (`联系人：赵敏`, `由王建军负责`) robust across all three models.",
-        "- **No behaviour change unless you opt in.** The default stays the small model, so a",
-        "  plain upgrade keeps today's results; bigger models are a Settings-page switch that",
-        "  takes effect on the next document (and is remembered).",
+        "  (`联系人：赵敏`, `授权代表：李明远`) robust across all three models.",
+        "- **`lg` is the default for English and Chinese.** Install it once (Settings, or the",
+        "  `[nlp-models]` extra) and detection uses it automatically — no further switch needed,",
+        "  which is what maximises recall out of the box; until it is installed, the bundled",
+        "  `en_core_web_sm` keeps English working fully offline. A Settings choice always wins,",
+        "  so switching back to `sm`/`md` (smaller download, faster) stays available and takes",
+        "  effect on the next document.",
         "- **Not measured here:** `en_core_web_trf` (transformer) — it is offered in Settings but",
         "  needs PyTorch on top of the wheel, so it was left out of this comparison; expect",
         "  slower, higher-recall English detection on the same pipeline.",

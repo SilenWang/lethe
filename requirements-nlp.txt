@@ -12,7 +12,11 @@ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0
 # ---- bigger name-detection models -------------------------------------------
 # These are NOT installed by default. The app's Settings page downloads the ones
 # you pick, on demand, into this same environment, and lets you switch between
-# them at any time (the switch applies to the next document). Per language:
+# them at any time (the switch applies to the next document). English and
+# Chinese *default* to the lg models — install them (here, via [nlp-models], or
+# from Settings) and detection uses them automatically; the bundled
+# en_core_web_sm remains the offline fallback and can always be re-selected.
+# Per language:
 #
 #   English   en_core_web_sm (bundled) · en_core_web_md · en_core_web_lg · en_core_web_trf
 #   Chinese   zh_core_web_sm · zh_core_web_md · zh_core_web_lg

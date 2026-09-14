@@ -1546,12 +1546,14 @@ def build_settings_panel():
             ui.label("English name detection is built in and works fully offline. Scanned-page OCR "
                      "uses a small local English model — bundled in the Windows app; on a pip install, "
                      "add it once with the button. Every language offers several name-detection "
-                     "models: the small one downloads fastest, the larger ones catch more names. "
-                     "Download the ones you want and switch between them at any time — the switch "
-                     "applies to the next document you check. Adding a language also installs its "
-                     "OCR model, so scanned documents in that script are read too. Your dictionary "
-                     "works in every language regardless. Downloading any model needs internet "
-                     "(one-off); nothing else does.").classes(
+                     "models: the larger ones catch more names but download more data. English and "
+                     "Chinese default to the largest model (`lg`) — download it once and detection "
+                     "uses it automatically, for maximum recall; the built-in small model keeps "
+                     "English working fully offline until then. Switch between models at any time — "
+                     "the switch applies to the next document you check. Adding a language also "
+                     "installs its OCR model, so scanned documents in that script are read too. "
+                     "Your dictionary works in every language regardless. Downloading any model "
+                     "needs internet (one-off); nothing else does.").classes(
                 "text-sm text-slate-500")
             if not nlp_suggester.available():
                 ui.label("⚠ The NLP suggestion engine isn't available in this build — only the dictionary "

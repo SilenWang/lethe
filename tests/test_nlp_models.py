@@ -31,9 +31,18 @@ def _uninstalled_model(code: str = "en") -> str | None:
     return None
 
 
+def _default_model(code: str) -> str:
+    """The catalogue's preferred model for a language (English/Chinese: lg)."""
+    for L in nlp_suggester.LANGUAGES:
+        if L["code"] == code:
+            return next(m["name"] for m in L["models"] if m.get("default"))
+    raise AssertionError(f"no language {code}")
+
+
 def test_catalogue_shape():
-    """Every language offers models, exactly one default, and the English one
-    ships built-in (so the suggester is usable offline out of the box)."""
+    """Every language offers models, exactly one preferred (default) model, and
+    the English one ships built-in (so the suggester is usable offline out of
+    the box). English and Chinese prefer the largest recall model, `lg`."""
     codes = [L["code"] for L in nlp_suggester.LANGUAGES]
     assert {"en", "zh"} <= set(codes)
     for L in nlp_suggester.LANGUAGES:
@@ -43,6 +52,10 @@ def test_catalogue_shape():
         assert len(names) == len(set(names))
     en = next(L for L in nlp_suggester.LANGUAGES if L["code"] == "en")
     assert [m["name"] for m in en["models"] if m.get("builtin")] == ["en_core_web_sm"]
+    assert _default_model("en") == "en_core_web_lg"
+    assert _default_model("zh") == "zh_core_web_lg"
+    # The bundled English model stays in the catalogue as the offline fallback.
+    assert "en_core_web_sm" in [m["name"] for m in en["models"]]
     # English is not script-gated (Latin text never "contains English script").
     assert en["_re"] is None
     zh = next(L for L in nlp_suggester.LANGUAGES if L["code"] == "zh")
@@ -59,20 +72,36 @@ def test_wheel_urls():
             assert url.endswith(f"{m['name']}-{nlp_suggester._VERSION}-py3-none-any.whl")
 
 
-def test_active_model_falls_back_to_default():
-    """An unset/invalid/stale choice falls back to the language default; an
-    unknown language has no model at all."""
+def test_active_model_prefers_default_and_falls_back():
+    """With no user choice the preferred model (`lg`) is used once installed,
+    the bundled small model is the offline fallback, and unknown/stale choices
+    are ignored."""
     _with_temp_selection()
-    assert nlp_suggester.active_model("en") == "en_core_web_sm"
+    fallback = "en_core_web_sm"  # bundled, always installed
+    expected = ("en_core_web_lg" if nlp_suggester.is_installed("en_core_web_lg")
+                else fallback)
+    assert nlp_suggester.active_model("en") == expected
     assert nlp_suggester.active_model("nope") is None
     # A stale choice pointing at a not-yet-downloaded model is ignored.
     missing = _uninstalled_model("en")
     if missing:
         nlp_suggester._SELECTION = {"en": missing}
-        assert nlp_suggester.active_model("en") == "en_core_web_sm"
+        assert nlp_suggester.active_model("en") == expected
     # A choice that isn't in the catalogue at all is ignored too.
     nlp_suggester._SELECTION = {"en": "en_core_web_xxl"}
-    assert nlp_suggester.active_model("en") == "en_core_web_sm"
+    assert nlp_suggester.active_model("en") == expected
+
+
+def test_user_can_switch_back_to_smaller_model():
+    """A Settings choice overrides the lg default — switching back to sm/md
+    keeps working (the whole point of keeping every model in the catalogue)."""
+    _with_temp_selection()
+    for name in ("en_core_web_sm", "en_core_web_md"):
+        if not nlp_suggester.is_installed(name):
+            continue
+        ok, msg = nlp_suggester.set_active_model("en", name)
+        assert ok and name in msg
+        assert nlp_suggester.active_model("en") == name
 
 
 def test_set_active_model_validation():
