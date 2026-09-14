@@ -8,3 +8,29 @@ spacy
 click
 # Small English model (~12 MB) pinned by direct wheel URL so it installs offline-reproducibly:
 https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+
+# ---- bigger name-detection models -------------------------------------------
+# These are NOT installed by default. The app's Settings page downloads the ones
+# you pick, on demand, into this same environment, and lets you switch between
+# them at any time (the switch applies to the next document). English and
+# Chinese *default* to the lg models — install them (here, via [nlp-models], or
+# from Settings) and detection uses them automatically; the bundled
+# en_core_web_sm remains the offline fallback and can always be re-selected.
+# Per language:
+#
+#   English   en_core_web_sm (bundled) · en_core_web_md · en_core_web_lg · en_core_web_trf
+#   Chinese   zh_core_web_sm · zh_core_web_md · zh_core_web_lg
+#   Japanese  ja_core_news_sm · ja_core_news_md · ja_core_news_lg
+#   Korean    ko_core_news_sm · ko_core_news_md · ko_core_news_lg
+#
+# To pre-seed the bigger English/Chinese models offline instead (the same wheel
+# URLs the Settings page uses), uncomment the lines below:
+# https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl
+# https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
+# https://github.com/explosion/spacy-models/releases/download/zh_core_web_sm-3.8.0/zh_core_web_sm-3.8.0-py3-none-any.whl
+# https://github.com/explosion/spacy-models/releases/download/zh_core_web_md-3.8.0/zh_core_web_md-3.8.0-py3-none-any.whl
+# https://github.com/explosion/spacy-models/releases/download/zh_core_web_lg-3.8.0/zh_core_web_lg-3.8.0-py3-none-any.whl
+#
+# The English transformer is the heaviest option and needs its runtime as well:
+# spacy-transformers
+# https://github.com/explosion/spacy-models/releases/download/en_core_web_trf-3.8.0/en_core_web_trf-3.8.0-py3-none-any.whl
