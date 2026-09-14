@@ -129,15 +129,17 @@ DB: "lethe"  version 1
 |---|---|---|
 | 创建 job（上传文档） | 原始文档字节（docx/pptx/xlsx/pdf/txt/eml/msg/html） | 服务端提取文本、生成预览、后续脱敏 |
 | 检测 | 词典快照 + 自定义类型 + 检测开关 | `core.detect()`；不含文档（用服务端已存的提取文本） |
-| 脱敏 | 勾选项 + 目标类型 + token 分配 | `core.build_replacer()` + `docio.redact_document()` |
+| 脱敏 | 勾选项 + 类型修正（token 可带预览编号） | `core.build_replacer()` + `docio.redact_document()` |
 | 还原（Re-identify） | 浏览器本地解密后的 `token→real` 映射 + AI 回复文件/文本 | `core.build_restorer()` + `docio.redact_document()` |
 | 手动还原（Restore） | 用户在界面填写的 token→值映射 + 文件/文本 | 同上 |
 | 一次性迁移 | 旧口令（仅迁移期间） | 服务端用现有 `vault.py` 解密旧 `DATA_DIR/vault/*`；不落盘、不写日志 |
 
+> **token 分配归属（定稿）：** 最终 token 编号的唯一权威点是服务端 `/api/jobs/{id}/redact`（内部调用 `core.assign_tokens()`），因为编号必须基于用户最终勾选的集合重算；浏览器只提交勾选与类型修正。`/detect` 返回的 `token` 仅为预览用临时编号，不落库、不参与还原。
+
 ### 5.3 运算结果如何回传且不落盘
 
 - 提取阶段：`docio.extract_text()` + `pdf_warnings()` 的结果作为响应体返回浏览器；服务端临时区只保留原始字节（供后续脱敏）与提取文本缓存。
-- 检测阶段：返回序列化后的 `items`（`type/canonical/surfaces/source/count/include/token`），**不含**文档正文以外的额外信息。
+- 检测阶段：返回序列化后的 `items`（`type/canonical/surfaces/source/count/include/token`，其中 `token` 为预览用临时编号），**不含**文档正文以外的额外信息。
 - 脱敏阶段：返回 `outputs[]`（文件名 + 字节）与 `token_to_real`；响应成功写出后，**立即删除**该 job 的结果文件与映射（不等 TTL）；TTL 清理器是兜底。
 - 还原阶段：返回重建后的字节与命中计数；请求中的映射不缓存、不写日志。
 - 传输形态：本地回环 HTTP（`127.0.0.1`）。文件类响应用 `application/octet-stream` / zip，浏览器侧用 `Blob` + `URL.createObjectURL` 下载；小对象用 JSON。这样避免 NiceGUI WebSocket 对大二进制的不必要开销，也让「服务端持有时间」完全由 API 调用点决定。
@@ -160,12 +162,12 @@ DB: "lethe"  version 1
 | 端点 | 方法 | 入参 | 返回 | 备注 |
 |---|---|---|---|---|
 | `/api/jobs` | POST | multipart：`files[]` + `entities` + `token_types` + `options` | `{job_id, created_at, expires_at, files:[{name, kind, warnings, text}]}` | 提取文本回传浏览器预览；原始字节进 runtime 临时区 |
-| `/api/jobs/{job_id}/detect` | POST | `{entities, token_types, options}` | `{items:[…]}` | 只读服务端提取文本；刷新 `last_touch` |
-| `/api/jobs/{job_id}/redact` | POST | `{items:[…], add_to_dictionary}` | `{outputs:[{name, ext, data_b64}], token_to_real, replacements, meta}` | 响应后立即删结果与映射；`meta` 供浏览器写 `jobs` |
+| `/api/jobs/{job_id}/detect` | POST | `{entities, token_types, options}` | `{items:[…]}`（`token` 为预览用临时编号） | 只读服务端提取文本；刷新 `last_touch` |
+| `/api/jobs/{job_id}/redact` | POST | `{items:[…]（include + type；token 可为预览编号）, add_to_dictionary}` | `{items:[…]（含最终 token）, outputs:[{name, ext, data_b64}], token_to_real, replacements, meta}` | token 由服务端 `core.assign_tokens()` 基于最终勾选集合分配；响应后立即删结果与映射；`meta` 供浏览器写 `jobs` |
 | `/api/restore` | POST | multipart：`mapping`（JSON）+ `file` 或 `text` | `{outputs:[…], hits}` | 映射由浏览器解密后上传；服务端不查 vault |
 | `/api/restore/scan` | POST | `{text}` 或文件 | `{tokens:[{token,count}]}` | 可选；也可在 JS 侧用正则完成，推荐 JS 侧（见 §10 决策 3） |
-| `/api/migrate/export` | POST | `{passphrase?}` | `{entities, token_types, jobs:[{…, mapping}]}` | 仅一次性迁移使用；读 `DATA_DIR`，口令不落盘不写日志 |
-| `/api/migrate/finalize` | POST | `{}` | `{archived_to}` | 把 `DATA_DIR` 改名为 `DATA_DIR.bak-<ts>`，**不删除** |
+| `/api/migrate/export` | POST | `{passphrase?}` | `{entities, token_types, jobs:[{…, mapping}]}` | 仅一次性迁移使用；读 `DATA_DIR` 下的旧用户数据，口令不落盘不写日志；临时数据生命周期见 §7.6 |
+| `/api/migrate/finalize` | POST | `{}` | `{archived_to}` | 只归档旧**用户数据**（`entities.json`、`token_types.json`、`vault/`）到 `DATA_DIR/legacy-backup-<ts>/`；`runtime/` 与 `tessdata/` 原地不动，**不删除** |
 | `/api/runtime` | GET | — | `{jobs:[{job_id, files, bytes, last_touch_at, expires_at}]}` | 仅 `LETHE_DEBUG_RUNTIME=1` 时注册；供任务 4 验证，绝不返回内容 |
 
 安全约束：所有 `/api/*` 端点校验 `Origin`/`Host` 为回环地址，拒绝跨站表单与跨源读取；job_id 用 `secrets.token_urlsafe(16)`，不可枚举；响应设置 `Cache-Control: no-store`。
@@ -195,6 +197,8 @@ DB: "lethe"  version 1
 - 结构：`runtime/<job_id>/{source/<idx>.<ext>, text/<idx>.txt, out/<name>, job.json}`；目录权限 `0700`。
 - 进程内注册表：`{job_id: {created_at, last_touch_at, dir, files:{path:size}, bytes}}`，`job.json` 与注册表内容一致，进程重启后由目录扫描恢复。
 - 配置：`LETHE_JOB_TTL_SECONDS`（默认 `300`）、`LETHE_JOB_MAX_LIFETIME_SECONDS`（默认 `3600`，0 表示关闭）。
+
+> **`DATA_DIR` 在改造后的角色（与迁移归档的边界）：** `DATA_DIR` 仍是应用数据根目录，稳态下只承载**非用户数据**——`runtime/`（临时工作区）、`tessdata/`（OCR 程序模型）、`.session_secret`。旧用户数据（`entities.json`、`token_types.json`、`vault/`）在迁移前暂存于此，迁移归档只移动这三项（见 §11.1 第 5 步），**绝不整体改名或删除 `DATA_DIR`**，因此 `runtime/` 与 `tessdata/` 不会被迁移动作波及。§7.3/§7.4 的清理只作用于 `runtime/`，与迁移归档互不影响。
 
 ### 7.2 计时起点（已定）
 
@@ -236,6 +240,14 @@ DB: "lethe"  version 1
   5. `kill -9` 进程后重启，确认启动清扫后 runtime 为空。
 - 端到端：任务 7 回归中把「5 分钟无残留」列为必测项。
 
+### 7.6 非 job 请求（一次性迁移）的临时数据
+
+`/api/migrate/export` **不创建 job**、不进 §7.1 的 job 注册表，因此不适用 job 级 TTL；它的临时数据生命周期定为**单个 HTTP 请求作用域**：
+
+- 旧口令与解密后的明文映射只存在于该请求的局部变量中，不写磁盘、不写日志；响应体写出完成后即释放。
+- 防护约束：端点超时（默认 60 秒）、导出体量上限（默认 50 MB，超出返回错误并提示用户精简或分批发往浏览器）、仅允许本机回环调用、响应 `Cache-Control: no-store`。
+- 若未来实现需要在迁移导出中**中间落盘**（例如超限拆分），落盘内容必须注册为 `migrate-<ts>` 伪 job，进入同一注册表并服从 §7.2-§7.4 的 TTL 与清理。
+
 ## 8. 多用户隔离与安全
 
 ### 8.1 同机多浏览器互不可见
@@ -266,12 +278,12 @@ DB: "lethe"  version 1
 | 文件 | 改动点 | 影响说明 |
 |---|---|---|
 | `app.py` | 新增 `/api/*` 端点；用 `ui.run_javascript` 桥接 IndexedDB；`files`/`items` 改为浏览器侧状态；历史与词典改为异步读客户端库；新增迁移/备份/TTL 提示 UI；`storage_secret` 随机化 | 单文件改动量最大（≈5 个面板 + 新端点）。检测/脱敏算法调用不变，回归风险集中在状态管理与异步时序 |
-| `lethe/__init__.py` | 新增 `RUNTIME_DIR`、`JOB_TTL_SECONDS` 解析与导出；导出新 `runtime` 模块 | 向后兼容：`DATA_DIR` 仍存在（承载 runtime 与 tessdata），但不再存用户词典/vault |
+| `lethe/__init__.py` | 新增 `RUNTIME_DIR`、`JOB_TTL_SECONDS` 解析与导出；导出新 `runtime` 模块 | 向后兼容：`DATA_DIR` 仍存在，但稳态只承载非用户数据（`runtime/`、`tessdata/`、`.session_secret`）；不再写用户词典/vault，旧用户数据仅在迁移归档目录 `legacy-backup-*` 中保留 |
 | `lethe/core.py` | 基本不变；新增 `items_to_dict()` / `items_from_dict()` 供 API 序列化，token 分配逻辑保持现状 | 检测/替换/还原行为零变化；新增的是纯序列化辅助，便于任务 2 复用与测试 |
 | `lethe/docio.py` | `DATA_DIR` 仅保留 `tessdata`（程序资源）；临时文件统一走 runtime；明确 `clear_pdf_cache()` 的调用点；OCR 语言安装不参与 TTL | 文档格式处理逻辑不变；改动集中在路径来源与缓存生命周期 |
 | `lethe/nlp_suggester.py` | 无数据边界改动；保持服务端模型下载/卸载；模型目录不纳入 TTL；与任务 6（VYB-357）的模型扩充解耦 | 行为不变；仅需确认模型安装目录不被误删 |
 | `lethe/store.py` | 移除文件读写（`entities.json` / `token_types.json`）；保留 `merge_entities()` 等纯逻辑与「dict ↔ Entity」转换，供 API 与迁移复用 | 破坏性变更：`load_entities/save_entities` 语义改变；`tests/test_smoke.py` 等直接调用文件持久化的用例需改为纯函数用例 |
-| `lethe/vault.py` | 稳态不再写盘；保留 Fernet 解密能力供 `/api/migrate/export`；新增 `decrypt_record(record, passphrase)` 便于迁移；新增 `export_all()` 读取旧 `DATA_DIR` | 破坏性变更：`save_job/load_job/list_jobs/delete_job/history` 不再面向稳态；客户端承担加密与历史 |
+| `lethe/vault.py` | 稳态不再写盘；保留 Fernet 解密能力供 `/api/migrate/export`；新增 `decrypt_record(record, passphrase)` 便于迁移；新增 `export_all()` 读取旧 `DATA_DIR/vault`，以及 `archive_legacy(keep_runtime=True)` 只归档 `entities.json`/`token_types.json`/`vault/` 到 `DATA_DIR/legacy-backup-<ts>/` | 破坏性变更：`save_job/load_job/list_jobs/delete_job/history` 不再面向稳态；客户端承担加密与历史；归档不动 `runtime/`、`tessdata/` |
 | `lethe/web_static/` | 新增 `client-store.js`（IndexedDB + WebCrypto 封装）、`session.js`（上传/下载/桥接）；任务 3 追加 `manifest.webmanifest`、`sw.js`、图标 | 任务 2 与任务 3 共享这些文件；service worker 只缓存静态资源，**不缓存**文档与结果 |
 | 新增 `lethe/runtime.py` | TTL 注册表、目录管理、三层清理器、日志 | 任务 4 的核心实现点，被 `app.py` 端点调用 |
 | `tests/` | 新增 TTL 单测、API 集成测试；更新 `test_smoke.py` 中依赖文件持久化的部分 | 现有 docx/pptx/xlsx/pdf/email 格式测试不应回归 |
@@ -285,7 +297,7 @@ DB: "lethe"  version 1
 2. **TTL 起点**：推荐滑动 TTL（`last_touch_at + 300s`，另有 1 小时硬上限）；理由见 §7.2。备选固定起点会让长时间评审的流程中途失效。
 3. **手动还原的 token 扫描**：推荐放在 JS 侧（正则 + 用户填值），服务端只做文件重建；理由是扫描结果完全来自用户文档，放客户端可减少一次上传与一份服务端副本。
 4. **旧 vault 迁移解密**：推荐服务端辅助（一次性传口令给本机服务端，复用已测试的 `vault.py`）；备选纯浏览器 Fernet 兼容解密可做到口令不出浏览器，但实现与测试成本更高。
-5. **runtime 存放介质**：推荐 `$LETHE_DATA_DIR/runtime/` 下的临时目录（可配置、便于验证与启动清扫）；纯内存方案在崩溃后无残留但也无法审计，且大文件更易触发内存压力。
+5. **runtime 存放介质**：推荐 `$LETHE_DATA_DIR/runtime/` 下的临时目录（可配置、便于验证与启动清扫）；纯内存方案在崩溃后无残留但也无法审计，且大文件更易触发内存压力。配套边界已定稿：`DATA_DIR` 稳态只承载非用户数据，迁移归档只移动三项旧用户数据（§7.1、§11.1 第 5 步），因此 runtime 与 tessdata 不会被归档或清理。
 6. **历史记录位置**：推荐 IndexedDB（与映射同库，便于原子删除）；备选 localStorage 容量与事务都不足。
 7. **JS 测试栈**：推荐在**本地**用 pixi 建一个含 node/playwright 的验证环境跑浏览器侧用例；仓库内的依赖声明仍以现有 `pyproject.toml` / `requirements*.txt` 为准，不改变用户既有运行方式。
 
@@ -297,16 +309,16 @@ DB: "lethe"  version 1
 
 1. **升级前备份**：文档提示用户备份 `DATA_DIR`（Settings 里的路径）。
 2. **检测条件**：新版本启动时，若 `DATA_DIR` 存在 `entities.json` / `token_types.json` / `vault/*.vault.json` 且浏览器 IndexedDB 为空 → Settings 显示「从本机旧数据迁移」。
-3. **导出**：浏览器调 `POST /api/migrate/export`（可带旧口令）。服务端读取 `DATA_DIR`，用 `vault.py` 解密每个 vault 记录，返回 `{entities, token_types, jobs:[{job_id, created, source_file, replacements, mapping}]}`。口令与明文映射不落盘、不写日志，服务端仅持有到 TTL 到期。
+3. **导出**：浏览器调 `POST /api/migrate/export`（可带旧口令）。服务端读取 `DATA_DIR` 下的旧用户数据（`entities.json`、`token_types.json`、`vault/`），用 `vault.py` 解密每个 vault 记录，返回 `{entities, token_types, jobs:[{job_id, created, source_file, replacements, mapping}]}`。该端点不创建 job，口令与明文映射只在**单个请求作用域**内存在：不落盘、不写日志、响应写出即释放（超时/体量上限见 §7.6）。
 4. **导入并重新加密**：浏览器把 entities/token_types 写入 IndexedDB；每个 job 的 mapping 用当前客户端口令（可与旧口令不同，UI 引导用户设置）AES-GCM 加密后写入 `jobs`。
-5. **校验与收尾**：界面展示「迁移了 N 个实体、M 个自定义类型、K 个历史 job」，逐项抽样验证还原可用；用户确认后调 `POST /api/migrate/finalize`，服务端把 `DATA_DIR` **改名**为 `DATA_DIR.bak-<时间戳>`（不删除）并写 `migrated.flag`。
-6. **可回退**：`DATA_DIR.bak-*` 原样保留；旧版本仍可指向它运行；浏览器侧另有 JSON 备份可导入。
+5. **校验与收尾**：界面展示「迁移了 N 个实体、M 个自定义类型、K 个历史 job」，逐项抽样验证还原可用；用户确认后调 `POST /api/migrate/finalize`，服务端只把旧用户数据 `entities.json`、`token_types.json`、`vault/` **同目录内移动**到 `DATA_DIR/legacy-backup-<时间戳>/`（不删除），并写 `DATA_DIR/migrated.flag`。`runtime/`、`tessdata/` 与 `.session_secret` 原地保留，不受归档影响（见 §7.1 的角色说明）。
+6. **可回退**：`DATA_DIR/legacy-backup-*` 原样保留，把三项数据移回 `DATA_DIR` 原始位置即可让旧版本继续运行；浏览器侧另有 JSON 备份可导入。
 
 ### 11.2 改造期间的功能回退策略
 
 - **环境开关**：`LETHE_CLIENT_STORAGE=1`（默认）启用新路径；`=0` 时保留一个发布周期内的旧 `store.py`/`vault.py` 文件持久化路径，便于线上快速回退。
 - **灰度方式**：先在 `dev` 分支完成 2→3→4，再合并到 `main`；每个任务独立 PR，标题带 `VYB-354`，可单独 revert。
-- **数据安全**：任何阶段都不删除用户旧数据；迁移只做改名归档；客户端备份导出与导入在任务 2 内实现。
+- **数据安全**：任何阶段都不删除用户旧数据；迁移只做同目录归档（`DATA_DIR/legacy-backup-*`），且只涉及三项旧用户数据，不触碰 `runtime/` 与 `tessdata/`；客户端备份导出与导入在任务 2 内实现。
 - **回归门**：任务 7 对 docx/pptx/xlsx/pdf/email/纯文本跑全量「上传 → 检测 → 脱敏 → 还原」，并验证多浏览器隔离、service worker 不缓存用户文档、TTL 5 分钟无残留。
 
 ### 11.3 已知风险与应对
@@ -314,15 +326,14 @@ DB: "lethe"  version 1
 | 风险 | 影响 | 应对 |
 |---|---|---|
 | 浏览器存储被清空/更换设备 | 丢失词典与还原能力 | 备份导出/导入、`storage.persist()`、界面持续提示 |
-| 迁移中口令/明文映射短暂驻留服务端内存 | 理论泄露面 | 一次性、仅本机回环、TTL 立即清理、日志白名单 |
+| 迁移中口令/明文映射短暂驻留服务端内存 | 理论泄露面 | 一次性、仅本机回环、单请求作用域（不落盘、响应写出即释放）+ 端点超时与体量上限（§7.6）、日志白名单 |
 | 异步桥接引入时序 bug（面板先于数据渲染） | 界面空列表或竞态 | 骨架 + `refresh()` 模式；写入用事务；`BroadcastChannel` 同步 |
 | NiceGUI 未固定版本导致端点 API 差异 | 端点注册失败 | 任务 2 实施时先确认版本与 API 表面，必要时锁定 NiceGUI 版本 |
 | README 中「无服务端」表述过时 | 用户误解数据边界 | 任务 7 统一更新文案与文档 |
 
 ## 12. 与后续任务的交接结论
 
-- **任务 2（VYB-360）**：按 §4 建 IndexedDB 库与 §5 的边界改造 `app.py` + `store.py` + `vault.py` + `web_static/client-store.js`；`/api/jobs`、`/api/jobs/{id}/detect`、`/api/jobs/{id}/redact`、`/api/restore` 是接口契约；验收按「两个 profile 互不可见、重开仍在、服务端无 `entities.json`/`vault/`」。
+- **任务 2（VYB-360）**：按 §4 建 IndexedDB 库与 §5 的边界改造 `app.py` + `store.py` + `vault.py` + `web_static/client-store.js`；`/api/jobs`、`/api/jobs/{id}/detect`、`/api/jobs/{id}/redact`（token 由服务端分配）、`/api/restore` 是接口契约；验收按「两个 profile 互不可见、重开仍在、服务端不再读写 `entities.json`/`token_types.json`/`vault/`（迁移归档目录 `legacy-backup-*` 除外，仅供回退）」。
 - **任务 3（VYB-361）**：在 `web_static/` 增加 manifest 与 service worker；SW 只缓存静态资源，禁止缓存 `/api/*` 与文档/结果；安装后独立窗口全流程可用。
 - **任务 4（VYB-359）**：实现 `lethe/runtime.py` 与 §7 的三层清理；按 §7.5 的脚本/单测给出可重复验证输出；`/api/runtime` 作为调试自检端点。
 - **任务 7（VYB-358）**：把「服务端 5 分钟无残留」「多浏览器隔离」「SW 不缓存用户文档」列为回归必测，并更新 README/使用文档中的存储与隐私说明。
-
