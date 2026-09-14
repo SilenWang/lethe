@@ -2144,7 +2144,8 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                        f"{data.get('token_types', 0)} type(s), {data.get('jobs', 0)} conversion(s) into "
                        "this browser")
                 if notes:
-                    msg += f"; {data.get('errors', len(notes))} job(s) need the right old passphrase"
+                    msg += (f"; {data.get('errors', len(notes))} job(s) need the right old passphrase — "
+                            "the old server data was kept, so you can retry with the correct passphrase")
                 if data.get("archivedTo"):
                     msg += " · old server data archived (not deleted)"
                 ui.notify(msg, color="positive" if not notes else "warning",
