@@ -135,12 +135,20 @@ def test_every_tr_key_resolves():
     assert not missing, f"keys missing from a locale file: {missing}"
 
 
+def _dynamic_keys() -> set[str]:
+    """Keys resolved at runtime (not literal tr("...") calls): source badges,
+    the engine's language names and its size annotations."""
+    import app as lethe_app
+
+    keys = {label for label, _ in lethe_app.SOURCE_BADGE.values()}
+    keys |= set(lethe_app.LANG_LABEL_KEYS.values())
+    keys |= set(lethe_app.LANG_SIZE_KEYS.values())
+    return keys
+
+
 def test_every_locale_key_is_used():
-    """No dead strings: every key is referenced by the UI (the review-table badge
-    labels are passed dynamically, so they are added explicitly)."""
-    keys = _tr_keys(_app_source()) | {"badge.known", "badge.pattern",
-                                      "badge.suggested", "badge.manual"}
-    unused = sorted(k for k in EN if k not in keys)
+    """No dead strings: every key is referenced by the UI."""
+    unused = sorted(k for k in EN if k not in _tr_keys(_app_source()) | _dynamic_keys())
     assert not unused, f"locale keys never used by the app: {unused}"
 
 
@@ -188,6 +196,43 @@ def test_guide_and_about_text_left_the_source():
     assert "GUIDE_MD" not in source
     assert "ABOUT_HTML" not in source
     assert 'Dear Mr John Smith' in source  # the demo memo is content, not UI
+
+
+def test_every_engine_language_has_a_locale_name():
+    """Settings → Detection & OCR languages renders the engine's language list;
+    every language and prose size annotation must be translatable."""
+    import app as lethe_app
+    from lethe import nlp_suggester
+
+    for lang in nlp_suggester.LANGUAGES:
+        key = lethe_app.LANG_LABEL_KEYS.get(lang["code"])
+        assert key, f"no locale key mapped for engine language {lang['code']!r}"
+        assert key in EN and key in ZH, f"{key} missing from a locale file"
+        size = lang["size"]
+        if any(ch.isdigit() for ch in size):
+            continue  # "~72 MB" — a number plus a unit, language-neutral
+        skey = lethe_app.LANG_SIZE_KEYS.get(size)
+        assert skey, f"untranslatable size annotation {size!r}"
+        assert skey in EN and skey in ZH, f"{skey} missing from a locale file"
+
+
+def test_settings_language_rows_go_through_the_translator():
+    """Regression guard: the engine's English labels (nlp_suggester.LANGUAGES)
+    must never be rendered straight into the localised Settings page."""
+    source = _ui_source()  # comments and docstrings stripped
+    assert re.search(r'ui\.label\(\s*L\["label"\]', source) is None
+    assert re.search(r'ui\.label\(\s*L\["size"\]', source) is None
+    assert re.search(r'_lang_name\(tr,\s*L\["code"\],\s*L\["label"\]\)', source)
+    assert re.search(r'_lang_size\(tr,\s*L\["size"\]\)', source)
+
+
+def test_engine_error_text_is_never_shown_raw():
+    """The vault raises an English "Wrong passphrase, or the vault file is
+    corrupted."; showing str(exc) on its own would leak English into the Chinese
+    UI, so the known failures get their own locale strings."""
+    assert "notify(str(exc)" not in _ui_source()
+    for key in ("reid.wrong_passphrase", "reid.key_missing", "reid.cant_open_job"):
+        assert key in EN and key in ZH, f"{key} missing from a locale file"
 
 
 # ------------------------------------------------------- language persistence

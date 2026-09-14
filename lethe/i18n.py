@@ -76,6 +76,13 @@ def from_accept_language(header: str | None) -> str | None:
     return None
 
 
+def has_key(key: str) -> bool:
+    """True if the key exists in a shipped locale. Used for optional UI text, such
+    as a language the engine knows but the locale files don't translate yet."""
+    return any(isinstance(_load(lang).get(key), str)
+               for lang in dict.fromkeys((DEFAULT_LANG, FALLBACK_LANG)))
+
+
 def resolve(lang_param: str | None = None, cookie: str | None = None,
             accept_language: str | None = None) -> str:
     """Pick the language for a page load (see module docstring for priority)."""

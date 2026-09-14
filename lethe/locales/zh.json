@@ -194,5 +194,13 @@
   "ref.sources": "来源：",
   "ref.token": "令牌",
   "ref.real_value": "真实值",
-  "reid.delete_tip": "删除此转换"
+  "reid.delete_tip": "删除此转换",
+  "lang.en": "英语",
+  "lang.zh": "中文",
+  "lang.ja": "日语",
+  "lang.ko": "韩语",
+  "settings.size_builtin": "内置",
+  "reid.wrong_passphrase": "口令错误，或该转换的还原密钥已损坏。",
+  "reid.key_missing": "找不到该转换的还原密钥——它可能已被删除。",
+  "reid.cant_open_job": "无法打开该转换：{error}"
 }

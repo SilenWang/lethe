@@ -194,5 +194,13 @@
   "ref.sources": "Sources: ",
   "ref.token": "TOKEN",
   "ref.real_value": "REAL VALUE",
-  "reid.delete_tip": "Delete this conversion"
+  "reid.delete_tip": "Delete this conversion",
+  "lang.en": "English",
+  "lang.zh": "Chinese",
+  "lang.ja": "Japanese",
+  "lang.ko": "Korean",
+  "settings.size_builtin": "built-in",
+  "reid.wrong_passphrase": "Wrong passphrase, or this conversion's reversal key is corrupted.",
+  "reid.key_missing": "This conversion's reversal key is missing — it may have been deleted.",
+  "reid.cant_open_job": "Couldn't open that conversion: {error}"
 }

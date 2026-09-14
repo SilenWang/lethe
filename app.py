@@ -96,6 +96,29 @@ SOURCE_BADGE = {"dictionary": ("badge.known", "deep-purple-6"),
                 "manual": ("badge.manual", "pink-7")}
 
 
+# The Settings → "Detection & OCR languages" list is built from the engine's
+# nlp_suggester.LANGUAGES, whose labels ("English", "Chinese", …) are English.
+# The UI maps each language to a locale key so the list follows the interface
+# language; an unknown code falls back to the engine's own label, so a language
+# added to the engine later still renders (just untranslated).
+LANG_LABEL_KEYS = {"en": "lang.en", "zh": "lang.zh", "ja": "lang.ja", "ko": "lang.ko"}
+# Engine annotations that are prose rather than a number + unit ("~72 MB" reads
+# the same in both languages, "built-in" does not).
+LANG_SIZE_KEYS = {"built-in": "settings.size_builtin"}
+
+
+def _lang_name(tr, code: str, fallback: str) -> str:
+    """Localised display name for a detection / OCR language."""
+    key = LANG_LABEL_KEYS.get(code)
+    return tr(key) if key and i18n.has_key(key) else fallback
+
+
+def _lang_size(tr, size: str) -> str:
+    """Localised download size annotation (numbers stay as they are)."""
+    key = LANG_SIZE_KEYS.get(size)
+    return tr(key) if key and i18n.has_key(key) else size
+
+
 def _svg_uri(svg: str) -> str:
     return "data:image/svg+xml," + urllib.parse.quote(svg, safe="")
 
@@ -1048,8 +1071,14 @@ def build_reidentify_panel(tr):
                 return
             try:
                 job = vault.load_job(sel["job_id"], pw.value or "")
-            except (ValueError, FileNotFoundError) as exc:
-                ui.notify(str(exc), color="negative")
+            except ValueError:            # wrong passphrase / corrupted key file
+                ui.notify(tr("reid.wrong_passphrase"), color="negative")
+                return
+            except FileNotFoundError:     # the reversal key is gone
+                ui.notify(tr("reid.key_missing"), color="negative")
+                return
+            except Exception as exc:      # noqa: BLE001 — anything else, keep the detail
+                ui.notify(tr("reid.cant_open_job", error=exc), color="negative")
                 return
             restore = build_restorer(job["mapping"])
             result.clear()
@@ -1420,10 +1449,12 @@ def build_settings_panel(tr):
                 with lst:
                     for L in nlp_suggester.language_status():
                         with ui.row().classes("items-center gap-3 w-full border-b py-2"):
-                            ui.label(L["label"]).classes("font-medium").style("width:110px")
+                            ui.label(_lang_name(tr, L["code"], L["label"])).classes(
+                                "font-medium").style("width:110px")
                             ui.label(tr("settings.name_ocr")).classes(
                                 "text-xs text-slate-500").style("width:165px")
-                            ui.label(L["size"]).classes("text-xs text-slate-400").style("width:70px")
+                            ui.label(_lang_size(tr, L["size"])).classes(
+                                "text-xs text-slate-400").style("width:70px")
                             ui.space()
                             if L["builtin"]:
                                 ui.badge(tr("settings.builtin"), color="teal-7")
@@ -1438,12 +1469,14 @@ def build_settings_panel(tr):
                             elif L["installed"]:
                                 ui.badge(tr("settings.installed"), color="teal-7")
                                 ui.button(tr("settings.remove"), icon="delete",
-                                          on_click=lambda c=L["code"], n=L["label"], o=L["ocr"]:
-                                          do_remove(c, n, o)).props("flat no-caps dense color=grey-7")
+                                          on_click=lambda c=L["code"],
+                                          n=_lang_name(tr, L["code"], L["label"]),
+                                          o=L["ocr"]: do_remove(c, n, o)).props("flat no-caps dense color=grey-7")
                             else:
                                 ui.button(tr("settings.download"), icon="download",
-                                          on_click=lambda c=L["code"], n=L["label"], o=L["ocr"]:
-                                          do_download(c, n, o)).props("outline no-caps dense")
+                                          on_click=lambda c=L["code"],
+                                          n=_lang_name(tr, L["code"], L["label"]),
+                                          o=L["ocr"]: do_download(c, n, o)).props("outline no-caps dense")
 
             async def do_download(code, label, ocr):
                 note = ui.notification(tr("settings.downloading", label=label),
