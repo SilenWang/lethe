@@ -36,6 +36,8 @@ from nicegui import app, run, ui
 
 from lethe import (
     DATA_DIR,
+    JOB_TTL_SECONDS,
+    RUNTIME_DIR,
     WEB_STATIC,
     Entity,
     _whole_word_regex,
@@ -53,6 +55,7 @@ from lethe import (
     read_xlsx_grid,
     redact_document,
     rows_to_entities,
+    runtime,
     store,
     vault,
 )
@@ -87,6 +90,17 @@ def _sanitize_type(s: str) -> str:
     """Normalise a user type name to a token-safe identifier, e.g.
     'Fund name' -> 'FUND_NAME' (tokens become [FUND_NAME_001])."""
     return re.sub(r"[^A-Za-z0-9]+", "_", (s or "").strip()).strip("_").upper()
+
+
+def _ttl_text() -> str:
+    """Human phrasing for the server-side runtime TTL (default 5 minutes)."""
+    secs = float(JOB_TTL_SECONDS)
+    if secs >= 60:
+        mins = secs / 60
+        return f"{mins:.0f} minutes" if abs(mins - round(mins)) < 1e-6 else f"{mins:.1f} minutes"
+    return f"{secs:.0f} seconds"
+
+
 SOURCE_BADGE = {"dictionary": ("Known entity", "deep-purple-6"),
                 "pattern": ("Pattern", "blue-grey-6"),
                 "suggestion": ("Suggested", "amber-8"),
@@ -387,6 +401,11 @@ server, and never uploaded:
 It survives refreshing and reopening the app. Clearing the browser's site data for Lethe
 erases it — **Settings → Browser data** lets you export/import a JSON backup and shows
 your stored counts, so keep a backup somewhere safe.
+
+The server keeps nothing of its own: while a run is in progress it holds temporary
+working copies of the files you uploaded and the text extracted from them, and deletes
+them **5 minutes after your last action** (or straight away when you click *Start over*).
+A restart or shutdown clears any leftovers too, so no document stays on the server.
 
 ### What it can't remove
 The tool reads the **text** of your files. It does **not** touch:
@@ -708,11 +727,21 @@ def _legacy_status() -> dict:
     }
 
 
+async def _ttl_pre_request(request: Request, call_next):
+    """§7.4 layer 2 — an opportunistic TTL sweep before every /api/* request, so
+    an expired run is removed even if the periodic sweeper never fires."""
+    if (request.url.path or "").startswith("/api/"):
+        runtime.RUNTIME.purge_expired()
+    return await call_next(request)
+
+
 def register_api() -> None:
     """Register the small local HTTP surface used by the browser store: the
     one-time legacy migration. Everything else runs over the NiceGUI channel."""
     def _json(payload: dict, status: int = 200) -> JSONResponse:
         return JSONResponse(payload, status_code=status, headers={"Cache-Control": "no-store"})
+
+    app.middleware("http")(_ttl_pre_request)
 
     @app.get("/api/migrate/status")
     async def migrate_status() -> JSONResponse:
@@ -760,6 +789,8 @@ def main() -> None:
     or via the `lethe` console entry point."""
     app.add_static_files("/static", WEB_STATIC)
     register_api()
+    # §7.4 — TTL cleanup: startup sweep + 30 s periodic task + shutdown/atexit purge.
+    runtime.install_scheduler(app)
     ui.page("/")(_build_index)
 
 
@@ -875,9 +906,28 @@ async def _build_index() -> None:
 # 1 · DE-IDENTIFY
 # ============================================================================
 def build_deidentify_panel(custom_types: list[str] | None = None):
-    files: list[dict] = []          # [{name, kind, data}]
+    # Uploaded bytes live in the server-side runtime workspace (5-minute sliding
+    # TTL), never in this closure — T1 §6.3 D2, option (a). Each entry keeps only
+    # a pointer into that workspace plus the extracted text.
+    files: list[dict] = []          # [{name, kind, sidx, rel, text, warnings}]
     manual_entities: list[Entity] = []
     state: dict = {"items": [], "preview_idx": 0}
+    job: dict = {"id": None}        # runtime job for this panel session
+    seq: dict = {"n": 0}            # stable per-file index inside the job
+
+    def _ensure_job() -> str:
+        jid = job["id"]
+        if not jid or not runtime.RUNTIME.has_job(jid):
+            jid = job["id"] = runtime.RUNTIME.create_job()
+        return jid
+
+    def _drop_job(reason: str = "done") -> None:
+        if job["id"]:
+            runtime.RUNTIME.finish_job(job["id"], reason)
+            job["id"] = None
+
+    def _touch() -> None:
+        runtime.RUNTIME.touch(job["id"])
 
     # Built-in name types + any user-defined ones (Settings → Token types),
     # loaded from the browser store when the page was built.
@@ -1068,7 +1118,14 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                            "their text was recovered with <b>local OCR</b> and is detected below. "
                            "OCR isn't perfect: review these pages carefully.</div>")
             if f["kind"] == "xlsx":
-                preview_html.content = banner + _xlsx_preview_html(f["data"], state["items"])
+                data = runtime.RUNTIME.read(job["id"], f.get("rel") or "")
+                if data is None:
+                    preview_html.content = banner + (
+                        '<div class="pdf-warn">The server-side copy of this file has expired — '
+                        "temporary working files are cleared a few minutes after the last action. "
+                        "Re-add the file to preview it again.</div>")
+                else:
+                    preview_html.content = banner + _xlsx_preview_html(data, state["items"])
             else:
                 preview_html.content = banner + _preview_html(f.get("text", ""), state["items"])
 
@@ -1086,6 +1143,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 state["items"] = []
                 refresh_table()
                 return
+            _touch()  # §7.2 — a server-side scan slides the job's TTL forward
             combined = "\n\n".join(f.get("text", "") for f in files)
             note = ui.notification("Scanning for names…  (large documents take a few seconds)",
                                    spinner=True, timeout=None)
@@ -1116,7 +1174,13 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             f = e.file
             data = await f.read()
             kind = file_kind(f.name) or "txt"
-            entry = {"name": f.name, "kind": kind, "data": data, "text": "", "warnings": []}
+            jid = _ensure_job()
+            sidx = seq["n"]
+            seq["n"] += 1
+            # Bytes go to runtime/<job>/source/ — the closure keeps only a pointer.
+            rel = runtime.RUNTIME.put_source(jid, sidx, f.name, data)
+            entry = {"name": f.name, "kind": kind, "sidx": sidx, "rel": rel,
+                     "text": "", "warnings": []}
             files.append(entry)
             render_files.refresh()
             note = ui.notification(f"Reading {f.name}…", spinner=True, timeout=None)
@@ -1127,6 +1191,8 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 ui.notify(f"Couldn't read {f.name}: {exc}", color="negative")
                 return
             note.dismiss()
+            runtime.RUNTIME.put_text(jid, sidx, entry["text"] or "")
+            _touch()  # §7.2 — upload/extract count as server-side activity
             await run_detection()
             warns = entry.get("warnings") or []
             hard = [w for w in warns if not w.get("ocr")]
@@ -1147,14 +1213,23 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
         async def on_sample():
             files.clear()
             manual_entities.clear()
-            files.append({"name": "sample-memo.txt", "kind": "txt",
-                          "data": SAMPLE.encode("utf-8"), "text": SAMPLE, "warnings": []})
+            _drop_job("done")
+            jid = _ensure_job()
+            sidx = seq["n"]
+            seq["n"] += 1
+            rel = runtime.RUNTIME.put_source(jid, sidx, "sample-memo.txt", SAMPLE.encode("utf-8"))
+            runtime.RUNTIME.put_text(jid, sidx, SAMPLE)
+            files.append({"name": "sample-memo.txt", "kind": "txt", "sidx": sidx, "rel": rel,
+                          "text": SAMPLE, "warnings": []})
             render_files.refresh()
             await run_detection()
             ui.notify("Loaded sample memo", color="primary")
 
         async def remove_file(i):
-            del files[i]
+            f = files.pop(i)
+            if f.get("rel"):
+                runtime.RUNTIME.drop_file(job["id"], f["rel"])
+            runtime.RUNTIME.drop_file(job["id"], f"text/{f['sidx']}.txt")
             state["preview_idx"] = 0
             render_files.refresh()
             await run_detection()
@@ -1164,6 +1239,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             manual_entities.clear()
             state["preview_idx"] = 0
             clear_pdf_cache()   # don't retain any parsed PDF once files are cleared
+            _drop_job("done")   # §7.3 — a finished run leaves no runtime files behind
             render_files.refresh()
             await run_detection()
 
@@ -1209,14 +1285,28 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 ui.notify("Nothing selected to redact", color="warning")
                 return
 
+            # Read the originals back from the runtime workspace — the closure no
+            # longer holds the bytes (§6.3 D2). If the job's TTL already expired,
+            # the browser still has the file and the user simply re-adds it.
+            jid = job["id"]
+            payloads = []
+            for f in files:
+                data = runtime.RUNTIME.read(jid, f.get("rel") or "") if jid else None
+                if data is None:
+                    ui.notify(f"The server-side copy of “{f['name']}” has expired — temporary working "
+                              "files are removed a few minutes after the last action. Re-add the file "
+                              "and try again.", color="warning", multi_line=True)
+                    return
+                payloads.append((f["name"], data, f["kind"]))
+            _touch()  # §7.2 — redaction counts as server-side activity
+
             passphrase = pw.value or ""
             job_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
             created = datetime.now(timezone.utc).isoformat()
             sources = [f["name"] for f in files]
             note = ui.notification("Generating de-identified file(s)…", spinner=True, timeout=None)
             try:
-                outputs, total_hits = await run.io_bound(
-                    _redact_files, [(f["name"], f["data"], f["kind"]) for f in files], replace_fn)
+                outputs, total_hits = await run.io_bound(_redact_files, payloads, replace_fn)
             except Exception as exc:  # noqa: BLE001
                 note.dismiss()
                 ui.notify(f"Couldn't generate the file(s): {exc}", color="negative")
@@ -1226,6 +1316,13 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 # from memory rather than retaining sensitive content between jobs.
                 clear_pdf_cache()
             note.dismiss()
+            # §7.3 — results are staged in runtime/<job>/out/ and deleted once the
+            # response is built; the TTL sweeper is the fallback if a crash lands
+            # between the write and the delete.
+            for name, data in outputs.items():
+                runtime.RUNTIME.put_out(jid, name, data)
+            runtime.RUNTIME.clear_out(jid)
+            _touch()
             ref_bytes = _reference_text(job_id, created, sources, token_to_real)
 
             # The reversal key is encrypted and stored in THIS browser only
@@ -1291,6 +1388,9 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                         ui.button(f"Download all {len(outputs)} files + reference (.zip)", icon="download",
                                   on_click=lambda z=zipb: ui.download(z, f"deidentified_{job_id}.zip")).props(
                             "unelevated no-caps")
+                ui.label(f"Server-side working copies (the uploaded documents and the extracted "
+                         f"text) are deleted automatically {_ttl_text()} after your last action — "
+                         "nothing is kept on the server.").classes("text-xs text-slate-500")
                 with ui.expansion("Show the sealed token → name mapping").classes("w-full"):
                     mcols = [{"name": "t", "label": "Token", "field": "t", "align": "left"},
                              {"name": "v", "label": "Real value", "field": "v", "align": "left"}]
@@ -2185,6 +2285,10 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
             folder_row("Server-side data folder (program resources only)",
                        "OCR models and the session secret — no user data, nothing to back up.",
                        DATA_DIR)
+            folder_row("Server-side temporary files (auto-deleted)",
+                       f"Working copies of uploaded documents and their extracted text are deleted "
+                       f"{_ttl_text()} after your last action.",
+                       RUNTIME_DIR)
             folder_row("Program files (where Lethe runs from)", "",
                        os.path.dirname(os.path.abspath(__file__)))
 

@@ -15,7 +15,9 @@ keywords = ["pii", "de-identification", "redaction", "privacy", "nicegui", "pres
 # Base engine + UI. The NLP suggestion engine is an optional extra (see below);
 # without it, Lethe falls back to a built-in regex name-guesser.
 dependencies = [
-    "nicegui",
+    # 3.16.0 is the version the client-side-storage / TTL work was verified against;
+    # keep a floor so an older NiceGUI can't silently change UI/session behaviour.
+    "nicegui>=3.16.0",
     "python-docx",
     "python-pptx",
     "openpyxl",
