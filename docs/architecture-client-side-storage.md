@@ -353,6 +353,6 @@ DB: "lethe"  version 1
 ## 12. 与后续任务的交接结论
 
 - **任务 2（VYB-360）**：**已完成并合入 `dev`（`f673686`）**。实现与 §4/§5/§6.3 一致：IndexedDB 库、浏览器加密、备份、迁移端点、会话密钥随机化；计算流程仍走 NiceGUI 通道，REST 端点未实施（§6.2 降级为可选）。已核验「两个 profile 互不可见、重开仍在、服务端不再读写 `entities.json`/`token_types.json`/`vault/`（归档目录 `migrated-*` 除外，仅供回退）」。
-- **任务 3（VYB-361）**：在 `web_static/` 增加 manifest 与 service worker；SW 只缓存静态资源，禁止缓存用户文档/结果与迁移接口响应（当前计算不走 `/api/*`，但同样不得缓存）；安装后独立窗口全流程可用。
+- **任务 3（VYB-361）**：**已完成（待合入 `dev`）**。`web_static/` 新增 `manifest.webmanifest`、`sw.js` 与 `icons/`（192/512/maskable PNG，`tools/make_pwa_icons.py` 生成）；`app.py` 以 `/manifest.webmanifest`、`/sw.js`（带 `Service-Worker-Allowed: /`）提供二者并在页面注册，`/sw.js?v=<APP_VERSION>` 负责版本轮换。SW 只缓存 `STATIC_PATHS` 白名单内的静态资源（JS/图标/字体/manifest），**不缓存**用户文档/结果/映射、`/api/*`、页面 HTML 与任何非 GET 请求；安装、独立窗口与缓存边界见 `docs/pwa.md`，自动化证据见 `tests/test_pwa_assets.py` 与 `tests/browser/test_pwa.py`。
 - **任务 4（VYB-359）**：实现 `lethe/runtime.py` 与 §7 的三层清理；按 §7.5 的脚本/单测给出可重复验证输出；**D2** 需同时解决会话闭包中的上传字节归属（§6.3 D2，推荐方案 (a)：移入 `runtime/<job_id>/` 统一 TTL 管理）；`/api/runtime` 仅在实施 §6.2 可选 REST 路径时作为调试自检端点。
 - **任务 7（VYB-358）**：把「服务端 5 分钟无残留（含 D2 会话闭包字节的处置结果）」「多浏览器隔离」「SW 不缓存用户文档」列为回归必测，并更新 README/使用文档中的存储与隐私说明。

@@ -31,7 +31,7 @@ import zipfile
 from datetime import datetime, timezone
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from nicegui import app, run, ui
 
 from lethe import (
@@ -742,6 +742,25 @@ def register_api() -> None:
         archived = vault.legacy_archive(DATA_DIR)
         return _json({"archived": archived is not None, "archived_to": archived})
 
+    # ---- PWA shell: manifest + service worker (static assets only) ---------
+    # Both are served from / and /sw.js rather than /static/ so that the service
+    # worker's scope can cover the whole app (a worker may only control URLs at
+    # or below its own path unless the response allows otherwise) and so that
+    # each file gets its correct media type — the browser refuses a manifest
+    # whose Content-Type it doesn't recognise.
+    @app.get("/sw.js")
+    async def service_worker() -> FileResponse:
+        # Service-Worker-Allowed widens the worker's scope to the app root;
+        # no-store keeps every update check honest (see web_static/sw.js).
+        return FileResponse(
+            os.path.join(WEB_STATIC, "sw.js"), media_type="text/javascript",
+            headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-store"})
+
+    @app.get("/manifest.webmanifest")
+    async def web_app_manifest() -> FileResponse:
+        return FileResponse(os.path.join(WEB_STATIC, "manifest.webmanifest"),
+                            media_type="application/manifest+json")
+
 
 def _guide_dialog():
     with ui.dialog() as dlg, ui.card().classes("max-w-2xl").style("max-height:85vh;overflow:auto"):
@@ -794,12 +813,27 @@ async def _build_index() -> None:
     browser's IndexedDB — the server keeps none of it."""
     ui.colors(**_BRAND_COLORS)
     ui.add_head_html(THEME_CSS)
+    # PWA shell: the manifest makes Lethe installable, the icons are what the
+    # OS shows for the installed app, and the theme colour tints its title bar.
+    ui.add_head_html('<link rel="manifest" href="/manifest.webmanifest">')
+    ui.add_head_html('<meta name="theme-color" content="' + PRIMARY + '">')
+    ui.add_head_html('<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">')
+    ui.add_head_html('<link rel="apple-touch-icon" href="/static/icons/icon-192.png">')
     ui.add_head_html('<script src="/static/client-store.js"></script>')
     ui.add_head_html('<script src="/static/migration.js"></script>')
     # remember the last text selection inside the preview, even after a click
     ui.add_body_html("<script>document.addEventListener('mouseup',function(){"
                      "try{var s=window.getSelection().toString();"
                      "if(s&&s.trim())window.__deidSel=s;}catch(e){}});</script>")
+    # Install the service worker (offline shell + installable app). The version
+    # in the query string makes every release a new script URL, which is what
+    # rotates the service worker and its cache (see web_static/sw.js).
+    ui.add_body_html(
+        "<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){"
+        f"navigator.serviceWorker.register('/sw.js?v={APP_VERSION}',{{scope:'/'}})"
+        ".then(function(r){r.update();})"
+        ".catch(function(e){console.warn('Lethe: service worker registration failed',e);});"
+        "});}</script>")
 
     guide = _guide_dialog()
     dark = ui.dark_mode(value=False)
