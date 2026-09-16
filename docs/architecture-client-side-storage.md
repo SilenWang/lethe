@@ -63,16 +63,16 @@
 
 | 存储 | 放什么 | 不放什么 | 理由 |
 |---|---|---|---|
-| **IndexedDB**（库名 `lethe`） | 词典 `entities`、自定义 token 类型 `token_types`、运行记录与加密映射 `jobs`、schema 元数据 `meta` | 原始文档、提取文本、结果文件（这些放页面内存） | 结构化、可索引、容量大（磁盘配额级别）、支持事务与版本升级；词典与映射需要按 job/名称查询 |
+| **IndexedDB**（库名 `lethe`） | 词典 `entities`、自定义 token 类型 `token_types`、运行记录与加密映射 `jobs`、**结果文件 `outputs`（T8，二进制 Blob）**、schema 元数据 `meta` | 原始文档、提取文本（放页面内存，随 job 结束丢弃） | 结构化、可索引、容量大（磁盘配额级别）、支持事务与版本升级；词典与映射需要按 job/名称查询 |
 | **localStorage** | 语言偏好（任务 5）、主题、上次所在标签页等轻量设置 | 任何含姓名/映射的数据 | 同步、简单、够小；但只有 ~5 MB 且无事务，不适合结构化数据 |
 | **sessionStorage** | 不采用 | — | 关闭标签页即丢失，无法满足「重开应用后数据仍在」；语义与需求冲突 |
 | **页面内存（JS 变量 / Blob / object URL）** | 本次会话上传的原始文档字节、提取文本（预览高亮用）、评审勾选状态、生成的结果 Blob | — | 这些是「一次运算」的中间态，重开页面后用户重新选文件即可；持久化它们既无必要也扩大泄露面。现状补充：上传字节同时有一份在服务端会话闭包（§6.3 D2，归任务 4 处置） |
 | **NiceGUI `app.storage.user` / `app.storage.browser`** | **不采用** | — | 两者都把数据镜像/落盘到服务端（`user` 走服务端文件或 Redis，`browser` 由服务端读写浏览器 localStorage），与「数据永不离开浏览器」直接冲突，且容量与并发语义都不合适 |
 
-### 4.2 IndexedDB 结构（`lethe`，version 1）
+### 4.2 IndexedDB 结构（`lethe`，version 2）
 
 ```text
-DB: "lethe"  version 1
+DB: "lethe"  version 2        （version 1 → 2 为纯加法升级：只新增 "outputs" store）
 ├─ store "entities"      keyPath: "key"           （key = canonical.toLowerCase().trim()）
 │    { key, canonical, type, aliases: string[], updatedAt: ISO8601 }
 │    index "by_type" on "type"
@@ -84,9 +84,15 @@ DB: "lethe"  version 1
 │      crypto: null | { kdf: {name:"PBKDF2", hash:"SHA-256", iterations:480000, saltB64},
 │                        cipher: {name:"AES-GCM", ivB64}, ciphertextB64 } }
 │    index "by_createdAt" on "createdAt"
+├─ store "outputs"       keyPath: "jobId"         （T8：结果文件，二进制）
+│    { jobId, createdAt, files: [{ name, type, blob: Blob }] }
+│    index "by_createdAt" on "createdAt"          （按时间淘汰最旧结果）
 └─ store "meta"          keyPath: "key"
      { key: "lethe.schema.v1",    value: 1 }        （T2 实现用此键名记录 schema 版本）
+     { key: "lethe.schema.v2",    value: 2 }        （T8 起写入；旧键保留，读取取两者较大值）
      { key: "lethe.installed.v1", value: ISO8601 }  （首次安装时间；也用作“存储被清空”的标记）
+     { key: "lethe.persisted.v1", value: bool }     （T8：上次 navigator.storage.persist() 的结果）
+     { key: "lethe.outputs.retention.v1", value: int } （T8：结果保留上限，默认 20）
 ```
 
 说明：
@@ -94,6 +100,8 @@ DB: "lethe"  version 1
 - `jobs.crypto` 为空表示「空口令、映射以明文存在客户端」——与当前 `vault.py` 中「blank passphrase = 未加密」的语义保持一致，UI 必须给出同等强度的警告。
 - 运行记录（「Past conversions」列表）直接由 `jobs` 的**非敏感字段**（`createdAt`、`sourceFiles`、`replacements`）渲染，不引入单独的 `index.json`；敏感映射只在用户输入口令、本地解密后短暂出现在内存中。
 - 词典键用规范化小写，别名去重逻辑沿用 `store.merge_entities()` 的语义（新增别名合并进已有条目，按 canonical 大小写不敏感去重）。
+- 结果文件（`outputs`）以 **Blob 二进制**保存——不是 base64 字符串；跨 NiceGUI 桥时用 base64 传输一次，落库前在浏览器内解码为 Blob。历史列表渲染只用 `getAllKeys()` 取键（元数据查询），**不读取任何 Blob**；只有用户点击「重新下载」时才 `get(jobId)` 取回字节，用 `URL.createObjectURL()` 直接触发下载（不经过服务端）。
+- 结果保留上限默认 **20**：每次写入后按 `by_createdAt` 升序游标（只读键、不读值）删除超出上限的最旧结果，同时清理存储占用；UI 在「Past conversions」与设置页说明该行为。
 
 ### 4.3 客户端加密（`jobs.crypto`）
 
@@ -285,6 +293,7 @@ DB: "lethe"  version 1
 | 风险 | 说明 | 缓解 |
 |---|---|---|
 | 浏览器存储被清除 / 换机器 | IndexedDB 被清空即丢失词典与还原能力 | 「导出/导入备份」；`navigator.storage.persist()`；界面提示备份 |
+| 结果文件被驱逐或超过保留上限 | 无法从历史记录里再次下载结果 | 生成后立即落库并申请持久化；设置页显示配额与持久化状态；超限只淘汰最旧；缺失时给出「重新生成」的明确提示（不抛错）；首次下载始终可用 |
 | 存储未加密 | IndexedDB 默认不随 OS 全盘加密之外再加一层 | 敏感映射本身用 AES-GCM 加密；词典明文属用户自选（与旧版 `entities.json` 明文一致） |
 | XSS / 本机恶意软件 | 页面被注入脚本可在输入口令后读取明文 | 不加载外部脚本、加 CSP、纯本地无 CDN；风险与旧版本机文件同级，需在文档说明 |
 | 口令遗忘 | 映射不可恢复（设计如此） | 生成时二次确认；备份文件含加密态映射 |
@@ -355,4 +364,5 @@ DB: "lethe"  version 1
 - **任务 2（VYB-360）**：**已完成并合入 `dev`（`f673686`）**。实现与 §4/§5/§6.3 一致：IndexedDB 库、浏览器加密、备份、迁移端点、会话密钥随机化；计算流程仍走 NiceGUI 通道，REST 端点未实施（§6.2 降级为可选）。已核验「两个 profile 互不可见、重开仍在、服务端不再读写 `entities.json`/`token_types.json`/`vault/`（归档目录 `migrated-*` 除外，仅供回退）」。
 - **任务 3（VYB-361）**：**已完成（待合入 `dev`）**。`web_static/` 新增 `manifest.webmanifest`、`sw.js` 与 `icons/`（192/512/maskable PNG，`tools/make_pwa_icons.py` 生成）；`app.py` 以 `/manifest.webmanifest`、`/sw.js`（带 `Service-Worker-Allowed: /`）提供二者并在页面注册，`/sw.js?v=<APP_VERSION>` 负责版本轮换。SW 只缓存 `STATIC_PATHS` 白名单内的静态资源（JS/图标/字体/manifest），**不缓存**用户文档/结果/映射、`/api/*`、页面 HTML 与任何非 GET 请求；安装、独立窗口与缓存边界见 `docs/pwa.md`，自动化证据见 `tests/test_pwa_assets.py` 与 `tests/browser/test_pwa.py`。
 - **任务 4（VYB-359）**：实现 `lethe/runtime.py` 与 §7 的三层清理；按 §7.5 的脚本/单测给出可重复验证输出；**D2** 需同时解决会话闭包中的上传字节归属（§6.3 D2，推荐方案 (a)：移入 `runtime/<job_id>/` 统一 TTL 管理）；`/api/runtime` 仅在实施 §6.2 可选 REST 路径时作为调试自检端点。
+- **任务 8（VYB-375）**：**已实现**。IndexedDB 升到 version 2 并新增 `outputs` store（keyPath `jobId`，二进制 Blob，索引 `by_createdAt`）；生成后立即把结果字节落库并调用 `navigator.storage.persist()`；Re-identify 列表每行提供「重新下载结果」入口，列表渲染只做键查询；设置页显示 `navigator.storage.estimate()` 的已用/上限、结果保留上限与持久化状态，并提供「清空结果文件」（只清 `outputs`）；默认保留最近 20 个结果，超出即淘汰最旧；结果缺失时给出重新生成的明确提示。验证见 `tests/browser/test_client_store.py` 中新增的 4 个用例。顺带修复：NiceGUI ≥3.6 的 tab 事件回传的是 tab **名称**（不再是 Tab 对象），原 `_on_tab_change` 因此从不匹配，导致切到 Re-identify / Entity dictionary 时面板不刷新——现已按名称匹配，并把历史表首渲染改为 `ui.timer(0.1, …)`（原先是未 await 的异步 refreshable 调用，从不执行）。
 - **任务 7（VYB-358）**：把「服务端 5 分钟无残留（含 D2 会话闭包字节的处置结果）」「多浏览器隔离」「SW 不缓存用户文档」列为回归必测，并更新 README/使用文档中的存储与隐私说明。

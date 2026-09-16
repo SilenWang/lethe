@@ -119,6 +119,12 @@ with a passphrase and stored only on your computer.
   with your passphrase in the browser (PBKDF2-SHA-256 480k → AES-GCM-256) and kept in
   IndexedDB — never uploaded to the server. Lose the passphrase and that job is
   unrecoverable *by design*. Export a JSON backup from Settings → Browser data.
+- **Your result file is kept too:** the de-identified file of each recent conversion is
+  stored in the same browser storage, exactly as downloaded, so **Past conversions** can
+  hand it back after a refresh, a closed tab or a restart (the ⤓ button on a row). The
+  most recent 20 are kept; older ones are dropped automatically, and
+  **Settings → Browser data → Clear result files** deletes them all without touching your
+  dictionary, token types or conversion list.
 - **Review before anything is written:** Lethe shows every proposed redaction,
   highlighted in the document — nothing is changed until you confirm.
 - **Multi-language (detection + OCR):** adding a language in Settings (Chinese, Japanese,
@@ -199,9 +205,9 @@ app.py  (NiceGUI UI)
 
 The UI is a thin layer over the `lethe` package; all detection, redaction and storage
 logic lives there with no UI coupling. User data — your dictionary, custom token types,
-conversion history and the encrypted token→name mappings — lives in **the browser**
-(IndexedDB, isolated per browser profile) and never goes inside the package or on the
-server. The per-user data directory (`DATA_DIR`) only holds program resources such as
+conversion history, the encrypted token→name mappings and the de-identified result files —
+lives in **the browser** (IndexedDB, isolated per browser profile) and never goes inside
+the package or on the server. The per-user data directory (`DATA_DIR`) only holds program resources such as
 the OCR models and the NiceGUI session secret; a legacy install's `entities.json`,
 `token_types.json` and `vault/` are imported into the browser once via
 Settings → Migrate old server-side data and then archived in place.

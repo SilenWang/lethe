@@ -10,6 +10,12 @@ Playwright, using two persistent browser profiles to prove:
     the old files;
   * a cleared browser store shows an explicit warning.
 
+It also covers the kept result files (VYB-375): a de-identified file stays
+downloadable after the browser is closed and reopened, the history list renders
+from metadata only, the retention limit evicts the oldest results, Settings can
+clear them without touching the dictionary, and a missing result degrades into a
+plain-language message instead of an error.
+
 Local run (requires a Python env with the app deps, pytest and playwright):
     python -m pytest tests/browser/test_client_store.py -q
     playwright install chromium   # once
@@ -278,7 +284,7 @@ def test_cleared_storage_banner(server, tmp_path):
         # simulate a browser-side eviction: the store is empty, the marker stays
         page.evaluate(
             "new Promise(resolve => {"
-            "  const req = indexedDB.open('lethe', 1);"
+            "  const req = indexedDB.open('lethe');"      # current version — never pin it
             "  req.onsuccess = () => {"
             "    const db = req.result;"
             "    const tx = db.transaction('meta', 'readwrite');"
@@ -340,4 +346,214 @@ def test_custom_token_types_persist(server, tmp_path):
         page.reload(wait_until="networkidle")
         page.get_by_text("Lethe", exact=True).first.wait_for(timeout=30000)
         assert page.evaluate("window.lethStore.getTokenTypes().then(t => t.indexOf('PROJECT') > -1)")
+        ctx.close()
+
+
+# ============================================================================
+# Kept result files (VYB-375): re-download after a restart, metadata-only
+# history rendering, retention, clearing and the missing-result message.
+# ============================================================================
+
+# Counts how every value-returning read hits the "outputs" store, so a test can
+# assert the history list never loads a stored blob. getAllKeys() is the one
+# metadata-only call the UI is allowed to make.
+_IDB_READ_PROBE = """
+(() => {
+  window.__idbReads = { outputs: {} };
+  const proto = IDBObjectStore.prototype;
+  ['get', 'getAll', 'getAllKeys', 'openCursor', 'count'].forEach((method) => {
+    const original = proto[method];
+    proto[method] = function (...args) {
+      if (this.name === 'outputs') {
+        window.__idbReads.outputs[method] = (window.__idbReads.outputs[method] || 0) + 1;
+      }
+      return original.apply(this, args);
+    };
+  });
+})();
+"""
+
+
+def _generate_sample(page) -> str:
+    """De-identify the built-in sample memo and return the job id."""
+    _tab(page, "De-identify")
+    page.get_by_role("button", name="Try a sample memo").click()
+    page.get_by_text("will be tokenised").wait_for(timeout=60000)
+    page.get_by_role("button", name="Generate de-identified file(s)").click()
+    page.get_by_text("Saved in this browser").wait_for(timeout=60000)
+    job_id = page.locator(".q-badge", has_text="-").first.inner_text().strip()
+    assert job_id, "no Job ID badge found"
+    return job_id
+
+
+def _stored_output_type(page, job_id: str) -> str:
+    """The value type the outputs store really holds (must be a Blob)."""
+    return page.evaluate(
+        "new Promise(resolve => {"
+        "  const req = indexedDB.open('lethe');"
+        "  req.onsuccess = () => {"
+        "    const get = req.result.transaction('outputs', 'readonly')"
+        "      .objectStore('outputs').get(" + json.dumps(job_id) + ");"
+        "    get.onsuccess = () => {"
+        "      const row = get.result;"
+        "      resolve(row ? Object.prototype.toString.call(row.files[0].blob)"
+        "                 : 'missing');"
+        "    };"
+        "    get.onerror = () => resolve('error');"
+        "  };"
+        "})")
+
+
+def test_result_file_survives_reload_and_redownloads(server, tmp_path):
+    """Generate -> close the browser -> reopen -> the same bytes come back from
+    Past conversions (the T8 acceptance path)."""
+    url = server["url"]
+    profile = str(tmp_path / "profile-results")
+    with sync_playwright() as pw:
+        errors = []
+        ctx, page = _open_profile(pw, profile)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        _goto(page, url)
+        job_id = _generate_sample(page)
+
+        # the file as it is downloaded at generation time
+        with page.expect_download(timeout=30000) as first_dl:
+            page.get_by_role("button", name="Download de-identified file").click()
+        first = first_dl.value
+        first_bytes = first.path().read_bytes()
+        assert first.suggested_filename == "sample-memo__deidentified.txt"
+
+        # it is really in IndexedDB as binary, never as a base64 string
+        assert _stored_output_type(page, job_id) == "[object Blob]"
+        assert page.evaluate(
+            f"window.lethStore.outputStats().then(s => s.jobIds.indexOf({json.dumps(job_id)}) > -1)")
+        ctx.close()
+
+        # ---- reopen the browser: the result is still there ------------------
+        ctx2, page2 = _open_profile(pw, profile)
+        page2.on("pageerror", lambda e: errors.append(str(e)))
+        page2.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        _goto(page2, url)
+        _tab(page2, "Re-identify")
+        page2.get_by_text("Past conversions").wait_for(timeout=20000)
+        row = page2.locator(".q-table tbody tr", has_text=job_id).first
+        row.wait_for(timeout=20000)
+
+        with page2.expect_download(timeout=30000) as again_dl:
+            row.locator('[aria-label="Download result file again"]').click()
+        again = again_dl.value
+        assert again.suggested_filename == first.suggested_filename
+        assert again.path().read_bytes() == first_bytes, "re-downloaded bytes differ"
+
+        # the same entry point is offered for the selected conversion
+        row.locator("td").first.click()
+        page2.get_by_text(f"Selected: {job_id}").wait_for(timeout=20000)
+        page2.get_by_role("button", name="Download this result file again").wait_for(timeout=20000)
+
+        assert errors == [], f"browser console/page errors: {errors}"
+        ctx2.close()
+
+
+def test_history_list_does_not_read_result_blobs(server, tmp_path):
+    """Rendering Past conversions must only issue metadata queries — the blob is
+    touched solely when the user asks for the file."""
+    profile = str(tmp_path / "profile-history")
+    with sync_playwright() as pw:
+        ctx = pw.chromium.launch_persistent_context(profile, headless=True)
+        ctx.add_init_script(_IDB_READ_PROBE)
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        _goto(page, server["url"])
+        job_id = _generate_sample(page)
+        assert page.evaluate(f"window.lethStore.outputStats().then(s => s.count)") == 1
+
+        page.evaluate("window.__idbReads.outputs = {};")
+        _tab(page, "Re-identify")
+        page.locator(".q-table tbody tr", has_text=job_id).first.wait_for(timeout=20000)
+        reads = page.evaluate("window.__idbReads.outputs")
+        assert not any(reads.get(m) for m in ("get", "getAll", "openCursor")), \
+            f"history render read result blobs: {reads}"
+        assert reads.get("getAllKeys", 0) >= 1, "expected a metadata-only key lookup"
+
+        # …and the blob is loaded the moment the user asks for the download
+        with page.expect_download(timeout=30000):
+            page.locator('[aria-label="Download result file again"]').first.click()
+        assert page.evaluate("window.__idbReads.outputs.get") == 1
+        ctx.close()
+
+
+def test_clear_result_files_keeps_dictionary_and_mappings(server, tmp_path):
+    """Settings → Clear result files empties the result store and nothing else,
+    and the re-download entry then explains itself instead of failing."""
+    profile = str(tmp_path / "profile-clear-results")
+    with sync_playwright() as pw:
+        errors = []
+        ctx, page = _open_profile(pw, profile)
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
+        _goto(page, server["url"])
+        job_id = _generate_sample(page)
+        entities_before = page.evaluate("window.lethStore.getEntities().then(e => e.length)")
+        jobs_before = page.evaluate("window.lethStore.listJobs().then(j => j.length)")
+
+        _tab(page, "Settings")
+        page.get_by_text("Result files:", exact=False).wait_for(timeout=20000)
+        page.get_by_text("Storage:", exact=False).wait_for(timeout=20000)
+        page.get_by_role("button", name="Clear result files").click()
+        page.locator(".q-dialog").get_by_role("button", name="Delete result files").click()
+        page.get_by_text("Stored result files deleted", exact=False).wait_for(timeout=20000)
+
+        assert page.evaluate("window.lethStore.outputStats().then(s => s.count)") == 0
+        assert page.evaluate("window.lethStore.getEntities().then(e => e.length)") == entities_before
+        assert page.evaluate("window.lethStore.listJobs().then(j => j.length)") == jobs_before
+        assert page.evaluate(
+            f"window.lethStore.getMapping({json.dumps(job_id)}, '')"
+            ".then(m => Object.keys(m).length > 0)"), "the mapping must survive"
+
+        # the row no longer offers the file, and asking for it explains why
+        _tab(page, "Re-identify")
+        row = page.locator(".q-table tbody tr", has_text=job_id).first
+        row.wait_for(timeout=20000)
+        assert row.locator('[aria-label="Download result file again"]').count() == 0
+        row.locator("td").first.click()
+        page.get_by_text(f"Selected: {job_id}").wait_for(timeout=20000)
+        assert page.get_by_role("button", name="Download this result file again").is_visible() is False
+        missing = page.evaluate(
+            f"window.lethStore.downloadOutput({json.dumps(job_id)})"
+            ".then(() => '', e => e.message)")
+        assert "no longer stored" in missing and "original" in missing.lower()
+        assert errors == [], f"browser console/page errors: {errors}"
+        ctx.close()
+
+
+def test_result_retention_evicts_the_oldest(server, tmp_path):
+    """Beyond the retention limit only the oldest results go; the rest still
+    re-download, and the default limit is 20."""
+    profile = str(tmp_path / "profile-retention")
+    with sync_playwright() as pw:
+        ctx, page = _open_profile(pw, profile)
+        _goto(page, server["url"])
+        assert page.evaluate("window.lethStore.outputRetentionDefault") == 20
+
+        # three kept, four stored — the oldest must be dropped and nothing else
+        page.evaluate("window.lethStore.setOutputRetention(3)")
+        for i in range(4):
+            page.evaluate(
+                "window.lethStore.saveOutput({jobId: 'ret-job-' + " + str(i) + ","
+                " createdAt: '2026-01-0" + str(i + 1) + "T00:00:00Z',"
+                " files: [{name: 'ret-' + " + str(i) + " + '.txt', type: 'text/plain',"
+                " b64: btoa('result ' + " + str(i) + ")}]})")
+        kept = page.evaluate("window.lethStore.outputStats().then(s => s.jobIds.sort())")
+        assert kept == ["ret-job-1", "ret-job-2", "ret-job-3"], kept
+        assert page.evaluate("window.lethStore.outputStats().then(s => s.limit)") == 3
+
+        gone = page.evaluate("window.lethStore.downloadOutput('ret-job-0')"
+                             ".then(() => '', e => e.message)")
+        assert "no longer stored" in gone
+        # …while every surviving result is still downloadable
+        still = page.evaluate("window.lethStore.downloadOutput('ret-job-3')"
+                              ".then(names => names.join(','))")
+        assert still == "ret-3.txt"
+        # the platform default (20) is what the app asks for on generation
+        assert page.evaluate("window.lethStore.setOutputRetention(20)")
         ctx.close()
