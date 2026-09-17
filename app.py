@@ -2166,10 +2166,15 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
             ui.label("Detection & OCR languages").classes("text-base font-medium")
             ui.label("English name detection is built in and works fully offline. Scanned-page OCR "
                      "uses a small local English model — bundled in the Windows app; on a pip install, "
-                     "add it once with the button. Adding another language installs BOTH its "
-                     "name-detection model and its OCR model, so scanned documents in that script are "
-                     "read too. Your dictionary works in every language regardless. Downloading any "
-                     "model needs internet (one-off); nothing else does.").classes(
+                     "add it once with the button. Every language offers several name-detection "
+                     "models: the larger ones catch more names but download more data. English and "
+                     "Chinese default to the largest model (`lg`) — download it once and detection "
+                     "uses it automatically, for maximum recall; the built-in small model keeps "
+                     "English working fully offline until then. Switch between models at any time — "
+                     "the switch applies to the next document you check. Adding a language also "
+                     "installs its OCR model, so scanned documents in that script are read too. "
+                     "Your dictionary works in every language regardless. Downloading any model "
+                     "needs internet (one-off); nothing else does.").classes(
                 "text-sm text-slate-500")
             if not nlp_suggester.available():
                 ui.label("⚠ The NLP suggestion engine isn't available in this build — only the dictionary "
@@ -2181,53 +2186,87 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 lst.clear()
                 with lst:
                     for L in nlp_suggester.language_status():
-                        with ui.row().classes("items-center gap-3 w-full border-b py-2"):
-                            ui.label(L["label"]).classes("font-medium").style("width:110px")
-                            ui.label("Name detection + OCR").classes(
-                                "text-xs text-slate-500").style("width:165px")
-                            ui.label(L["size"]).classes("text-xs text-slate-400").style("width:70px")
-                            ui.space()
-                            if L["builtin"]:
-                                ui.badge("Built-in", color="teal-7")
+                        with ui.column().classes("w-full border-b py-2 gap-1"):
+                            with ui.row().classes("items-center gap-3 w-full"):
+                                ui.label(L["label"]).classes("font-medium").style("width:110px")
+                                ui.label(L["note"]).classes("text-xs text-slate-500")
+                                ui.space()
+                                if L["ocr"]:
+                                    ui.label(f"OCR model {L['ocr_size']}").classes("text-xs text-slate-400")
                                 # English name detection is bundled, but its OCR model can be
                                 # absent on a lean pip install — we never fetch it silently, so
                                 # offer an explicit one-off download when OCR is available.
-                                if docio.ocr_available() and "eng" not in docio.installed_ocr_languages():
+                                if (L["code"] == "en" and docio.ocr_available()
+                                        and "eng" not in docio.installed_ocr_languages()):
                                     ui.button("Add OCR model", icon="download",
-                                              on_click=lambda: do_download_eng_ocr()).props(
+                                              on_click=do_download_eng_ocr).props(
                                         "outline no-caps dense").tooltip(
                                         "Download the English OCR model so scanned English pages are read")
-                            elif L["installed"]:
-                                ui.badge("Installed", color="teal-7")
-                                ui.button("Remove", icon="delete",
-                                          on_click=lambda c=L["code"], n=L["label"], o=L["ocr"]:
-                                          do_remove(c, n, o)).props("flat no-caps dense color=grey-7")
-                            else:
-                                ui.button("Download", icon="download",
-                                          on_click=lambda c=L["code"], n=L["label"], o=L["ocr"]:
-                                          do_download(c, n, o)).props("outline no-caps dense")
+                            for m in L["models"]:
+                                with ui.row().classes("items-center gap-3 w-full pl-4"):
+                                    ui.label(m["name"]).classes("text-sm").style("width:190px")
+                                    ui.label(m["size"]).classes("text-xs text-slate-400").style("width:130px")
+                                    if m["active"]:
+                                        ui.badge("In use", color="teal-7")
+                                    elif m["installed"]:
+                                        ui.badge("Installed", color="grey-6")
+                                    elif m["builtin"]:
+                                        ui.badge("Built-in", color="teal-7")
+                                    else:
+                                        ui.badge("Not installed", color="amber-8")
+                                    if m["note"]:
+                                        ui.label(m["note"]).classes("text-xs text-slate-400")
+                                    ui.space()
+                                    if not m["installed"]:
+                                        ui.button("Download", icon="download",
+                                                  on_click=lambda mm=m, LL=L: do_download(mm, LL)).props(
+                                            "outline no-caps dense")
+                                    else:
+                                        if not m["active"]:
+                                            ui.button("Use", icon="check_circle",
+                                                      on_click=lambda mm=m, LL=L: do_use(mm, LL)).props(
+                                                "outline no-caps dense").tooltip(
+                                                "Detect with this model from the next document on")
+                                        if not m["builtin"]:
+                                            ui.button("Remove", icon="delete",
+                                                      on_click=lambda mm=m, LL=L: do_remove(mm, LL)).props(
+                                                "flat no-caps dense color=grey-7")
 
-            async def do_download(code, label, ocr):
-                note = ui.notification(f"Downloading {label} (name detection + OCR)… this can take a minute",
+            def do_use(m, L):
+                ok, msg = nlp_suggester.set_active_model(L["code"], m["name"])
+                ui.notify(msg, color="positive" if ok else "negative", multi_line=True)
+                render.refresh()
+
+            async def do_download(m, L):
+                note = ui.notification(f"Downloading {m['name']}… this can take a few minutes",
                                        spinner=True, timeout=None)
-                ok, log = await run.io_bound(nlp_suggester.download_language, code)
+                ok, log = await run.io_bound(nlp_suggester.download_model, m["name"])
+                # Pull the language's OCR model along with the name-detection model, so a
+                # new language reads scanned documents too.
+                missing_ocr = ([c for c in L["ocr"] if c not in docio.installed_ocr_languages()]
+                               if (ok and L["ocr"] and docio.ocr_available()) else [])
                 ocr_ok = True
-                if ok and ocr:
-                    ocr_ok, ocr_log = await run.io_bound(docio.download_ocr_language, ocr)
+                if missing_ocr:
+                    ocr_ok, ocr_log = await run.io_bound(docio.download_ocr_language, missing_ocr)
                     log = f"{log}\n--- OCR ---\n{ocr_log}"
                 note.dismiss()
+                if ok:
+                    # A freshly downloaded model becomes the active one — that is the whole
+                    # point of downloading a bigger model.
+                    nlp_suggester.set_active_model(L["code"], m["name"])
                 if ok and ocr_ok:
-                    ui.notify(f"{label} installed — name detection and OCR now active for {label} text",
-                              color="positive")
-                elif ok and not ocr_ok:
-                    ui.notify(f"{label} detection installed, but its OCR model didn't download "
-                              "(no internet, or blocked). See the console window.",
+                    ui.notify(f"{m['name']} installed — {L['label']} detection now uses it",
+                              color="positive", multi_line=True)
+                elif ok:
+                    ui.notify(f"{m['name']} installed and in use, but the {L['label']} OCR model "
+                              "didn't download (no internet, or blocked). See the console window.",
                               color="warning", multi_line=True)
-                    print(f"\n[OCR download: {label}] FAILED:\n{log}\n")
+                    print(f"\n[OCR download: {L['label']}] FAILED:\n{log}\n")
                 else:
-                    ui.notify(f"Couldn't install {label} (no internet, or blocked). See the console window.",
+                    ui.notify(f"Couldn't install {m['name']} (no internet, or blocked). "
+                              f"{L['label']} detection is unchanged. See the console window.",
                               color="negative", multi_line=True)
-                    print(f"\n[language download: {label}] FAILED:\n{log}\n")
+                    print(f"\n[model download: {m['name']}] FAILED:\n{log}\n")
                 render.refresh()
 
             async def do_download_eng_ocr():
@@ -2244,16 +2283,24 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                     print(f"\n[English OCR download] FAILED:\n{log}\n")
                 render.refresh()
 
-            async def do_remove(code, label, ocr):
-                note = ui.notification(f"Removing {label}…", spinner=True, timeout=None)
-                ok, log = await run.io_bound(nlp_suggester.remove_language, code)
-                if ocr:
-                    await run.io_bound(docio.remove_ocr_language, ocr)
+            async def do_remove(m, L):
+                note = ui.notification(f"Removing {m['name']}…", spinner=True, timeout=None)
+                ok, log = await run.io_bound(nlp_suggester.remove_model, m["name"])
+                # Drop the language's OCR model only when its last detection model goes,
+                # so removing one model doesn't break scanned-page OCR for the others.
+                status = next((x for x in nlp_suggester.language_status() if x["code"] == L["code"]), None)
+                last_one = bool(status) and not any(x["installed"] for x in status["models"])
+                if ok and last_one and L["ocr"]:
+                    await run.io_bound(docio.remove_ocr_language, L["ocr"])
                 note.dismiss()
-                ui.notify(f"{label} removed" if ok else f"Couldn't remove {label}",
-                          color="positive" if ok else "negative")
                 if not ok:
-                    print(f"\n[language remove: {label}] FAILED:\n{log}\n")
+                    ui.notify(f"Couldn't remove {m['name']}", color="negative")
+                    print(f"\n[model remove: {m['name']}] FAILED:\n{log}\n")
+                elif last_one:
+                    ui.notify(f"{m['name']} removed — {L['label']} detection is inactive until a "
+                              "model is downloaded again", color="positive", multi_line=True)
+                else:
+                    ui.notify(f"{m['name']} removed", color="positive")
                 render.refresh()
 
             render()
