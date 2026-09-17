@@ -6,10 +6,11 @@
  * value mappings. Nothing here is ever sent to the server for keeping; the
  * server only computes (see the client-side storage architecture doc).
  *
- * Backing stores (IndexedDB database "lethe", schema version 1):
+ * Backing stores (IndexedDB database "lethe", schema version 2):
  *   entities     keyPath "key"     { key, canonical, type, aliases, updatedAt }
  *   token_types  keyPath "id"      { id: "token_types", types: [...], updatedAt }
  *   jobs         keyPath "jobId"   metadata + (encrypted) token -> real mapping
+ *   outputs      keyPath "jobId"   the de-identified result file(s), as binary
  *   meta         keyPath "key"     { key, value }
  *
  * Sensitive mappings are encrypted in the browser with WebCrypto
@@ -21,11 +22,20 @@
   'use strict';
 
   var DB_NAME = 'lethe';
-  var DB_VERSION = 1;
-  var SCHEMA_VERSION = 1;
-  var SCHEMA_VERSION_KEY = 'lethe.schema.v1';
+  // version 2 adds the "outputs" store (result files); the upgrade is purely
+  // additive, so entities / token_types / jobs / meta are untouched.
+  var DB_VERSION = 2;
+  var SCHEMA_VERSION = 2;
+  var SCHEMA_VERSION_KEY = 'lethe.schema.v2';
+  var SCHEMA_VERSION_KEY_V1 = 'lethe.schema.v1';
   var INSTALLED_AT_KEY = 'lethe.installed.v1';
+  var PERSIST_KEY = 'lethe.persisted.v1';
+  var OUTPUT_RETENTION_KEY = 'lethe.outputs.retention.v1';
   var CHANNEL_NAME = 'lethe';
+
+  // How many result files to keep, newest first. The oldest are dropped (and
+  // their bytes deleted) once the cap is exceeded; the UI shows this number.
+  var OUTPUT_RETENTION_DEFAULT = 20;
 
   var _dbPromise = null;
   var _channel = null;
@@ -51,6 +61,10 @@
     var bytes = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return bytes;
+  }
+
+  function b64ToBlob(text, type) {
+    return new Blob([b64Decode(text)], { type: type || 'application/octet-stream' });
   }
 
   function broadcast(reason) {
@@ -97,6 +111,10 @@
         if (!db.objectStoreNames.contains('jobs')) {
           var jobs = db.createObjectStore('jobs', { keyPath: 'jobId' });
           jobs.createIndex('by_createdAt', 'createdAt', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('outputs')) {
+          var outs = db.createObjectStore('outputs', { keyPath: 'jobId' });
+          outs.createIndex('by_createdAt', 'createdAt', { unique: false });
         }
         if (!db.objectStoreNames.contains('meta')) {
           db.createObjectStore('meta', { keyPath: 'key' });
@@ -360,14 +378,159 @@
       store.delete(jobId);
       return { __value: jobId };
     }).then(function (id) {
+      // A job's result file is useless without its mapping — drop it too.
+      return run('outputs', 'readwrite', function (store) {
+        store.delete(jobId);
+        return { __value: id };
+      });
+    }).then(function (id) {
       announce('jobs');
       return id;
+    });
+  }
+
+  // ---- result files (outputs) ---------------------------------------------
+  //
+  // The de-identified result of a conversion is kept here, as the raw bytes
+  // the user downloads (a Blob — never a base64 string), so it can be fetched
+  // again after a refresh. The history list itself only ever reads job
+  // metadata; a result is opened solely when the user asks for it.
+
+  function retentionLimit() {
+    return getMeta(OUTPUT_RETENTION_KEY).then(function (value) {
+      var n = Number(value);
+      return (isFinite(n) && n > 0) ? Math.floor(n) : OUTPUT_RETENTION_DEFAULT;
+    });
+  }
+
+  function setOutputRetention(limit) {
+    var n = Number(limit);
+    if (!isFinite(n) || n <= 0) {
+      return Promise.reject(new Error('The retention limit must be a positive number.'));
+    }
+    return setMeta(OUTPUT_RETENTION_KEY, Math.floor(n)).then(function () {
+      announce('outputs');
+      // A lower cap takes effect at once, not only on the next conversion.
+      return pruneOutputs(Math.floor(n)).then(function () { return Math.floor(n); });
+    });
+  }
+
+  /** Drop every result file beyond the newest `limit` (default: the configured
+   * retention). Ordering comes from the by_createdAt index and only the keys
+   * are read, so no blob is ever loaded into memory here. */
+  function pruneOutputs(limit) {
+    var limitPromise = (limit === undefined) ? retentionLimit() : Promise.resolve(Math.floor(Number(limit)));
+    return limitPromise.then(function (n) {
+      return run('outputs', 'readwrite', function (store) {
+        var removed = { __value: [] };
+        var seen = 0;
+        var req = store.index('by_createdAt').openCursor(null, 'prev');   // newest first
+        req.onsuccess = function (ev) {
+          var cursor = ev.target.result;
+          if (!cursor) return;
+          seen += 1;
+          if (seen > n) {
+            removed.__value.push(cursor.primaryKey);
+            cursor.delete();
+          }
+          cursor.continue();
+        };
+        return removed;
+      });
+    });
+  }
+
+  /** Keep a conversion's result file. `files` is [{name, type, b64}]; the
+   * bytes are decoded and stored as Blobs, so nothing base64 survives. */
+  function saveOutput(record) {
+    var jobId = (record && record.jobId) || '';
+    var files = ((record && record.files) || []).map(function (f) {
+      return {
+        name: String((f && f.name) || 'result.bin'),
+        type: String((f && f.type) || 'application/octet-stream'),
+        blob: b64ToBlob(f && f.b64, f && f.type)
+      };
+    }).filter(function (f) { return f.blob.size > 0; });
+    if (!jobId || !files.length) {
+      return Promise.reject(new Error('There was nothing to store for that result.'));
+    }
+    var row = {
+      jobId: jobId,
+      createdAt: (record && record.createdAt) || nowIso(),
+      files: files
+    };
+    return run('outputs', 'readwrite', function (store) {
+      store.put(row);
+      return { __value: files.length };
+    }).then(function () {
+      announce('outputs');
+      return pruneOutputs(record && record.keep);
+    }).then(function (removed) {
+      return { files: files.length, evicted: removed || [] };
+    });
+  }
+
+  /** Metadata only: how many result files are kept, and which ones. */
+  function outputStats() {
+    return run('outputs', 'readonly', function (store) {
+      var out = { __value: { count: 0, jobIds: [] } };
+      var req = store.getAllKeys();
+      req.onsuccess = function () {
+        out.__value.jobIds = (req.result || []).slice();
+        out.__value.count = out.__value.jobIds.length;
+      };
+      return out;
+    }).then(function (stats) {
+      return retentionLimit().then(function (limit) {
+        stats.limit = limit;
+        return stats;
+      });
+    });
+  }
+
+  /** Download a stored result file again, straight from IndexedDB (no server
+   * round trip). Rejects with a plain-language error when it is gone. */
+  function downloadOutput(jobId) {
+    return getOne('outputs', jobId).then(function (row) {
+      var files = (row && row.files) || [];
+      if (!files.length) {
+        throw new Error('This result file is no longer stored in this browser ' +
+                        '(it was cleared, or it passed the retention limit). Add the original ' +
+                        'file again to generate a fresh de-identified copy.');
+      }
+      return files.map(function (f) {
+        var url = URL.createObjectURL(f.blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = f.name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        // Give the browser time to start the download before dropping the URL.
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+        return f.name;
+      });
+    });
+  }
+
+  /** Remove stored result files only — dictionary, token types and the
+   * conversion mappings are left alone. */
+  function clearOutputs() {
+    return run('outputs', 'readwrite', function (store) {
+      store.clear();
+      return { __value: true };
+    }).then(function () {
+      announce('outputs');
+      return true;
     });
   }
 
   // ---- backup / restore ----------------------------------------------------
 
   function exportBackup() {
+    // Result files are deliberately NOT part of the backup: the export stays a
+    // portable JSON document. A restored job keeps its mapping and can be
+    // re-identified; only its result file has to be generated again.
     return Promise.all([getEntities(), getTokenTypes(), getAll('jobs'), getMeta(INSTALLED_AT_KEY)])
       .then(function (parts) {
         return {
@@ -448,9 +611,41 @@
     });
   }
 
+  /** Ask the browser to keep this origin's data (dictionary, mappings, result
+   * files) even under disk pressure. Never rejects, never blocks the caller:
+   * a refusal only changes what the Settings page says. */
   function requestPersist() {
-    if (!navigator.storage || !navigator.storage.persist) return Promise.resolve(false);
-    return navigator.storage.persist().catch(function () { return false; });
+    var out = { supported: false, persisted: false };
+    if (!navigator.storage || !navigator.storage.persist) {
+      return setMeta(PERSIST_KEY, false).then(function () { return out; });
+    }
+    out.supported = true;
+    var already = (navigator.storage.persisted ? navigator.storage.persisted()
+                                               : Promise.resolve(false));
+    return already.catch(function () { return false; }).then(function (yes) {
+      if (yes) { out.persisted = true; return out; }
+      return navigator.storage.persist().then(function (granted) {
+        out.persisted = !!granted;
+        return out;
+      }, function () { return out; });
+    }).then(function (result) {
+      return setMeta(PERSIST_KEY, result.persisted).then(function () { return result; });
+    });
+  }
+
+  /** What the Settings page shows about persistent storage. */
+  function persistStatus() {
+    var out = { supported: !!(navigator.storage && navigator.storage.persist),
+                persisted: false, requested: false };
+    var already = (navigator.storage && navigator.storage.persisted)
+      ? navigator.storage.persisted() : Promise.resolve(false);
+    return already.catch(function () { return false; }).then(function (yes) {
+      out.persisted = !!yes;
+      return getMeta(PERSIST_KEY);
+    }).then(function (stored) {
+      out.requested = stored === true;
+      return out;
+    }).catch(function () { return out; });
   }
 
   // ---- lifecycle -----------------------------------------------------------
@@ -462,12 +657,21 @@
       cleared: false,
       installedAt: null,
       schemaVersion: SCHEMA_VERSION,
+      upgradedFrom: null,
       error: null
     };
     var marker = null;
     try { marker = window.localStorage.getItem(INSTALLED_AT_KEY); } catch (e) { marker = null; }
     return openDB().then(function () {
-      return getMeta(SCHEMA_VERSION_KEY);
+      // Version 1 wrote "lethe.schema.v1"; version 2 writes "lethe.schema.v2".
+      // Read both so an existing browser reports its real version and the
+      // upgrade (new "outputs" store, applied by onupgradeneeded) is recorded
+      // without touching any existing record.
+      return Promise.all([getMeta(SCHEMA_VERSION_KEY), getMeta(SCHEMA_VERSION_KEY_V1)]);
+    }).then(function (versions) {
+      var known = Math.max(Number(versions[0]) || 0, Number(versions[1]) || 0);
+      out.upgradedFrom = known && known < SCHEMA_VERSION ? known : null;
+      return known;
     }).then(function (storedVersion) {
       var installedAt = null;
       return getMeta(INSTALLED_AT_KEY).then(function (v) {
@@ -485,6 +689,7 @@
       }).then(function () {
         out.ok = true;
         out.installedAt = installedAt;
+        out.schemaVersion = SCHEMA_VERSION;
         try { window.localStorage.setItem(INSTALLED_AT_KEY, installedAt); } catch (e) { /* ignore */ }
         return out;
       });
@@ -528,11 +733,19 @@
     deleteJob: deleteJob,
     saveJob: saveJob,
     getMapping: getMapping,
+    saveOutput: saveOutput,
+    outputStats: outputStats,
+    downloadOutput: downloadOutput,
+    clearOutputs: clearOutputs,
+    pruneOutputs: pruneOutputs,
+    setOutputRetention: setOutputRetention,
+    outputRetentionDefault: OUTPUT_RETENTION_DEFAULT,
     exportBackup: exportBackup,
     importBackup: importBackup,
     downloadBackup: downloadBackup,
     clearAll: clearAll,
     quota: quota,
-    requestPersist: requestPersist
+    requestPersist: requestPersist,
+    persistStatus: persistStatus
   };
 })();

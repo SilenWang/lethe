@@ -45,8 +45,9 @@ Everything else goes straight to the network, untouched — the handler calls
 
 - **Uploaded documents and their extracted text** (they travel over the NiceGUI
   WebSocket, so they never reach the worker at all);
-- **De-identified / restored results** (downloaded from the page, never fetched
-  through the worker);
+- **De-identified / restored results** (the first download is served straight from
+  the page; the copy kept for re-download lives in IndexedDB and is turned into a
+  `blob:` URL locally — neither ever reaches the worker or the network);
 - **The token → real mappings** (IndexedDB only, never a request);
 - **`/api/migrate/*`** responses (POST, and already served with
   `Cache-Control: no-store`);

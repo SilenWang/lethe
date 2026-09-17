@@ -21,6 +21,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+import base64
 import html as _html
 import io
 import json
@@ -383,10 +384,16 @@ server, and never uploaded:
   the passphrase and that job can no longer be reversed.
 - **History index** — the *Past conversions* list (date, file name, redaction count)
   in plain text. It does **not** contain the real names.
+- **Result files** — the de-identified file of each recent conversion, kept exactly as
+  you downloaded it, so **Past conversions** can hand it back after a refresh, a closed
+  tab or a restart. Only the most recent 20 are kept; older ones are dropped
+  automatically, and **Settings → Browser data → Clear result files** deletes them all
+  without touching your dictionary or the conversion list.
 
 It survives refreshing and reopening the app. Clearing the browser's site data for Lethe
 erases it — **Settings → Browser data** lets you export/import a JSON backup and shows
-your stored counts, so keep a backup somewhere safe.
+your stored counts and storage usage, so keep a backup somewhere safe. The backup holds
+your dictionary, custom types and conversion mappings — result files stay in the browser.
 
 ### What it can't remove
 The tool reads the **text** of your files. It does **not** touch:
@@ -471,7 +478,9 @@ ABOUT_HTML = f"""
       <p>Your entity dictionary and the encrypted, reversible mappings are stored in <b>your
       browser only</b> (IndexedDB, isolated per browser) and never uploaded to the server. Each
       job's reversal key is encrypted in the browser with your passphrase; lose the passphrase and
-      that job can no longer be reversed. Export a backup from Settings → Browser data.</p>
+      that job can no longer be reversed. The de-identified file of each recent conversion is kept
+      in that browser too, so it can be downloaded again from Past conversions. Export a backup
+      from Settings → Browser data.</p>
       <h4>License</h4>
       <p>Lethe is released under the
       <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noreferrer">Apache
@@ -501,6 +510,35 @@ def _zip_bytes(files: dict[str, bytes]) -> bytes:
         for name, data in files.items():
             z.writestr(name, data)
     return buf.getvalue()
+
+
+# Content types for the download of a stored result file. Only the browser's
+# own downloader uses these, and a wrong guess merely changes the MIME hint.
+_MEDIA_TYPES = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".doc": "application/msword",
+    ".pdf": "application/pdf",
+    ".zip": "application/zip",
+    ".txt": "text/plain;charset=utf-8",
+    ".csv": "text/csv",
+    ".md": "text/markdown",
+    ".html": "text/html",
+    ".eml": "message/rfc822",
+}
+
+
+def _media_type(name: str) -> str:
+    return _MEDIA_TYPES.get(os.path.splitext(name)[1].lower(), "application/octet-stream")
+
+
+# Result files are kept in the browser (see client_save_output). Guard against
+# a single result that is too large to move across the browser bridge and back
+# into IndexedDB — the user is told to download it there and then.
+RESULT_KEEP_MAX_BYTES = 64 * 1024 * 1024
+# How many results the browser keeps; older ones are evicted (T8).
+RESULT_KEEP_LIMIT = 20
 
 
 def _reference_text(job_id: str, created: str, sources: list[str], token_to_real: dict) -> bytes:
@@ -663,6 +701,9 @@ async def client_save_token_types(types: list[str]) -> list[str]:
 
 
 async def client_jobs() -> list[dict]:
+    """Conversion metadata only (date, file names, count, passphrase flag).
+    Deliberately never touches the stored result blobs — the history table must
+    stay cheap no matter how large the kept results are."""
     return await _store_call("window.lethStore.listJobs()") or []
 
 
@@ -679,6 +720,53 @@ async def client_mapping(job_id: str, passphrase: str) -> dict:
 async def client_save_job(job: dict) -> str:
     """Encrypt (in the browser) and store a new conversion + its mapping."""
     return await _store_call(f"window.lethStore.saveJob({json.dumps(job)})")
+
+
+async def client_save_output(job_id: str, created: str, files: list[tuple[str, str, bytes]],
+                             keep: int) -> dict:
+    """Keep a conversion's result file(s) in the browser (IndexedDB `outputs`)
+    so they can be downloaded again after a refresh. The bytes are only
+    base64-encoded for the trip across the JS bridge; the store writes real
+    binary (Blob) values."""
+    payload = {
+        "jobId": job_id,
+        "createdAt": created,
+        "keep": keep,
+        "files": [{"name": name, "type": media_type, "b64": base64.b64encode(data).decode("ascii")}
+                  for name, media_type, data in files],
+    }
+    return await _store_call(f"window.lethStore.saveOutput({json.dumps(payload)})",
+                             timeout=180.0) or {}
+
+
+async def client_download_output(job_id: str) -> list[str]:
+    """Hand a stored result file back to the browser's downloader (no server
+    round trip). Raises BrowserStoreError when it is no longer stored."""
+    return await _store_call(f"window.lethStore.downloadOutput({json.dumps(job_id)})") or []
+
+
+async def client_output_stats() -> dict:
+    return await _store_call("window.lethStore.outputStats()") or {}
+
+
+async def client_clear_outputs() -> bool:
+    return bool(await _store_call("window.lethStore.clearOutputs()"))
+
+
+async def client_request_persist() -> dict:
+    """Ask the browser to keep this origin's data. Never raises: a refusal only
+    changes what the Settings page says."""
+    try:
+        return await _store_call("window.lethStore.requestPersist()", timeout=10.0) or {}
+    except BrowserStoreError:
+        return {}
+
+
+async def client_persist_status() -> dict:
+    try:
+        return await _store_call("window.lethStore.persistStatus()", timeout=10.0) or {}
+    except BrowserStoreError:
+        return {}
 
 
 async def storage_init() -> dict:
@@ -890,19 +978,29 @@ async def _build_index() -> None:
         with ui.tab_panel(t_dict).classes("p-0"):
             refresh_dictionary = build_dictionary_panel(token_types)
         with ui.tab_panel(t_set).classes("p-0"):
-            build_settings_panel(token_types, storage)
+            refresh_settings = build_settings_panel(token_types, storage)
 
     # Keep the browser-backed tables fresh: when the tab is opened and when the
     # store changes in this tab or another tab (BroadcastChannel).
+    # NiceGUI >= 3.6 hands the tab NAME to the handler (older releases handed
+    # the Tab element over), so match on whichever we get.
+    tab_names = {t.props.get("name") for t in (t_reid, t_dict, t_set)}
+
     def _on_tab_change(e) -> None:
-        if e.value == t_reid:
+        name = e.value if isinstance(e.value, str) else getattr(e.value, "_props", {}).get("name")
+        if name not in tab_names:
+            return
+        if name == t_reid.props.get("name"):
             refresh_history.refresh()
-        elif e.value == t_dict:
+        elif name == t_dict.props.get("name"):
             _fire_soon(refresh_dictionary)
+        elif name == t_set.props.get("name"):
+            _fire_soon(refresh_settings)
 
     tabs.on_value_change(_on_tab_change)
     ui.on("leth-data-changed",
-          lambda _e: (refresh_history.refresh(), _fire_soon(refresh_dictionary)))
+          lambda _e: (refresh_history.refresh(), _fire_soon(refresh_dictionary),
+                      _fire_soon(refresh_settings)))
 
 
 # ============================================================================
@@ -1261,6 +1359,16 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 clear_pdf_cache()
             note.dismiss()
             ref_bytes = _reference_text(job_id, created, sources, token_to_real)
+            # The file this job hands back: the single de-identified document,
+            # or one .zip bundling every output plus the reference. The very
+            # same bytes are kept in the browser, so a later re-download is
+            # identical to the first one.
+            if len(outputs) == 1:
+                dl_name, dl_bytes = next(iter(outputs.items()))
+            else:
+                bundle = dict(outputs)
+                bundle[f"{job_id}__reference.txt"] = ref_bytes
+                dl_name, dl_bytes = f"deidentified_{job_id}.zip", _zip_bytes(bundle)
 
             # The reversal key is encrypted and stored in THIS browser only
             # (IndexedDB + WebCrypto) — the server never keeps it.
@@ -1276,6 +1384,30 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 })
             except BrowserStoreError as exc:
                 save_error = str(exc)
+
+            # Keep the result file(s) in THIS browser too, so a refresh / closed
+            # tab doesn't lose them: Past conversions can hand them back later
+            # (T8). The server still serves the first download below; this is the
+            # durable copy. Failure here never blocks the conversion.
+            keep_error = ""
+            if save_error:
+                # Without a stored mapping the conversion can't be reversed, so
+                # there is nothing a kept result file could be paired with.
+                keep_error = "the reversal key could not be saved"
+            elif len(dl_bytes) > RESULT_KEEP_MAX_BYTES:
+                keep_error = (f"it is larger than {RESULT_KEEP_MAX_BYTES // (1024 * 1024)} MB and "
+                              "too big to keep in browser storage")
+            else:
+                try:
+                    await client_save_output(job_id, created,
+                                             [(dl_name, _media_type(dl_name), dl_bytes)],
+                                             RESULT_KEEP_LIMIT)
+                    # Ask for persistent storage once a result actually exists,
+                    # so the browser is less likely to evict it later. A refusal
+                    # changes only what Settings says — never the main flow.
+                    await client_request_persist()
+                except BrowserStoreError as exc:
+                    keep_error = str(exc)
 
             added = 0
             if add_dict.value:
@@ -1307,23 +1439,27 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                                  "Download the reference file below — it is the only copy of the "
                                  "token → name mapping.").classes("text-xs").style("color:var(--danger)")
                 else:
-                    ui.label("Saved in this browser (IndexedDB) — it will be listed under Re-identify. "
-                             "Use Settings → Browser data to export a backup.").classes(
-                        "text-xs text-slate-500")
+                    saved_note = ("Saved in this browser (IndexedDB) — the reversal key and the "
+                                  "result file are both kept, so you can download the same file "
+                                  "again from Re-identify → Past conversions."
+                                  if not keep_error else
+                                  f"The reversal key is saved, but the result file was not kept "
+                                  f"({keep_error}). Download it now — Past conversions can re-identify "
+                                  "the job, but it can't hand this file back again.")
+                    ui.label(saved_note).classes("text-xs text-slate-500")
+                    ui.label("Use Settings → Browser data to export a backup.").classes(
+                        "text-xs text-slate-400")
                 with ui.row().classes("items-center gap-2 flex-wrap"):
                     if len(outputs) == 1:
-                        name, data = next(iter(outputs.items()))
                         ui.button("Download de-identified file", icon="download",
-                                  on_click=lambda d=data, n=name: ui.download(d, n)).props("unelevated no-caps")
+                                  on_click=lambda d=dl_bytes, n=dl_name: ui.download(d, n)).props(
+                            "unelevated no-caps")
                         ui.button("Download reference (.txt)", icon="description",
                                   on_click=lambda: ui.download(ref_bytes, f"{job_id}__reference.txt")).props(
                             "outline no-caps")
                     else:
-                        bundle = dict(outputs)
-                        bundle[f"{job_id}__reference.txt"] = ref_bytes
-                        zipb = _zip_bytes(bundle)
                         ui.button(f"Download all {len(outputs)} files + reference (.zip)", icon="download",
-                                  on_click=lambda z=zipb: ui.download(z, f"deidentified_{job_id}.zip")).props(
+                                  on_click=lambda z=dl_bytes, n=dl_name: ui.download(z, n)).props(
                             "unelevated no-caps")
                 with ui.expansion("Show the sealed token → name mapping").classes("w-full"):
                     mcols = [{"name": "t", "label": "Token", "field": "t", "align": "left"},
@@ -1348,7 +1484,10 @@ def build_reidentify_panel():
                 ui.label("Past conversions").classes("text-base font-medium")
                 ui.button(icon="refresh", on_click=lambda: render_history.refresh()).props(
                     "flat round dense").tooltip("Refresh")
-            ui.label("Pick the conversion you want to reverse.").classes("text-sm text-slate-500")
+            ui.label(f"Pick the conversion you want to reverse. The ⤓ button on a row downloads "
+                     f"that result file again — handy after a refresh, a closed tab or a restart. "
+                     f"The last {RESULT_KEEP_LIMIT} results are kept; older ones are dropped by "
+                     "the browser.").classes("text-sm text-slate-500")
             hcols = [
                 {"name": "created", "label": "When", "field": "created", "align": "left"},
                 {"name": "source_file", "label": "Source file(s)", "field": "source_file", "align": "left"},
@@ -1360,7 +1499,13 @@ def build_reidentify_panel():
                               selection="single").classes("w-full").props("flat dense")
             htable.add_slot("body-cell-actions", '''
                 <q-td :props="props" auto-width>
+                  <q-btn v-if="props.row.has_result" flat round dense size="sm"
+                    icon="download" color="primary" aria-label="Download result file again"
+                    @click.stop="() => $parent.$emit('downloadresult', props.row)">
+                    <q-tooltip>Download this result file again</q-tooltip>
+                  </q-btn>
                   <q-btn flat round dense size="sm" icon="delete" color="grey-7"
+                    aria-label="Delete this conversion"
                     @click.stop="() => $parent.$emit('deletejob', props.row)">
                     <q-tooltip>Delete this conversion</q-tooltip>
                   </q-btn>
@@ -1374,13 +1519,22 @@ def build_reidentify_panel():
                     ui.notify(f"Couldn't read the conversion history from this browser: {exc}",
                               color="negative", multi_line=True)
                     jobs = []
+                # Which results are still kept. This reads object-store KEYS
+                # only — never a stored blob — so rendering the list stays
+                # cheap however large the kept result files are.
+                kept: set[str] = set()
+                try:
+                    kept = set((await client_output_stats()).get("jobIds") or [])
+                except BrowserStoreError:
+                    pass
                 rows = []
                 for h in jobs:
                     src = ", ".join(h.get("sourceFiles") or [])
                     rows.append({"job_id": h.get("jobId", ""),
                                  "created": (h.get("createdAt") or "").replace("T", " ")[:16],
                                  "source_file": src or "—",
-                                 "replacements": h.get("replacements", 0)})
+                                 "replacements": h.get("replacements", 0),
+                                 "has_result": h.get("jobId", "") in kept})
                 htable.rows = rows
                 htable.selected = [r for r in rows if r["job_id"] == sel["job_id"]]
                 htable.update()
@@ -1389,6 +1543,8 @@ def build_reidentify_panel():
                 sel["job_id"] = htable.selected[0]["job_id"] if htable.selected else None
                 selected_label.text = f"Selected: {sel['job_id']}" if sel["job_id"] else \
                     "Selected: none — click a row above."
+                dl_selected.visible = any(r["job_id"] == sel["job_id"] and r["has_result"]
+                                         for r in htable.rows)
 
             htable.on("selection", on_select)
 
@@ -1420,12 +1576,52 @@ def build_reidentify_panel():
 
             htable.on("deletejob", on_delete)
 
+            async def on_download_result(e):
+                """Hand a stored result file back again — byte-for-byte the file
+                this conversion produced. Nothing is regenerated and no blob is
+                read while the list renders; only this click touches it."""
+                row = e.args[0] if isinstance(e.args, list) else e.args
+                jid = row.get("job_id") if isinstance(row, dict) else None
+                if not jid:
+                    return
+                try:
+                    names = await client_download_output(jid)
+                except BrowserStoreError as exc:
+                    ui.notify(f"Couldn't download the result for {jid}: {exc}",
+                              color="warning", multi_line=True)
+                    await render_history.refresh()
+                    return
+                ui.notify(f"Downloading {', '.join(names)} again", color="primary")
+
+            htable.on("downloadresult", on_download_result)
+
         with ui.card().classes("w-full rounded-xl shadow-sm"):
             ui.label("Bring the real names back").classes("text-base font-medium")
             selected_label = ui.label("Selected: none — click a row above.").classes(
                 "text-sm").style(f"color:{PRIMARY}")
             pw = ui.input("Passphrase (if one was set)", password=True,
                           password_toggle_button=True).props("outlined dense").classes("w-full")
+
+            # Re-download of the selected conversion's result file: the same
+            # entry point, available without hunting for the row's icon.
+            async def on_download_selected():
+                jid = sel["job_id"]
+                if not jid:
+                    return
+                try:
+                    names = await client_download_output(jid)
+                except BrowserStoreError as exc:
+                    ui.notify(f"Couldn't download the result for {jid}: {exc}",
+                              color="warning", multi_line=True)
+                    await render_history.refresh()
+                    return
+                ui.notify(f"Downloading {', '.join(names)} again", color="primary")
+
+            with ui.row().classes("items-center gap-2"):
+                dl_selected = ui.button("Download this result file again", icon="download",
+                                        on_click=lambda: on_download_selected()).props(
+                    "outline no-caps")
+                dl_selected.visible = False
 
             ui.label("Give it the AI's reply — upload the file to get the SAME format back, "
                      "or paste text.").classes("text-sm text-slate-500 mt-1")
@@ -1494,7 +1690,9 @@ def build_reidentify_panel():
                                                                       f"{sel['job_id']}__reidentified.txt")).props(
                         "unelevated no-caps")
             ui.notify("Re-identified", color="positive")
-        render_history()
+        # Fill the table once the page is live (an un-awaited call to an async
+        # refreshable never renders) and whenever the tab is opened.
+        ui.timer(0.1, render_history, once=True)
     return render_history
 
 
@@ -2042,12 +2240,16 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
             ui.label("Browser data (IndexedDB)").classes("text-base font-medium")
             ui.label("Your entity dictionary, custom token types, conversion history and the encrypted "
                      "token→name mappings are stored in THIS browser only and are never uploaded to the "
-                     "server. They survive refreshing and reopening the app; clearing the browser's site "
-                     "data for Lethe erases them — so keep a backup somewhere safe.").classes(
+                     "server — and so are the de-identified result files, so you can download the same "
+                     "file again from Re-identify → Past conversions. They survive refreshing and "
+                     "reopening the app; clearing the browser's site data for Lethe erases them — so "
+                     "keep a backup somewhere safe.").classes(
                 "text-sm text-slate-500")
 
             counts_label = ui.label("Checking…").classes("text-sm").style(f"color:{PRIMARY}")
             quota_label = ui.label("").classes("text-xs text-slate-400")
+            kept_label = ui.label("").classes("text-xs text-slate-400")
+            persist_label = ui.label("").classes("text-xs text-slate-400")
 
             async def refresh_browser_summary():
                 try:
@@ -2056,8 +2258,23 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 except BrowserStoreError as exc:
                     counts_label.text = f"Browser storage unavailable: {exc}"
                     counts_label.style("color:var(--danger)")
+                    kept_label.text = ""
+                    persist_label.text = ""
                     return
                 counts_label.text = f"{len(ents)} entit(ies) · {len(jobs)} conversion(s) stored in this browser"
+                stats = {}
+                try:
+                    stats = await client_output_stats()
+                except BrowserStoreError:
+                    stats = {}
+                limit = stats.get("limit") or RESULT_KEEP_LIMIT
+                kept = stats.get("count")
+                kept_label.text = (
+                    f"Result files: {kept} of the last {limit} kept "
+                    f"(the same file you downloaded, stored in this browser)"
+                    if kept is not None else
+                    f"Result files: the last {limit} are kept in this browser"
+                )
                 try:
                     q = await _store_call("window.lethStore.quota()", timeout=5)
                 except BrowserStoreError:
@@ -2068,11 +2285,57 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                                         f"{q['quota'] / 1024 / 1024:.0f} MB (browser-managed)")
                 else:
                     quota_label.text = "Storage usage not exposed by this browser."
+                persist = await client_persist_status()
+                if persist.get("persisted"):
+                    persist_label.text = ("Persistent storage is ON — the browser will not clear these "
+                                          "files on its own.")
+                    persist_label.style("color:var(--ok, #3f7d4e)")
+                elif persist.get("supported"):
+                    persist_label.text = ("Persistent storage was not granted, so the browser may clear "
+                                          "stored result files on its own. Download what you need, or "
+                                          "install Lethe as an app to improve the odds.")
+                    persist_label.style("color:var(--warn, #9b6f16)")
+                else:
+                    persist_label.text = ("This browser does not offer persistent storage, so it may "
+                                          "clear stored result files on its own.")
+                    persist_label.style("color:var(--warn, #9b6f16)")
+
+            async def clear_results():
+                """Free the space the kept result files use. The dictionary, the
+                token types and every conversion mapping stay exactly as they
+                are — only the downloadable copies go."""
+                with ui.dialog() as dlg, ui.card():
+                    ui.label("Delete the stored result files?").classes("text-base font-medium")
+                    ui.label("This frees the space the de-identified files take in this browser. "
+                             "Your dictionary, custom token types, conversion history and "
+                             "re-identification mappings are NOT touched. Files you already "
+                             "downloaded are not affected; a file that was never downloaded "
+                             "would need to be generated again.").classes("text-sm text-slate-600")
+                    with ui.row().classes("justify-end gap-2 w-full"):
+                        ui.button("Cancel", on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                        ui.button("Delete result files", color="negative",
+                                  on_click=lambda: dlg.submit(True)).props("unelevated no-caps")
+                if not await dlg:
+                    return
+                try:
+                    await client_clear_outputs()
+                except BrowserStoreError as exc:
+                    ui.notify(f"Couldn't clear the result files: {exc}", color="negative",
+                              multi_line=True)
+                    return
+                await refresh_browser_summary()
+                ui.notify("Stored result files deleted — dictionary and conversions kept",
+                          color="positive")
 
             with ui.row().classes("items-center gap-2 mt-1"):
                 ui.button("Export backup (.json)", icon="download",
                           on_click=lambda: ui.run_javascript("window.lethStore.downloadBackup()")).props(
-                    "outline no-caps")
+                    "outline no-caps").tooltip(
+                    "Dictionary, custom types and conversion mappings — result files stay in the "
+                    "browser and are not part of the backup")
+                ui.button("Clear result files", icon="delete_sweep",
+                          on_click=lambda: clear_results()).props("outline no-caps").tooltip(
+                    "Deletes only the stored result files")
                 ui.html('<input type="file" id="leth-backup-file" accept=".json,application/json" '
                         'style="display:none">')
                 ui.button("Import backup (.json)", icon="upload",
@@ -2099,7 +2362,8 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 with ui.dialog() as dlg, ui.card():
                     ui.label("Erase ALL browser data for Lethe?").classes("text-base font-medium")
                     ui.label("This permanently deletes your dictionary, custom token types, conversion "
-                             "history and every re-identification mapping stored in this browser. "
+                             "history, every re-identification mapping and every stored result file in "
+                             "this browser. "
                              "Export a backup first if you might need any of it.").classes(
                         "text-sm text-slate-600")
                     with ui.row().classes("justify-end gap-2 w-full"):
@@ -2225,6 +2489,10 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
         with ui.card().classes("w-full rounded-xl shadow-sm"):
             ui.label("About Lethe").classes("text-base font-medium")
             ui.html(ABOUT_HTML)
+
+    # Lets the tab handler refresh the browser-storage summary (counts, quota,
+    # result-file retention, persistent-storage state) whenever Settings opens.
+    return refresh_browser_summary
 
 
 def _session_secret() -> str:
