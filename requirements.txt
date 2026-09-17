@@ -1,4 +1,4 @@
-nicegui
+nicegui>=3.16.0
 python-docx
 python-pptx
 openpyxl

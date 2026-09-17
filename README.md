@@ -125,6 +125,12 @@ with a passphrase and stored only on your computer.
   most recent 20 are kept; older ones are dropped automatically, and
   **Settings → Browser data → Clear result files** deletes them all without touching your
   dictionary, token types or conversion list.
+- **No server-side leftovers:** the server holds only what one run needs — temporary
+  working copies of the uploaded documents and their extracted text. Those are deleted
+  automatically **5 minutes after your last action** (configurable via
+  `LETHE_JOB_TTL_SECONDS`), and immediately when you click *Start over*; a sweep also
+  clears any leftovers at startup and shutdown. Nothing user-identifying is written to
+  the server's logs.
 - **Review before anything is written:** Lethe shows every proposed redaction,
   highlighted in the document — nothing is changed until you confirm.
 - **Multi-language (detection + OCR):** adding a language in Settings (Chinese, Japanese,
@@ -200,6 +206,7 @@ app.py  (NiceGUI UI)
           nlp_suggester.py   Presidio + spaCy suggestions (optional)
           vault.py           legacy vault codec (one-time DATA_DIR migration)
           store.py           dictionary logic (pure; data lives in the browser)
+          runtime.py         5-minute TTL workspace for one-off computation files
           web_static/        theme assets + client-store.js (IndexedDB/WebCrypto)
 ```
 
@@ -207,10 +214,12 @@ The UI is a thin layer over the `lethe` package; all detection, redaction and st
 logic lives there with no UI coupling. User data — your dictionary, custom token types,
 conversion history, the encrypted token→name mappings and the de-identified result files —
 lives in **the browser** (IndexedDB, isolated per browser profile) and never goes inside
-the package or on the server. The per-user data directory (`DATA_DIR`) only holds program resources such as
-the OCR models and the NiceGUI session secret; a legacy install's `entities.json`,
-`token_types.json` and `vault/` are imported into the browser once via
-Settings → Migrate old server-side data and then archived in place.
+the package or on the server. The per-user data directory (`DATA_DIR`) only holds program
+resources such as the OCR models and the NiceGUI session secret, plus the `runtime/`
+workspace holding the temporary files of a run in progress (5-minute sliding TTL, then
+deleted); a legacy install's `entities.json`, `token_types.json` and `vault/` are imported
+into the browser once via Settings → Migrate old server-side data and then archived in
+place.
 
 ## Limitations
 

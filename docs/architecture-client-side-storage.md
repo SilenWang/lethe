@@ -204,12 +204,9 @@ DB: "lethe"  version 2        （version 1 → 2 为纯加法升级：只新增 
 | `build_settings_panel()` 的「Files & folders」 | 展示 `DATA_DIR` 与「打开文件夹」 | 改为「浏览器数据（IndexedDB）」卡片（配额、导出备份、导入备份、清空）+ 旧数据迁移卡片 + 只读的服务端路径说明 |
 | `ui.run(storage_secret=…)` | 硬编码 `"deident-local"` | 每次安装随机生成并持久化到 `DATA_DIR/.session_secret`（只保护 NiceGUI 会话，不含用户数据） |
 | 存储被清空/驱逐 | 无处理 | 缺 `lethe.installed.v1` 标记时显示显式警告横幅 |
-| 生成结果页的服务端 TTL 提示 | — | **未实现**：属任务 4；届时展示「服务端临时副本将在 N 分钟后清除 / 过期后自动重传」 |
+| 生成结果页的服务端 TTL 提示 | — | 已实现（T4）：结果卡片显示「服务端临时副本将在 N 分钟后清除」，设置页新增「服务端临时文件（自动删除）」路径行 |
 
-> **上传字节的生命周期归属（D2，归任务 4 落实）：** 当前实现把每个上传文件的原始字节存进 `build_deidentify_panel()` 的 `files` 闭包，在**页面会话存活期间常驻服务端内存**；它不在 §7 的 `runtime/` 注册表里，因此不受 5 分钟 TTL 管理，只随会话结束（断开 / 关闭标签页）由闭包释放。这满足决策 3 的「服务端不落盘」，但服务端内存中确实存在上传字节。任务 4（VYB-359）需二选一并在实现与隐私说明中落地：
->
-> - **(a) 推荐**：把上传字节移入 `runtime/<job_id>/`，纳入 §7 的注册表与 TTL 统一释放（内存与磁盘都受管），或在检测 / 脱敏完成后显式从闭包中移除该文件条目；
-> - **(b)** 接受「会话闭包 = 会话期临时区、随会话销毁」的语义，并在任务 4 文档与隐私说明中显式写清该边界。
+> **上传字节的生命周期归属（D2，已由 T4 按方案 (a) 落实）：** 改造前实现把每个上传文件的原始字节存进 `build_deidentify_panel()` 的 `files` 闭包，在页面会话存活期间常驻服务端内存，不在 §7 的 `runtime/` 注册表内、不受 TTL 管理。T4（VYB-359）选择方案 **(a)**：`on_file()` 把字节写入 `runtime/<job_id>/source/` 并登记进 §7 注册表，`files` 闭包只保留指针（`sidx`/`rel`）与提取文本；生成脱敏文件时从 runtime 读回字节，内存副本仅在单次运算期间存在。因此上传文档与中间文件都随 5 分钟滑动 TTL（或 *Start over* / 断开 / 进程退出）一并删除。方案 (b) 未采用。
 
 ## 7. 服务端临时数据生命周期（TTL）
 
@@ -224,7 +221,7 @@ DB: "lethe"  version 2        （version 1 → 2 为纯加法升级：只新增 
 
 > **`DATA_DIR` 在改造后的角色（与迁移归档的边界）：** `DATA_DIR` 仍是应用数据根目录，稳态下只承载**非用户数据**——`runtime/`（临时工作区，任务 4 实现）、`tessdata/`（OCR 程序模型）、`.session_secret`。旧用户数据（`entities.json`、`token_types.json`、`vault/`）在迁移前暂存于此，迁移归档只移动这三项到 `DATA_DIR/migrated-<ts>/`（`migrated.flag` 在归档目录内，见 §11.1 第 5 步），**绝不整体改名或删除 `DATA_DIR`**，因此 `runtime/` 与 `tessdata/` 不会被迁移动作波及。§7.3/§7.4 的清理只作用于 `runtime/`，与迁移归档互不影响。
 >
-> **当前尚未纳入 runtime/ 的对象（D2）：** 上传文档的原始字节目前仍由 `build_deidentify_panel()` 的会话闭包持有（见 §6.3 末尾），不在本节注册表内、不受 TTL 管理；任务 4 需按 §6.3 的 (a)/(b) 方案之一决定其归属。
+> **原 D2 遗留（已由 T4 解决）：** 上传文档的原始字节此前由 `build_deidentify_panel()` 的会话闭包持有，不在本节注册表内、不受 TTL 管理。T4 按 §6.3 方案 (a) 实施：上传即写入 `runtime/<job_id>/source/`，闭包只保留指针，字节纳入本节注册表与 TTL（内存中的临时副本仅在单次运算期间存在）。
 
 ### 7.2 计时起点（已定）
 
@@ -304,16 +301,16 @@ DB: "lethe"  version 2        （version 1 → 2 为纯加法升级：只新增 
 
 | 文件 | 状态 | 改动点 | 影响说明 |
 |---|---|---|---|
-| `app.py` | 已实现（T2） | 新增 `/api/migrate/*` 三端点（`register_api()`，仅迁移）；`_store_call` 桥接 IndexedDB；词典/历史/类型改为异步读客户端库；设置页改为浏览器数据卡片 + 迁移卡片 + 存储被清空横幅；`storage_secret` 随机化；上传仍走 `ui.upload`，字节留在会话闭包（D2，归 T4 处置） | 单文件改动量大（≈5 个面板 + 迁移 UI）。检测/脱敏算法调用不变；用户数据读写全部改道浏览器；计算流程仍走 NiceGUI 通道（§6.2） |
-| `lethe/__init__.py` | 待实现（T4） | 新增 `RUNTIME_DIR`、`JOB_TTL_SECONDS` 解析与导出；导出新 `runtime` 模块 | `DATA_DIR` 稳态只承载非用户数据（`runtime/`、`tessdata/`、`.session_secret`）；旧用户数据迁移后归档在 `migrated-*` |
+| `app.py` | 已实现（T2）+ 已实现（T4） | 新增 `/api/migrate/*` 三端点（`register_api()`，仅迁移）；`_store_call` 桥接 IndexedDB；词典/历史/类型改为异步读客户端库；设置页改为浏览器数据卡片 + 迁移卡片 + 存储被清空横幅；`storage_secret` 随机化；T4：上传字节写入 `runtime/`（D2 方案 (a)），`/api/*` 请求前机会式清扫，结果卡片与设置页展示 TTL | 单文件改动量大（≈5 个面板 + 迁移 UI）。检测/脱敏算法调用不变；用户数据读写全部改道浏览器；计算流程仍走 NiceGUI 通道（§6.2） |
+| `lethe/__init__.py` | 已实现（T4） | 新增 `RUNTIME_DIR`、`JOB_TTL_SECONDS`、`JOB_MAX_LIFETIME_SECONDS` 解析与导出；导出新 `runtime` 模块 | `DATA_DIR` 稳态只承载非用户数据（`runtime/`、`tessdata/`、`.session_secret`）；旧用户数据迁移后归档在 `migrated-*` |
 | `lethe/core.py` | 已实现（基本不变） | 检测/替换/还原与 token 分配保持现状（服务端 `assign_tokens()`）；`items_to_dict/from_dict` 序列化辅助**暂未新增**，仅当实施 §6.2 可选 REST 路径时才需要 | 行为零变化；任务 2 未依赖这些辅助 |
 | `lethe/docio.py` | 待实现（T4 局部） | `tessdata` 仍在 `DATA_DIR`（程序资源，不受 TTL 管理）；临时文件统一走 runtime、`clear_pdf_cache()` 的调用点由任务 4 明确 | 文档格式处理逻辑不变 |
 | `lethe/nlp_suggester.py` | 保留 | 无数据边界改动；模型下载/卸载保持服务端；模型目录不纳入 TTL | 行为不变；与任务 6（VYB-357）解耦 |
 | `lethe/store.py` | 已实现（T2） | 移除活动态文件读写；保留纯逻辑 `entities_to_dicts()/rows_to_entities()/merge_entities()`，新增 legacy 读取 `legacy_user_data_present()/legacy_load_entities()/legacy_load_token_types()` | 破坏性变更：旧 `load_entities/save_entities` 语义移除；`tests/test_smoke.py` 等已改为纯函数用例 |
 | `lethe/vault.py` | 已实现（T2） | 稳态不再写盘；保留 Fernet 编解码 `encrypt_record()/decrypt_record()` 与 legacy 读取 `legacy_list_jobs()/legacy_read_index()/legacy_read_job()/legacy_history()/legacy_export()`；`legacy_archive(data_dir)` 把三项旧数据归档到 `DATA_DIR/migrated-<ts>/` 并写 `migrated.flag`（无多余参数） | 破坏性变更：旧 `save_job/load_job/list_jobs/delete_job/history` 移除；客户端承担加密与历史；归档不动 `runtime/`、`tessdata/` |
 | `lethe/web_static/` | 已实现（T2） | 新增 `client-store.js`（IndexedDB + WebCrypto + BroadcastChannel + 备份导出/导入/清空/持久化申请）+ `migration.js`（迁移与备份导入 UI 粘合）；不引入 `session.js`（上传/下载仍走 NiceGUI 通道）；任务 3 追加 `manifest.webmanifest`、`sw.js`、图标 | T2 与 T3 共享静态资源；service worker 只缓存静态资源，**不缓存**文档与结果 |
-| 新增 `lethe/runtime.py` | 待实现（T4） | TTL 注册表、目录管理、三层清理器、日志 | 任务 4 核心；同时处理 §6.3 D2 的会话闭包字节归属（方案 (a) 时） |
-| `tests/` | 已实现（T2）+ 待补 | 新增 `tests/test_storage_migration.py`（Python 纯逻辑）与 `tests/browser/test_client_store.py`（Playwright，5 项，覆盖隔离/往返/迁移/备份/类型持久化）；任务 4 补 TTL 单测，另补 D3 的「错口令不归档」浏览器用例 | 现有 docx/pptx/xlsx/pdf/email 格式测试不回归 |
+| 新增 `lethe/runtime.py` | 已实现（T4） | TTL 注册表、目录管理、三层清理器、结构化日志；`RuntimeStore` 可注入时钟便于测试 | 任务 4 核心；已按 §6.3 方案 (a) 接管会话闭包中的上传字节 |
+| `tests/` | 已实现（T2）+ 已实现（T4） | 新增 `tests/test_storage_migration.py`（Python 纯逻辑）与 `tests/browser/test_client_store.py`（Playwright，5 项，覆盖隔离/往返/迁移/备份/类型持久化）；T4 已补 `tests/test_runtime_ttl.py`（可注入时钟）；另补 D3 的「错口令不归档」浏览器用例 | 现有 docx/pptx/xlsx/pdf/email 格式测试不回归 |
 | `README.md` / `docs/` | 待实现（T7） | 更新「存储与隐私」描述、备份说明、TTL 行为 | 任务 7 负责终稿；本任务先提供架构依据 |
 
 ## 10. 选项与推荐（无遗留待拍板事项）
@@ -355,14 +352,14 @@ DB: "lethe"  version 2        （version 1 → 2 为纯加法升级：只新增 
 | 浏览器存储被清空/更换设备 | 丢失词典与还原能力 | 备份导出/导入、`storage.persist()`、界面持续提示 |
 | 迁移中口令/明文映射短暂驻留服务端内存 | 理论泄露面 | 一次性、仅本机回环、单请求作用域（不落盘、响应写出即释放）+ 端点超时与体量上限（§7.6）、日志白名单 |
 | 异步桥接引入时序 bug（面板先于数据渲染） | 界面空列表或竞态 | 骨架 + `refresh()` 模式；写入用事务；`BroadcastChannel` 同步 |
-| NiceGUI 依赖未固定版本 | 升级后行为/API 差异 | T2 已在 NiceGUI 3.16.0 验证通过；建议后续给 `pyproject.toml` 加最低版本约束（`nicegui>=3.16.0`）——非本次返修项，未实施 |
-| 上传字节驻留会话闭包（D2） | 服务端内存中保留上传内容，不受 TTL 管理 | 任务 4 按 §6.3 D2 的 (a)/(b) 方案之一落地并在隐私说明中写清 |
+| NiceGUI 依赖未固定版本 | 升级后行为/API 差异 | T2 已在 NiceGUI 3.16.0 验证通过；T4 已给 `pyproject.toml` / `requirements.txt` 加最低版本约束 `nicegui>=3.16.0` |
+| 上传字节驻留会话闭包（D2） | 服务端内存中保留上传内容，不受 TTL 管理 | T4 已按 §6.3 D2 方案 (a) 落地：上传字节移入 `runtime/<job_id>/source/`，纳入 §7 注册表与 TTL，闭包只保留指针；隐私说明已更新 |
 | README 中「无服务端」表述过时 | 用户误解数据边界 | 任务 7 统一更新文案与文档 |
 
 ## 12. 与后续任务的交接结论
 
 - **任务 2（VYB-360）**：**已完成并合入 `dev`（`f673686`）**。实现与 §4/§5/§6.3 一致：IndexedDB 库、浏览器加密、备份、迁移端点、会话密钥随机化；计算流程仍走 NiceGUI 通道，REST 端点未实施（§6.2 降级为可选）。已核验「两个 profile 互不可见、重开仍在、服务端不再读写 `entities.json`/`token_types.json`/`vault/`（归档目录 `migrated-*` 除外，仅供回退）」。
 - **任务 3（VYB-361）**：**已完成（待合入 `dev`）**。`web_static/` 新增 `manifest.webmanifest`、`sw.js` 与 `icons/`（192/512/maskable PNG，`tools/make_pwa_icons.py` 生成）；`app.py` 以 `/manifest.webmanifest`、`/sw.js`（带 `Service-Worker-Allowed: /`）提供二者并在页面注册，`/sw.js?v=<APP_VERSION>` 负责版本轮换。SW 只缓存 `STATIC_PATHS` 白名单内的静态资源（JS/图标/字体/manifest），**不缓存**用户文档/结果/映射、`/api/*`、页面 HTML 与任何非 GET 请求；安装、独立窗口与缓存边界见 `docs/pwa.md`，自动化证据见 `tests/test_pwa_assets.py` 与 `tests/browser/test_pwa.py`。
-- **任务 4（VYB-359）**：实现 `lethe/runtime.py` 与 §7 的三层清理；按 §7.5 的脚本/单测给出可重复验证输出；**D2** 需同时解决会话闭包中的上传字节归属（§6.3 D2，推荐方案 (a)：移入 `runtime/<job_id>/` 统一 TTL 管理）；`/api/runtime` 仅在实施 §6.2 可选 REST 路径时作为调试自检端点。
+- **任务 4（VYB-359）**：**已完成（T4）**——`lethe/runtime.py` 与 §7 的三层清理已实现（`RuntimeStore` 可注入时钟），`tests/test_runtime_ttl.py` 与 `tools/verify_ttl.py` 提供可重复验证；**D2** 已按方案 (a) 落地（上传字节移入 `runtime/<job_id>/source/`，闭包只保留指针）；`/api/runtime` 未实施（§6.2 可选 REST 路径未启用，按方案不提供调试端点）。
 - **任务 8（VYB-375）**：**已实现**。IndexedDB 升到 version 2 并新增 `outputs` store（keyPath `jobId`，二进制 Blob，索引 `by_createdAt`）；生成后立即把结果字节落库并调用 `navigator.storage.persist()`；Re-identify 列表每行提供「重新下载结果」入口，列表渲染只做键查询；设置页显示 `navigator.storage.estimate()` 的已用/上限、结果保留上限与持久化状态，并提供「清空结果文件」（只清 `outputs`）；默认保留最近 20 个结果，超出即淘汰最旧；结果缺失时给出重新生成的明确提示。验证见 `tests/browser/test_client_store.py` 中新增的 4 个用例。顺带修复：NiceGUI ≥3.6 的 tab 事件回传的是 tab **名称**（不再是 Tab 对象），原 `_on_tab_change` 因此从不匹配，导致切到 Re-identify / Entity dictionary 时面板不刷新——现已按名称匹配，并把历史表首渲染改为 `ui.timer(0.1, …)`（原先是未 await 的异步 refreshable 调用，从不执行）。
 - **任务 7（VYB-358）**：把「服务端 5 分钟无残留（含 D2 会话闭包字节的处置结果）」「多浏览器隔离」「SW 不缓存用户文档」列为回归必测，并更新 README/使用文档中的存储与隐私说明。
