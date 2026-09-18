@@ -250,6 +250,7 @@
   "settings.clear_results_title": "Delete the stored result files?",
   "settings.clear_results_warn": "This frees the space the de-identified files take in this browser. Your dictionary, custom token types, conversion history and re-identification mappings are NOT touched. Files you already downloaded are not affected; a file that was never downloaded would need to be generated again.",
   "settings.clear_results": "Clear result files",
+  "settings.clear_results_confirm": "Delete result files",
   "settings.clear_results_tip": "Deletes only the stored result files",
   "settings.clear_results_done": "Stored result files deleted — dictionary and conversions kept",
   "settings.cant_clear_results": "Couldn't clear the result files: {error}",

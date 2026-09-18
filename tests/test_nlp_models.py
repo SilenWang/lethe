@@ -8,6 +8,8 @@ import os
 import sys
 import tempfile
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from lethe import nlp_suggester  # noqa: E402
@@ -77,7 +79,13 @@ def test_active_model_prefers_default_and_falls_back():
     the bundled small model is the offline fallback, and unknown/stale choices
     are ignored."""
     _with_temp_selection()
-    fallback = "en_core_web_sm"  # bundled, always installed
+    if not any(nlp_suggester.is_installed(m["name"])
+               for L in nlp_suggester.LANGUAGES if L["code"] == "en"
+               for m in L["models"]):
+        # Lean install: the [nlp] extra (spaCy + en_core_web_sm) isn't present,
+        # so there is no model to fall back to and active_model() is None.
+        pytest.skip("no spaCy models installed (lean install)")
+    fallback = "en_core_web_sm"  # bundled with the [nlp] extra
     expected = ("en_core_web_lg" if nlp_suggester.is_installed("en_core_web_lg")
                 else fallback)
     assert nlp_suggester.active_model("en") == expected

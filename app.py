@@ -2336,7 +2336,7 @@ def build_settings_panel(tr, custom_types: list[str] | None = None, storage: dic
                     ui.label(tr("settings.clear_results_warn")).classes("text-sm text-slate-600")
                     with ui.row().classes("justify-end gap-2 w-full"):
                         ui.button(tr("reid.cancel"), on_click=lambda: dlg.submit(False)).props("flat no-caps")
-                        ui.button(tr("settings.clear_results"), color="negative",
+                        ui.button(tr("settings.clear_results_confirm"), color="negative",
                                   on_click=lambda: dlg.submit(True)).props("unelevated no-caps")
                 if not await dlg:
                     return
