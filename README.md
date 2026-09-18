@@ -145,6 +145,14 @@ with a passphrase and stored only on your computer.
   regardless.
 - **Themed desktop UI:** a NiceGUI app with a classical light/dark "river of oblivion"
   skin.
+- **Bilingual interface (中文 / English):** a language switcher in the header flips the
+  whole UI between Chinese and English instantly — titles, buttons, hints, errors and
+  settings alike — and remembers your choice in the browser. First visit follows
+  `?lang=`, the saved cookie, then your browser language, defaulting to Chinese.
+- **Installable as an app (PWA):** Chromium browsers offer **Install Lethe**, after which
+  it runs in its own window from a launcher icon. The service worker caches **only the
+  app's own static assets** — never a document, a result or a mapping. See
+  [docs/pwa.md](docs/pwa.md).
 - **Ships everywhere:** a Windows installer and portable bundle (no Python needed), or
   `pipx install` on Windows / macOS / Linux.
 
@@ -172,6 +180,26 @@ Settings downloads and switches between those models on demand, per language.
 
 The Windows installer and portable bundle embed their own Python, so they need **no
 Python on the target machine**.
+
+### Install it as an app (PWA)
+
+Chrome / Edge can install Lethe as a standalone-window app:
+
+1. Start Lethe and open it at `http://127.0.0.1:8731` (or `http://localhost:8731`).
+   Installation needs a **secure context** — `localhost` counts, a plain LAN IP does not,
+   so install from the machine running the server.
+2. Click the **Install** icon in the address bar (or *Cast, save and share → Install page
+   as app*) and accept.
+3. Lethe opens in its own window with a launcher icon; a first-launch prompt asks for
+   persistent storage so the browser is less likely to evict your dictionary and mappings.
+
+The service worker caches **only** the app's static shell — never your documents, results
+or mappings. Cache boundary, install requirements and update behaviour:
+[docs/pwa.md](docs/pwa.md).
+
+For a consolidated Chinese-language usage & deployment guide (PWA, language switching,
+model download/switch, the 5-minute TTL and where every kind of data lives), see
+[docs/user-guide.md](docs/user-guide.md).
 
 ## How it works — the tabs
 

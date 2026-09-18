@@ -250,6 +250,7 @@
   "settings.clear_results_title": "删除已保存的结果文件？",
   "settings.clear_results_warn": "这会释放脱敏文件在本浏览器中占用的空间。你的词典、自定义令牌类型、转换历史和重新识别映射都不会受影响。已下载的文件不受影响；从未下载过的文件需要重新生成。",
   "settings.clear_results": "清除结果文件",
+  "settings.clear_results_confirm": "删除结果文件",
   "settings.clear_results_tip": "仅删除已保存的结果文件",
   "settings.clear_results_done": "已删除保存的结果文件——词典与转换记录保留",
   "settings.cant_clear_results": "无法清除结果文件：{error}",
