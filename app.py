@@ -51,6 +51,7 @@ from lethe import (
     entities_to_dicts,
     extract_text,
     file_kind,
+    i18n,
     nlp_suggester,
     pdf_warnings,
     read_xlsx_grid,
@@ -93,19 +94,81 @@ def _sanitize_type(s: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "_", (s or "").strip()).strip("_").upper()
 
 
-def _ttl_text() -> str:
+def _ttl_text(tr) -> str:
     """Human phrasing for the server-side runtime TTL (default 5 minutes)."""
     secs = float(JOB_TTL_SECONDS)
     if secs >= 60:
         mins = secs / 60
-        return f"{mins:.0f} minutes" if abs(mins - round(mins)) < 1e-6 else f"{mins:.1f} minutes"
-    return f"{secs:.0f} seconds"
+        count = f"{mins:.0f}" if abs(mins - round(mins)) < 1e-6 else f"{mins:.1f}"
+        return tr("ttl.minutes", count=count)
+    return tr("ttl.seconds", count=f"{secs:.0f}")
 
 
-SOURCE_BADGE = {"dictionary": ("Known entity", "deep-purple-6"),
-                "pattern": ("Pattern", "blue-grey-6"),
-                "suggestion": ("Suggested", "amber-8"),
-                "manual": ("Manual", "pink-7")}
+# Source badges: label (a locale key — translated when a row is rendered)
+# plus the Quasar colour for the review table.
+SOURCE_BADGE = {"dictionary": ("badge.known", "deep-purple-6"),
+                "pattern": ("badge.pattern", "blue-grey-6"),
+                "suggestion": ("badge.suggested", "amber-8"),
+                "manual": ("badge.manual", "pink-7")}
+
+
+# The Settings → "Detection & OCR languages" list is built from the engine's
+# nlp_suggester language table, whose names are English. The UI maps each
+# language to a locale key so the list follows the interface language; an
+# unknown code falls back to the engine's own name, so a language added to the
+# engine later still renders (just untranslated).
+LANG_LABEL_KEYS = {"en": "lang.en", "zh": "lang.zh", "ja": "lang.ja", "ko": "lang.ko"}
+
+
+def _lang_name(tr, code: str, fallback: str) -> str:
+    """Localised display name for a detection / OCR language."""
+    key = LANG_LABEL_KEYS.get(code)
+    return tr(key) if key and i18n.has_key(key) else fallback
+
+
+# The browser store (web_static/client-store.js) reports failures in English.
+# The ones a user can actually hit get their own localised sentence; anything
+# else keeps its detail appended to a localised sentence, so a Chinese page
+# never shows a bare English message. Matched by prefix — the JS message for a
+# missing result file ends with advice the locale string already carries.
+STORE_ERROR_KEYS = (
+    ("Wrong passphrase, or the stored mapping is corrupted.", "reid.wrong_passphrase"),
+    ("That conversion is no longer in this browser.", "reid.key_missing"),
+    ("This result file is no longer stored in this browser", "reid.result_gone"),
+)
+
+
+def _store_error(tr, exc, fallback_key: str, **kw) -> str:
+    """Localised text for a browser-store failure."""
+    msg = str(exc)
+    for prefix, key in STORE_ERROR_KEYS:
+        if msg.startswith(prefix):
+            return tr(key)
+    return tr(fallback_key, error=exc, **kw)
+
+
+# The Settings language list also shows engine notes (nlp_suggester's language
+# and model descriptions). They are keyed the same way — by their English text —
+# so the panel follows the interface language; anything unmapped falls back to
+# the engine's own wording rather than showing a locale key.
+ENGINE_NOTE_KEYS = {
+    "Latin script — checked in every document": "langnote.en",
+    "CJK script — run when Chinese characters appear": "langnote.zh",
+    "CJK script — run when Japanese characters appear": "langnote.ja",
+    "Hangul script — run when Korean characters appear": "langnote.ko",
+    "Bundled — works fully offline (fallback until lg is installed)": "modelnote.en_sm",
+    "Default — best recall (word vectors)": "modelnote.en_lg",
+    "Transformer — most accurate, heaviest": "modelnote.en_trf",
+    "Default — best recall for Chinese names": "modelnote.zh_lg",
+}
+
+
+def _engine_note(tr, text: str) -> str:
+    """Localised engine-supplied note (falls back to the engine's own text)."""
+    if not text:
+        return text
+    key = ENGINE_NOTE_KEYS.get(text)
+    return tr(key) if key and i18n.has_key(key) else text
 
 
 def _svg_uri(svg: str) -> str:
@@ -322,138 +385,6 @@ body.body--dark ::selection{background:#5a467e;color:#fdfbf6;}
 """.replace("__MARK_LIGHT__", _MARK_LIGHT).replace("__MARK_DARK__", _MARK_DARK) \
    .replace("__MEANDER_LIGHT__", _MEANDER_LIGHT).replace("__MEANDER_DARK__", _MEANDER_DARK)
 
-GUIDE_MD = """
-### What this tool does
-Replaces real people & counterparty names with placeholder tokens (like
-`[PERSON_001]`, `[COUNTERPARTY_001]`) **before** you send a document to an AI —
-then puts the real names back into the AI's reply. Everything runs on this
-computer; nothing is ever sent anywhere.
-
-### 1 · De-identify
-1. Drag in one or more **Word / PowerPoint / PDF / Excel / email** files (`.eml`,
-   Outlook `.msg`, or `.html`) — or click *Try a sample memo*.
-2. The right pane shows the document with detected names **highlighted**
-   (amethyst = person, gold = counterparty, grey = email/phone/account).
-3. In the **Review** list:
-   - **Tick** what to remove. (Suggestions are off by default.)
-   - **Click a row** to jump to it in the document.
-   - Fix a wrong **Type** using its dropdown.
-   - Missed something? **Select the text** in the document, then **Redact selection**.
-   - Edited your dictionary? Press **↻** to re-scan.
-4. Optionally set a **passphrase**, then **Generate**. You get the de-identified
-   file(s), a **reference** list of tokens, and a **Job ID**.
-
-**When you hand the file to an AI**, add an instruction like *"Keep any
-`[TOKEN_NNN]` placeholders exactly as written."* The AI can rewrite, summarise or
-translate the document however you like — it just needs to leave the tokens intact
-so the real names can go back afterwards.
-
-### 2 · Re-identify
-The AI's reply can be a **completely different document** from the one you sent —
-a summary, a redraft, a translation, a table. Re-identify simply swaps every token
-it finds back to the real name, so it works on whatever text you give it; it never
-needs the original file.
-
-1. Pick the conversion from **Past conversions**.
-2. Enter the passphrase (if you set one).
-3. **Upload the AI's reply file** (same format back) *or* paste its text.
-4. Click **Re-identify** — the real names are restored, and the count shows how
-   many tokens were swapped back.
-
-Restoration matches tokens **exactly** (`[PERSON_001]`). If the AI changed a token —
-dropped the brackets, changed its case, or split it across a line — that one name
-won't be restored, so glance over the result and check the count looks right.
-
-### 3 · Restore — when the tokens didn't come from Lethe
-Use this when you already have a document full of `[BRACKETED]` placeholders that
-**Lethe didn't create** — made by another tool, a colleague, or by hand — so there's
-no Job ID to reverse. Lethe scans for the tokens and lets you fill in the real names.
-
-1. **Upload** the tokenised file (Word / PowerPoint / PDF / Excel / email) *or* paste the
-   text, then **Scan for tokens**.
-2. Each distinct `[token]` appears with its occurrence count and a blank field. Type the
-   real name behind each. **Untick** anything that isn't a placeholder (footnote markers
-   like `[1]` are unticked for you); leave a field **blank** to keep that token as-is.
-3. Optionally tick **Add the names I fill in to my dictionary** — recognised people,
-   counterparties and your custom types are saved for future detection; pattern tokens
-   (emails/phones) and unrecognised placeholders are skipped.
-4. **Restore document** — you get the file back in the same format (a PDF comes back as
-   Word). The count shows how many token occurrences were swapped.
-
-This is also a quick **template filler**: hand it a form with `[CLIENT]`, `[DATE]`,
-`[AMOUNT]` placeholders and it fills them in.
-
-### 4 · Entity dictionary
-Your curated list of people & counterparties — this is what makes detection
-reliable. Add **aliases** (short / legal / trading names) so every variant maps
-to the same token. Newly-found names you redact are added here automatically.
-
-### Where your data lives
-Your data is stored in **this browser** (IndexedDB), isolated per browser — not on the
-server, and never uploaded:
-- **Entity dictionary** — your people & counterparties, plain text.
-- **Reversal keys** — one record per job holding the token → real-name mapping,
-  **encrypted in the browser** (PBKDF2 480k → AES-GCM) with the passphrase you set
-  (blank = unprotected). This is the *only* way to re-identify a job; delete it or lose
-  the passphrase and that job can no longer be reversed.
-- **History index** — the *Past conversions* list (date, file name, redaction count)
-  in plain text. It does **not** contain the real names.
-- **Result files** — the de-identified file of each recent conversion, kept exactly as
-  you downloaded it, so **Past conversions** can hand it back after a refresh, a closed
-  tab or a restart. Only the most recent 20 are kept; older ones are dropped
-  automatically, and **Settings → Browser data → Clear result files** deletes them all
-  without touching your dictionary or the conversion list.
-
-It survives refreshing and reopening the app. Clearing the browser's site data for Lethe
-erases it — **Settings → Browser data** lets you export/import a JSON backup and shows
-your stored counts and storage usage, so keep a backup somewhere safe. The backup holds
-your dictionary, custom types and conversion mappings — result files stay in the browser.
-
-The server keeps nothing of its own: while a run is in progress it holds temporary
-working copies of the files you uploaded and the text extracted from them, and deletes
-them **5 minutes after your last action** (or straight away when you click *Start over*).
-A restart or shutdown clears any leftovers too, so no document stays on the server.
-
-### What it can't remove
-The tool reads the **text** of your files. It does **not** touch:
-- **Images & logos inside Word / Excel / PowerPoint** — a counterparty logo, a signature
-  image, or any name *inside a picture in an Office file* is not detected (OCR applies
-  to PDF pages only).
-- **Scanned / image-only PDF pages** are read with **local OCR** (fully on this machine —
-  no cloud; English works offline, and adding a language in Settings enables OCR for that
-  script too) and marked for review; OCR isn't perfect, so always check those pages. Any
-  page OCR still can't read is flagged as unread rather than dropped silently.
-- Text in **shapes, text boxes, charts or embedded objects**, and document
-  **metadata, comments or tracked changes** — these may still carry names.
-- In **Excel**, a name buried inside a **formula** (e.g. `="Acme "&A1`) — names are
-  redacted in cell text, not inside formulas. (Rare, but worth a glance.)
-- Amounts, dates and ID numbers — unless they match the email / phone / account patterns.
-
-Always glance over the document preview before sending — your dictionary and your
-review are the real safeguard.
-
-### Good to know
-- **Keep your passphrase + Job ID together** — you need both to reverse a job.
-- A **blank passphrase** means the reversal key is saved unprotected.
-- **PowerPoint** stays PowerPoint — slides, tables, speaker notes and master text are
-  all redacted (text inside charts / SmartArt isn't read).
-- **PDFs** come back as Word — tables stay tables, and each page gets a *Page N*
-  heading (matching the original PDF) so you can cite pages. The file opens with a short
-  notice telling an AI to cite by source page and keep the tokens intact. Image/scan
-  pages are flagged.
-- **Emails** (`.eml`, Outlook `.msg`, `.html`) also come back as Word — the **From / To /
-  Cc / Subject** block is de-identified along with the body. Attachments and inline images
-  are *not* included or redacted (only the message text is). (`.eml` and `.html` always
-  work; `.msg` support is built into the Windows app, and a pip install adds it with the
-  optional `email` extra.)
-- **Excel** keeps its charts, formatting and formulas — only cell text is changed. A
-  cell that mixes formatting *and* contains a redacted name may lose that cell's fine
-  in-line formatting (the redaction is still correct).
-- Your documents and the names in them never leave this machine — no telemetry. The only
-  thing that uses the internet is adding an optional language / OCR model in Settings;
-  document processing itself never does.
-"""
-
 # GitHub "Octocat" mark (same glyph Pythia's AboutPage uses).
 _GH_SVG = ('<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 '
            '3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53'
@@ -466,52 +397,6 @@ _GH_SVG = ('<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><pat
 
 # About card — mirrors Pythia's AboutPage layout (version pill + GitHub link,
 # intro, mythology note, engine bullets, license, tech-stack line).
-ABOUT_HTML = f"""
-<div class="about">
-  <div class="meta">
-    <span class="pill">v{APP_VERSION}</span>
-    <a class="gh" href="{REPO_URL}" target="_blank" rel="noreferrer">{_GH_SVG} View on GitHub</a>
-  </div>
-  <div class="about-grid">
-    <div class="about-col">
-      <p><b>Lethe</b> is a fully-local, reversible document de-identifier. It replaces real
-      people and counterparty names with stable tokens (like <code>[PERSON_001]</code>)
-      <b>before</b> you send a document to an AI, then restores the real names in the AI's
-      reply. Your documents and the names in them never leave this machine — no cloud, no
-      API key, no telemetry. The only network use is downloading an optional language / OCR
-      model, and only when you explicitly install one.</p>
-      <p>It is named after the <i>Lethe</i>, one of the five rivers of the Greek underworld —
-      the river of oblivion, whose waters erased the memories of those who drank from them.</p>
-      <h4>Detection engine</h4>
-      <ul>
-        <li>Microsoft <a href="https://github.com/microsoft/presidio" target="_blank" rel="noreferrer">Presidio</a>
-          (analyzer + anonymizer) — the PII detection framework</li>
-        <li><a href="https://spacy.io" target="_blank" rel="noreferrer">spaCy</a> with the
-          <code>en_core_web_sm</code> model — named-entity recognition for people &amp; organisations</li>
-        <li>Falls back to a built-in regex name-guesser when the NLP engine isn't installed —
-          your entity dictionary works either way</li>
-      </ul>
-    </div>
-    <div class="about-col">
-      <h4>Privacy &amp; storage</h4>
-      <p>Your entity dictionary and the encrypted, reversible mappings are stored in <b>your
-      browser only</b> (IndexedDB, isolated per browser) and never uploaded to the server. Each
-      job's reversal key is encrypted in the browser with your passphrase; lose the passphrase and
-      that job can no longer be reversed. The de-identified file of each recent conversion is kept
-      in that browser too, so it can be downloaded again from Past conversions. Export a backup
-      from Settings → Browser data.</p>
-      <h4>License</h4>
-      <p>Lethe is released under the
-      <a href="https://www.apache.org/licenses/LICENSE-2.0" target="_blank" rel="noreferrer">Apache
-      License 2.0</a>. Its detection libraries (Presidio, spaCy and the
-      <code>en_core_web_sm</code> model) are MIT-licensed; Lethe is not affiliated with or endorsed
-      by Microsoft or the spaCy project.</p>
-    </div>
-  </div>
-  <p class="stack">Built with NiceGUI · Microsoft Presidio · spaCy · python-docx · openpyxl · pypdf · cryptography.</p>
-</div>
-"""
-
 SAMPLE = (
     "Dear Mr John Smith,\n\n"
     "Acme Capital Partners (\"Acme\") confirms the secondary transaction with "
@@ -560,15 +445,19 @@ RESULT_KEEP_MAX_BYTES = 64 * 1024 * 1024
 RESULT_KEEP_LIMIT = 20
 
 
-def _reference_text(job_id: str, created: str, sources: list[str], token_to_real: dict) -> bytes:
-    lines = ["DE-IDENTIFICATION REFERENCE",
-             f"Job ID : {job_id}",
-             f"Created: {created.replace('T', ' ')[:19]} UTC",
-             f"Sources: {', '.join(sources)}", "",
-             f"{'TOKEN':24}REAL VALUE", f"{'-' * 24}{'-' * 30}"]
+def _reference_text(tr, job_id: str, created: str, sources: list[str],
+                    token_to_real: dict) -> bytes:
+    """The token → real-value reference file. The first column is sized from the
+    translated token header so the table lines up in both languages."""
+    w = max(24, len(tr("ref.token")) + 2)
+    lines = [tr("ref.title"),
+             f"{tr('ref.job_id')}{job_id}",
+             f"{tr('ref.created')}{created.replace('T', ' ')[:19]}{tr('ref.utc')}",
+             f"{tr('ref.sources')}{', '.join(sources)}", "",
+             f"{tr('ref.token'):<{w}}{tr('ref.real_value')}", f"{'-' * w}{'-' * 30}"]
     for t, v in token_to_real.items():
-        lines.append(f"{t:24}{v}")
-    lines += ["", "Keep this file secure — it reverses the de-identification."]
+        lines.append(f"{t:<{w}}{v}")
+    lines += ["", tr("ref.secure")]
     return "\n".join(lines).encode("utf-8")
 
 
@@ -604,7 +493,7 @@ def _preview_html(text: str, items: list) -> str:
     return '<div class="doc-preview">' + _mark_html(text, items) + "</div>"
 
 
-def _xlsx_preview_html(data: bytes, items: list) -> str:
+def _xlsx_preview_html(data: bytes, items: list, tr) -> str:
     """Render a workbook as real tables (one per sheet) with detected names
     highlighted in their cells — far more legible than a flat text dump."""
     out = ['<div class="xlsx-preview">']
@@ -612,7 +501,7 @@ def _xlsx_preview_html(data: bytes, items: list) -> str:
         out.append('<div class="xlsx-sheet">')
         out.append(f'<div class="xlsx-sheet-name">{_html.escape(name)}</div>')
         if not rows:
-            out.append('<div class="muted" style="padding:6px 2px">(empty sheet)</div>')
+            out.append('<div class="muted" style="padding:6px 2px">' + tr("xlsx.empty_sheet") + "</div>")
         else:
             out.append("<table>")
             for ri, row in enumerate(rows):
@@ -621,8 +510,7 @@ def _xlsx_preview_html(data: bytes, items: list) -> str:
                 out.append(f"<tr>{cells}</tr>")
             out.append("</table>")
         if truncated:
-            out.append('<div class="xlsx-trunc">… large sheet truncated in this preview '
-                       "(the full sheet is still de-identified on export).</div>")
+            out.append(tr("xlsx.truncated"))
         out.append("</div>")
     out.append("</div>")
     return "".join(out)
@@ -879,14 +767,40 @@ def register_api() -> None:
                             media_type="application/manifest+json")
 
 
-def _guide_dialog():
+def _guide_dialog(tr):
     with ui.dialog() as dlg, ui.card().classes("max-w-2xl").style("max-height:85vh;overflow:auto"):
         with ui.row().classes("items-center justify-between w-full"):
-            ui.label("How to use this tool").classes("text-lg font-semibold").style(f"color:{PRIMARY}")
+            ui.label(tr("guide.title")).classes("text-lg font-semibold").style(f"color:{PRIMARY}")
             ui.button(icon="close", on_click=dlg.close).props("flat round dense")
-        ui.markdown(GUIDE_MD).classes("guide-md")
-        ui.button("Got it", on_click=dlg.close).props("unelevated no-caps").classes("self-end")
+        ui.markdown(tr("guide.md")).classes("guide-md")
+        ui.button(tr("guide.got_it"), on_click=dlg.close).props("unelevated no-caps").classes("self-end")
     return dlg
+
+
+def _resolve_language() -> str:
+    """Language for this page load, in priority order: a ?lang= parameter, the
+    lethe_lang cookie (mirrored from localStorage by the switcher), the browser's
+    Accept-Language header, then the default (zh)."""
+    lang_param = cookie = accept = None
+    try:
+        request = ui.context.client.request
+        lang_param = request.query_params.get("lang")
+        cookie = request.cookies.get(i18n.COOKIE_NAME)
+        accept = request.headers.get("accept-language")
+    except Exception:  # noqa: BLE001 — no request in scope simply means "use the default"
+        pass
+    return i18n.resolve(lang_param, cookie, accept)
+
+
+def _switch_language(code: str) -> None:
+    """Persist the choice in the browser — localStorage (the source of truth)
+    plus a cookie mirror so the server can read it synchronously at page-build
+    time — then reload, which re-renders the whole UI in the new language."""
+    ui.run_javascript(
+        f"localStorage.setItem({json.dumps(i18n.STORAGE_KEY)}, {json.dumps(code)});"
+        "document.cookie=" + json.dumps(
+            f"{i18n.COOKIE_NAME}={code}; path=/; max-age=315360000; SameSite=Lax") + ";"
+        "location.reload();")
 
 
 def main() -> None:
@@ -901,20 +815,15 @@ def main() -> None:
     ui.page("/")(_build_index)
 
 
-def _storage_banner(error: str | None = None, *, cleared: bool = False) -> None:
+def _storage_banner(tr, error: str | None = None, *, cleared: bool = False) -> None:
     """A prominent, non-dismissable warning when the browser-side store can't be
     used — so nobody keeps working under the illusion their dictionary or
     re-identification mappings are being saved."""
     if error:
-        msg = (f"Browser storage is unavailable ({error}). Your dictionary, custom token types, "
-               "conversion history and re-identification mappings can NOT be saved in this browser. "
-               "If you are in a private/incognito window, open Lethe in a normal window; otherwise "
-               "check that site data (cookies/IndexedDB) is allowed for this page.")
+        msg = tr("storage.unavailable", error=error)
         icon, color = "error", "negative"
     else:
-        msg = ("Your browser data for Lethe looks cleared: the dictionary, custom token types and "
-               "re-identification mappings that were stored in this browser are gone. Restore a "
-               "backup from Settings → Browser data, or import your dictionary again.")
+        msg = tr("storage.cleared")
         icon, color = "warning", "warning"
     with ui.card().classes("w-full max-w-6xl mx-auto rounded-xl").style(
             "border-color:var(--danger)" if error else "border-color:var(--warn)"):
@@ -930,8 +839,12 @@ async def _build_index() -> None:
     the client connects and continues the build over the socket. The user data
     (dictionary, custom token types, history, mappings) is read from the
     browser's IndexedDB — the server keeps none of it."""
+    lang = _resolve_language()
+    tr = i18n.Translator(lang)
     ui.colors(**_BRAND_COLORS)
     ui.add_head_html(THEME_CSS)
+    # ui.run()'s title is language-neutral; each page sets its own localised one
+    ui.add_head_html("<script>document.title=" + json.dumps(tr("app.title")) + ";</script>")
     # PWA shell: the manifest makes Lethe installable, the icons are what the
     # OS shows for the installed app, and the theme colour tints its title bar.
     ui.add_head_html('<link rel="manifest" href="/manifest.webmanifest">')
@@ -954,7 +867,7 @@ async def _build_index() -> None:
         ".catch(function(e){console.warn('Lethe: service worker registration failed',e);});"
         "});}</script>")
 
-    guide = _guide_dialog()
+    guide = _guide_dialog(tr)
     dark = ui.dark_mode(value=False)
 
     with ui.header(elevated=False).classes("items-center justify-between px-6 py-2"):
@@ -962,17 +875,24 @@ async def _build_index() -> None:
             ui.html('<div class="lethe-mark"></div>')
             with ui.column().classes("gap-0"):
                 ui.html('<span class="wordmark">Lethe</span>')
-                ui.html('<span class="wordmark-sub">Document de-identifier · the river of oblivion</span>')
+                ui.html(tr("hdr.subtitle"))
         with ui.row().classes("items-center gap-2 no-wrap"):
-            ui.button("Guide", icon="help_outline", on_click=guide.open).props("flat no-caps")
-            ui.chip("Local · offline", icon="lock").props("outline")
-            theme_btn = ui.button(icon="dark_mode").props("flat round dense").tooltip("Toggle light / dark")
+            ui.button(tr("hdr.guide"), icon="help_outline", on_click=guide.open).props("flat no-caps")
+            ui.chip(tr("hdr.local"), icon="lock").props("outline")
+            theme_btn = ui.button(icon="dark_mode").props("flat round dense").tooltip(tr("hdr.toggle_theme"))
 
             def _toggle_theme():
                 dark.toggle()
                 theme_btn.props(f'icon={"light_mode" if dark.value else "dark_mode"}')
 
             theme_btn.on("click", _toggle_theme)
+
+            with ui.button(icon="translate").props("flat round dense").tooltip(
+                    tr("hdr.language")):
+                with ui.menu().props("auto-close"):
+                    for code in i18n.SUPPORTED_LANGS:
+                        ui.menu_item(("✓ " if code == lang else "") + i18n.LANG_LABELS[code],
+                                     on_click=lambda c=code: _switch_language(c))
 
     ui.html('<div class="meander w-full"></div>')
 
@@ -983,9 +903,9 @@ async def _build_index() -> None:
     except BrowserStoreError:
         token_types = []
     if not storage.get("ok"):
-        _storage_banner(storage.get("error") or "unavailable")
+        _storage_banner(tr, storage.get("error") or "unavailable")
     elif storage.get("cleared"):
-        _storage_banner(cleared=True)
+        _storage_banner(tr, cleared=True)
     elif storage.get("fresh"):
         # Ask for persistent storage once, so the browser is less likely to
         # evict the dictionary/mappings under disk pressure.
@@ -993,23 +913,23 @@ async def _build_index() -> None:
 
     with ui.tabs().classes("w-full max-w-6xl mx-auto").props(
             "align=left active-color=primary indicator-color=primary no-caps") as tabs:
-        t_deid = ui.tab("De-identify", icon="lock")
-        t_reid = ui.tab("Re-identify", icon="lock_open")
-        t_restore = ui.tab("Restore", icon="auto_fix_high")
-        t_dict = ui.tab("Entity dictionary", icon="menu_book")
-        t_set = ui.tab("Settings", icon="settings")
+        t_deid = ui.tab(tr("tab.deidentify"), icon="lock")
+        t_reid = ui.tab(tr("tab.reidentify"), icon="lock_open")
+        t_restore = ui.tab(tr("tab.restore"), icon="auto_fix_high")
+        t_dict = ui.tab(tr("tab.dictionary"), icon="menu_book")
+        t_set = ui.tab(tr("tab.settings"), icon="settings")
 
     with ui.tab_panels(tabs, value=t_deid).classes("w-full max-w-6xl mx-auto bg-transparent"):
         with ui.tab_panel(t_deid).classes("p-0"):
-            build_deidentify_panel(token_types)
+            build_deidentify_panel(tr, token_types)
         with ui.tab_panel(t_reid).classes("p-0"):
-            refresh_history = build_reidentify_panel()
+            refresh_history = build_reidentify_panel(tr)
         with ui.tab_panel(t_restore).classes("p-0"):
-            build_restore_panel(token_types)
+            build_restore_panel(tr, token_types)
         with ui.tab_panel(t_dict).classes("p-0"):
-            refresh_dictionary = build_dictionary_panel(token_types)
+            refresh_dictionary = build_dictionary_panel(tr, token_types)
         with ui.tab_panel(t_set).classes("p-0"):
-            refresh_settings = build_settings_panel(token_types, storage)
+            refresh_settings = build_settings_panel(tr, token_types, storage)
 
     # Keep the browser-backed tables fresh: when the tab is opened and when the
     # store changes in this tab or another tab (BroadcastChannel).
@@ -1037,7 +957,7 @@ async def _build_index() -> None:
 # ============================================================================
 # 1 · DE-IDENTIFY
 # ============================================================================
-def build_deidentify_panel(custom_types: list[str] | None = None):
+def build_deidentify_panel(tr, custom_types: list[str] | None = None):
     # Uploaded bytes live in the server-side runtime workspace (5-minute sliding
     # TTL), never in this closure — T1 §6.3 D2, option (a). Each entry keeps only
     # a pointer into that workspace plus the extracted text.
@@ -1070,18 +990,17 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
         # ---- add documents ----
         with ui.card().classes("w-full rounded-xl shadow-sm"):
             with ui.row().classes("items-center justify-between w-full"):
-                ui.label("Add documents").classes("text-base font-medium")
-                ui.button("Start over", icon="restart_alt", on_click=lambda: reset_all()).props(
+                ui.label(tr("deid.add_documents")).classes("text-base font-medium")
+                ui.button(tr("deid.start_over"), icon="restart_alt", on_click=lambda: reset_all()).props(
                     "flat no-caps dense").tooltip(
-                    "Clear all files, redactions, passphrase and results")
-            ui.label("Word, PowerPoint, PDF, Excel or email (.eml / .msg / .html) — one or many. "
-                     "Same name → same token across all of them.").classes(
+                    tr("deid.start_over_tip"))
+            ui.label(tr("deid.formats_hint")).classes(
                 "text-sm text-slate-500")
             with ui.row().classes("items-center gap-4 mt-2 w-full"):
-                uploader = ui.upload(label="Drop / browse files", multiple=True, auto_upload=True,
+                uploader = ui.upload(label=tr("deid.drop_or_browse"), multiple=True, auto_upload=True,
                                      on_upload=lambda e: on_file(e)).props(
                     'accept=".docx,.pptx,.pdf,.xlsx,.txt,.eml,.msg,.html,.htm" flat bordered').classes("flex-1")
-                ui.button("Try a sample memo", icon="description",
+                ui.button(tr("deid.try_sample"), icon="description",
                           on_click=lambda: on_sample()).props("outline no-caps")
             files_row = ui.row().classes("gap-2 flex-wrap mt-1")
 
@@ -1096,7 +1015,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                             ui.button(icon="close", on_click=lambda i=i: remove_file(i)).props(
                                 "flat round dense size=xs color=grey-7")
                     if len(files) > 1:
-                        ui.button("Clear all", icon="clear_all", on_click=lambda: clear_files()).props(
+                        ui.button(tr("deid.clear_all"), icon="clear_all", on_click=lambda: clear_files()).props(
                             "flat dense no-caps size=sm")
 
         # ---- work area: review (left) + document preview (right) ----
@@ -1108,18 +1027,17 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             with ui.element("div").classes("md:col-span-5 min-w-0"):
                 with ui.card().classes("w-full rounded-xl shadow-sm"):
                     with ui.row().classes("items-center justify-between w-full"):
-                        ui.label("Review").classes("text-base font-medium")
+                        ui.label(tr("deid.review")).classes("text-base font-medium")
                         with ui.row().classes("items-center gap-1"):
                             summary = ui.label("").classes("text-sm font-medium").style(f"color:{PRIMARY}")
                             ui.button(icon="refresh", on_click=lambda: run_detection()).props(
-                                "flat round dense").tooltip("Re-scan the loaded files with the current dictionary")
-                    ui.label("Tick = redact · click a row to find it · fix the Type if wrong · ↻ re-scan after "
-                             "editing the dictionary").classes("text-xs text-slate-500")
+                                "flat round dense").tooltip(tr("deid.rescan_tip"))
+                    ui.label(tr("deid.review_hint")).classes("text-xs text-slate-500")
                     columns = [
-                        {"name": "type", "label": "Type", "field": "type", "align": "left"},
-                        {"name": "value", "label": "Detected value", "field": "value", "align": "left"},
-                        {"name": "count", "label": "×", "field": "count", "align": "right"},
-                        {"name": "source", "label": "Found by", "field": "source", "align": "left"},
+                        {"name": "type", "label": tr("col.type"), "field": "type", "align": "left"},
+                        {"name": "value", "label": tr("col.detected_value"), "field": "value", "align": "left"},
+                        {"name": "count", "label": tr("col.count"), "field": "count", "align": "right"},
+                        {"name": "source", "label": tr("col.found_by"), "field": "source", "align": "left"},
                     ]
                     table = ui.table(columns=columns, rows=[], row_key="id",
                                      selection="multiple").classes("w-full").props("flat dense").style(
@@ -1144,7 +1062,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             with ui.element("div").classes("md:col-span-7 min-w-0"):
                 with ui.card().classes("w-full rounded-xl shadow-sm"):
                     with ui.row().classes("items-center justify-between w-full"):
-                        ui.label("Document").classes("text-base font-medium")
+                        ui.label(tr("deid.document")).classes("text-base font-medium")
                         file_select = ui.select(options=[], on_change=lambda e: on_preview_file(e)).props(
                             "outlined dense").style("min-width:180px")
                         file_select.visible = False
@@ -1152,9 +1070,9 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                         manual_type = ui.select(
                             options=["COUNTERPARTY"] + [t for t in name_types if t != "COUNTERPARTY"],
                             value="COUNTERPARTY").props("outlined dense").style("width:180px")
-                        ui.button("Redact selection", icon="visibility_off",
+                        ui.button(tr("deid.redact_selection"), icon="visibility_off",
                                   on_click=lambda: redact_selection()).props("outline no-caps dense")
-                    ui.label("Select any text in the document below, then click “Redact selection”.").classes(
+                    ui.label(tr("deid.select_hint")).classes(
                         "text-xs text-slate-500")
                     preview_html = ui.html("").classes("w-full")
         work.visible = False
@@ -1162,14 +1080,13 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
         # ---- confirm ----
         confirm_card = ui.card().classes("w-full rounded-xl shadow-sm")
         with confirm_card:
-            ui.label("Confirm & export").classes("text-base font-medium")
+            ui.label(tr("deid.confirm_export")).classes("text-base font-medium")
             with ui.row().classes("items-center gap-4 w-full"):
-                pw = ui.input("Passphrase (optional)", password=True,
+                pw = ui.input(tr("deid.passphrase_optional"), password=True,
                               password_toggle_button=True).props("outlined dense").classes("flex-1")
-                gen = ui.button("Generate de-identified file(s)", icon="bolt").props("unelevated no-caps")
-            add_dict = ui.checkbox("Add newly-found names to my dictionary", value=True)
-            ui.label("Blank passphrase = the reversal key is saved unprotected. You'll need the passphrase "
-                     "(if set) + the Job ID to re-identify later.").classes("text-xs text-slate-500")
+                gen = ui.button(tr("deid.generate"), icon="bolt").props("unelevated no-caps")
+            add_dict = ui.checkbox(tr("deid.add_to_dict"), value=True)
+            ui.label(tr("deid.passphrase_hint")).classes("text-xs text-slate-500")
             result = ui.column().classes("w-full mt-1")
         confirm_card.visible = False
 
@@ -1181,7 +1098,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 lbl, scol = SOURCE_BADGE.get(it.source, (it.source, "grey"))
                 rows.append({"id": i, "type": it.type, "type_color": TYPE_COLOR.get(it.type, "grey"),
                              "value": it.canonical, "count": it.count, "source": it.source,
-                             "source_label": lbl, "source_color": scol})
+                             "source_label": tr(lbl), "source_color": scol})
             table.rows = rows
             table.selected = [r for r in rows if items[r["id"]].include]
             table.update()
@@ -1192,7 +1109,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             render_preview()
 
         def update_summary():
-            summary.text = f"{len(table.selected)} will be tokenised"
+            summary.text = tr("deid.summary", count=len(table.selected))
 
         table.on("selection", lambda e: update_summary())
 
@@ -1241,23 +1158,16 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             soft = [w for w in warns if w.get("ocr")]
             if hard:
                 pages = ", ".join(str(w["page"]) for w in hard)
-                banner += (f'<div class="pdf-warn">⚠ Page(s) {_html.escape(pages)} look image-based and '
-                           "OCR couldn't read any text on them, so any names there are <b>not "
-                           "redacted</b>. Check those pages in the original PDF.</div>")
+                banner += (tr("deid.pdf_warn", pages=_html.escape(pages)))
             if soft:
                 pages = ", ".join(str(w["page"]) for w in soft)
-                banner += (f'<div class="pdf-ocr">🔍 Page(s) {_html.escape(pages)} were image-based — '
-                           "their text was recovered with <b>local OCR</b> and is detected below. "
-                           "OCR isn't perfect: review these pages carefully.</div>")
+                banner += (tr("deid.pdf_ocr", pages=_html.escape(pages)))
             if f["kind"] == "xlsx":
                 data = runtime.RUNTIME.read(job["id"], f.get("rel") or "")
                 if data is None:
-                    preview_html.content = banner + (
-                        '<div class="pdf-warn">The server-side copy of this file has expired — '
-                        "temporary working files are cleared a few minutes after the last action. "
-                        "Re-add the file to preview it again.</div>")
+                    preview_html.content = banner + tr("deid.expired_preview")
                 else:
-                    preview_html.content = banner + _xlsx_preview_html(data, state["items"])
+                    preview_html.content = banner + _xlsx_preview_html(data, state["items"], tr)
             else:
                 preview_html.content = banner + _preview_html(f.get("text", ""), state["items"])
 
@@ -1277,22 +1187,21 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 return
             _touch()  # §7.2 — a server-side scan slides the job's TTL forward
             combined = "\n\n".join(f.get("text", "") for f in files)
-            note = ui.notification("Scanning for names…  (large documents take a few seconds)",
+            note = ui.notification(tr("deid.scanning"),
                                    spinner=True, timeout=None)
             # The dictionary lives in the browser (IndexedDB), not on the server.
             try:
                 ents = await client_entities()
             except BrowserStoreError as exc:
                 note.dismiss()
-                ui.notify(f"Couldn't read your dictionary from this browser: {exc}", color="negative",
-                          multi_line=True)
+                ui.notify(tr("deid.cant_read_dict", error=exc), color="negative", multi_line=True)
                 ents = []
             ents = ents + manual_entities
             try:
                 items = await run.io_bound(_detect_text, combined, ents)
             except Exception as exc:  # noqa: BLE001
                 note.dismiss()
-                ui.notify(f"Couldn't scan the document(s): {exc}", color="negative")
+                ui.notify(tr("deid.cant_scan", error=exc), color="negative")
                 return
             note.dismiss()
             manual_set = {e.canonical.lower() for e in manual_entities}
@@ -1315,12 +1224,12 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                      "text": "", "warnings": []}
             files.append(entry)
             render_files.refresh()
-            note = ui.notification(f"Reading {f.name}…", spinner=True, timeout=None)
+            note = ui.notification(tr("deid.reading", name=f.name), spinner=True, timeout=None)
             try:
                 entry["text"], entry["warnings"] = await run.io_bound(_extract_and_warn, data, kind)
             except Exception as exc:  # noqa: BLE001
                 note.dismiss()
-                ui.notify(f"Couldn't read {f.name}: {exc}", color="negative")
+                ui.notify(tr("deid.cant_read", name=f.name, error=exc), color="negative")
                 return
             note.dismiss()
             runtime.RUNTIME.put_text(jid, sidx, entry["text"] or "")
@@ -1331,16 +1240,14 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             soft = [w for w in warns if w.get("ocr")]
             if hard:
                 pages = ", ".join(str(w["page"]) for w in hard)
-                ui.notify(f"⚠ {f.name}: page(s) {pages} look image-based and OCR couldn't read them — "
-                          "names there can't be detected. Review them in the original PDF.",
+                ui.notify(tr("deid.pdf_warn_notify", name=f.name, pages=pages),
                           type="warning", multi_line=True, timeout=10000)
             elif soft:
                 pages = ", ".join(str(w["page"]) for w in soft)
-                ui.notify(f"🔍 {f.name}: page(s) {pages} were image-based — text recovered with "
-                          "local OCR. Review those pages carefully.",
+                ui.notify(tr("deid.pdf_ocr_notify", name=f.name, pages=pages),
                           color="primary", multi_line=True, timeout=8000)
             else:
-                ui.notify(f"Added {f.name}", color="primary")
+                ui.notify(tr("deid.added_file", name=f.name), color="primary")
 
         async def on_sample():
             files.clear()
@@ -1355,7 +1262,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                           "text": SAMPLE, "warnings": []})
             render_files.refresh()
             await run_detection()
-            ui.notify("Loaded sample memo", color="primary")
+            ui.notify(tr("deid.sample_loaded"), color="primary")
 
         async def remove_file(i):
             f = files.pop(i)
@@ -1386,26 +1293,26 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 uploader.reset()          # also clear the upload widget's file list
             except Exception:
                 pass
-            ui.notify("Started over — cleared everything.", color="primary")
+            ui.notify(tr("deid.started_over"), color="primary")
 
         async def redact_selection():
             sel = await ui.run_javascript(
                 'window.__deidSel || (window.getSelection?window.getSelection().toString():"")', timeout=5)
             sel = (sel or "").strip()
             if not sel:
-                ui.notify("Select some text in the document first", color="warning")
+                ui.notify(tr("deid.select_first"), color="warning")
                 return
             if sel.lower() in {e.canonical.lower() for e in manual_entities}:
-                ui.notify("Already added", color="warning")
+                ui.notify(tr("deid.already_added"), color="warning")
                 return
             manual_entities.append(Entity(canonical=sel, type=manual_type.value, aliases=[]))
             await ui.run_javascript('window.__deidSel="";if(window.getSelection)window.getSelection().removeAllRanges();')
             await run_detection()
-            ui.notify(f'Redacting “{sel[:40]}”', color="primary")
+            ui.notify(tr("deid.redacting", text=sel[:40]), color="primary")
 
         async def on_generate():
             if not files:
-                ui.notify("Add a document first", color="warning")
+                ui.notify(tr("deid.add_doc_first"), color="warning")
                 return
             items = state["items"]
             selected_ids = {r["id"] for r in table.selected}
@@ -1414,7 +1321,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             assign_tokens(items)
             replace_fn, token_to_real = build_replacer(items)
             if not token_to_real:
-                ui.notify("Nothing selected to redact", color="warning")
+                ui.notify(tr("deid.nothing_selected"), color="warning")
                 return
 
             # Read the originals back from the runtime workspace — the closure no
@@ -1425,9 +1332,8 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             for f in files:
                 data = runtime.RUNTIME.read(jid, f.get("rel") or "") if jid else None
                 if data is None:
-                    ui.notify(f"The server-side copy of “{f['name']}” has expired — temporary working "
-                              "files are removed a few minutes after the last action. Re-add the file "
-                              "and try again.", color="warning", multi_line=True)
+                    ui.notify(tr("deid.expired_generate", name=f["name"]), color="warning",
+                              multi_line=True)
                     return
                 payloads.append((f["name"], data, f["kind"]))
             _touch()  # §7.2 — redaction counts as server-side activity
@@ -1436,12 +1342,12 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             job_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
             created = datetime.now(timezone.utc).isoformat()
             sources = [f["name"] for f in files]
-            note = ui.notification("Generating de-identified file(s)…", spinner=True, timeout=None)
+            note = ui.notification(tr("deid.generating"), spinner=True, timeout=None)
             try:
                 outputs, total_hits = await run.io_bound(_redact_files, payloads, replace_fn)
             except Exception as exc:  # noqa: BLE001
                 note.dismiss()
-                ui.notify(f"Couldn't generate the file(s): {exc}", color="negative")
+                ui.notify(tr("deid.cant_generate", error=exc), color="negative")
                 return
             finally:
                 # The de-identified output is built; drop the parsed source PDF(s)
@@ -1455,7 +1361,7 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                 runtime.RUNTIME.put_out(jid, name, data)
             runtime.RUNTIME.clear_out(jid)
             _touch()
-            ref_bytes = _reference_text(job_id, created, sources, token_to_real)
+            ref_bytes = _reference_text(tr, job_id, created, sources, token_to_real)
             # The file this job hands back: the single de-identified document,
             # or one .zip bundling every output plus the reference. The very
             # same bytes are kept in the browser, so a later re-download is
@@ -1490,10 +1396,10 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
             if save_error:
                 # Without a stored mapping the conversion can't be reversed, so
                 # there is nothing a kept result file could be paired with.
-                keep_error = "the reversal key could not be saved"
+                keep_error = tr("deid.keep_error_no_key")
             elif len(dl_bytes) > RESULT_KEEP_MAX_BYTES:
-                keep_error = (f"it is larger than {RESULT_KEEP_MAX_BYTES // (1024 * 1024)} MB and "
-                              "too big to keep in browser storage")
+                keep_error = tr("deid.keep_error_too_big",
+                                mb=RESULT_KEEP_MAX_BYTES // (1024 * 1024))
             else:
                 try:
                     await client_save_output(job_id, created,
@@ -1517,56 +1423,48 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
                     try:
                         added = await client_merge_entities(new_ents)
                     except BrowserStoreError as exc:
-                        ui.notify(f"Couldn't add the new names to your dictionary: {exc}",
+                        ui.notify(tr("deid.cant_add_names", error=exc),
                                   color="negative", multi_line=True)
 
             result.clear()
             with result:
                 with ui.row().classes("items-center gap-2 flex-wrap"):
                     ui.icon("check_circle", color="positive")
-                    ui.label(f"{total_hits} replacement(s) across {len(files)} file(s) · Job ID ").classes(
+                    ui.label(tr("deid.replacement_summary", count=total_hits, files=len(files))).classes(
                         "text-sm")
                     ui.badge(job_id).props("color=primary")
                     if added:
-                        ui.badge(f"+{added} to dictionary").props("color=teal-7")
+                        ui.badge(tr("deid.to_dict", count=added)).props("color=teal-7")
                 if save_error:
                     with ui.row().classes("items-center gap-2 flex-wrap"):
                         ui.icon("warning", color="negative", size="18px")
-                        ui.label(f"The reversal key could NOT be saved in this browser ({save_error}). "
-                                 "Download the reference file below — it is the only copy of the "
-                                 "token → name mapping.").classes("text-xs").style("color:var(--danger)")
+                        ui.label(tr("deid.key_unsaved", error=save_error)).classes("text-xs").style(
+                            "color:var(--danger)")
                 else:
-                    saved_note = ("Saved in this browser (IndexedDB) — the reversal key and the "
-                                  "result file are both kept, so you can download the same file "
-                                  "again from Re-identify → Past conversions."
-                                  if not keep_error else
-                                  f"The reversal key is saved, but the result file was not kept "
-                                  f"({keep_error}). Download it now — Past conversions can re-identify "
-                                  "the job, but it can't hand this file back again.")
+                    saved_note = (tr("deid.saved_ok") if not keep_error
+                                  else tr("deid.key_only_saved", reason=keep_error))
                     ui.label(saved_note).classes("text-xs text-slate-500")
-                    ui.label("Use Settings → Browser data to export a backup.").classes(
+                    ui.label(tr("deid.use_settings_backup")).classes(
                         "text-xs text-slate-400")
                 with ui.row().classes("items-center gap-2 flex-wrap"):
                     if len(outputs) == 1:
-                        ui.button("Download de-identified file", icon="download",
+                        ui.button(tr("deid.download_one"), icon="download",
                                   on_click=lambda d=dl_bytes, n=dl_name: ui.download(d, n)).props(
                             "unelevated no-caps")
-                        ui.button("Download reference (.txt)", icon="description",
+                        ui.button(tr("deid.download_ref"), icon="description",
                                   on_click=lambda: ui.download(ref_bytes, f"{job_id}__reference.txt")).props(
                             "outline no-caps")
                     else:
-                        ui.button(f"Download all {len(outputs)} files + reference (.zip)", icon="download",
+                        ui.button(tr("deid.download_all", count=len(outputs)), icon="download",
                                   on_click=lambda z=dl_bytes, n=dl_name: ui.download(z, n)).props(
                             "unelevated no-caps")
-                ui.label(f"Server-side working copies (the uploaded documents and the extracted "
-                         f"text) are deleted automatically {_ttl_text()} after your last action — "
-                         "nothing is kept on the server.").classes("text-xs text-slate-500")
-                with ui.expansion("Show the sealed token → name mapping").classes("w-full"):
-                    mcols = [{"name": "t", "label": "Token", "field": "t", "align": "left"},
-                             {"name": "v", "label": "Real value", "field": "v", "align": "left"}]
+                ui.label(tr("deid.ttl_note", ttl=_ttl_text(tr))).classes("text-xs text-slate-500")
+                with ui.expansion(tr("deid.show_mapping")).classes("w-full"):
+                    mcols = [{"name": "t", "label": tr("col.token"), "field": "t", "align": "left"},
+                             {"name": "v", "label": tr("col.real_value"), "field": "v", "align": "left"}]
                     ui.table(columns=mcols, rows=[{"t": t, "v": v} for t, v in token_to_real.items()]).props(
                         "flat dense").classes("w-full")
-            ui.notify("De-identified file(s) ready", color="positive")
+            ui.notify(tr("deid.ready"), color="positive")
 
         gen.on("click", on_generate)
 
@@ -1574,25 +1472,22 @@ def build_deidentify_panel(custom_types: list[str] | None = None):
 # ============================================================================
 # 2 · RE-IDENTIFY
 # ============================================================================
-def build_reidentify_panel():
+def build_reidentify_panel(tr):
     sel: dict = {"job_id": None}
     upload: dict = {"data": None, "kind": None, "name": None}
 
     with ui.column().classes("w-full gap-5 pt-5"):
         with ui.card().classes("w-full rounded-xl shadow-sm"):
             with ui.row().classes("items-center justify-between w-full"):
-                ui.label("Past conversions").classes("text-base font-medium")
+                ui.label(tr("reid.past")).classes("text-base font-medium")
                 ui.button(icon="refresh", on_click=lambda: render_history.refresh()).props(
-                    "flat round dense").tooltip("Refresh")
-            ui.label(f"Pick the conversion you want to reverse. The ⤓ button on a row downloads "
-                     f"that result file again — handy after a refresh, a closed tab or a restart. "
-                     f"The last {RESULT_KEEP_LIMIT} results are kept; older ones are dropped by "
-                     "the browser.").classes("text-sm text-slate-500")
+                    "flat round dense").tooltip(tr("reid.refresh"))
+            ui.label(tr("reid.pick_hint_keep", limit=RESULT_KEEP_LIMIT)).classes("text-sm text-slate-500")
             hcols = [
-                {"name": "created", "label": "When", "field": "created", "align": "left"},
-                {"name": "source_file", "label": "Source file(s)", "field": "source_file", "align": "left"},
-                {"name": "replacements", "label": "Redactions", "field": "replacements", "align": "right"},
-                {"name": "job_id", "label": "Job ID", "field": "job_id", "align": "left"},
+                {"name": "created", "label": tr("col.when"), "field": "created", "align": "left"},
+                {"name": "source_file", "label": tr("col.source_files"), "field": "source_file", "align": "left"},
+                {"name": "replacements", "label": tr("col.redactions"), "field": "replacements", "align": "right"},
+                {"name": "job_id", "label": tr("col.job_id"), "field": "job_id", "align": "left"},
                 {"name": "actions", "label": "", "field": "actions", "align": "right"},
             ]
             htable = ui.table(columns=hcols, rows=[], row_key="job_id",
@@ -1600,23 +1495,26 @@ def build_reidentify_panel():
             htable.add_slot("body-cell-actions", '''
                 <q-td :props="props" auto-width>
                   <q-btn v-if="props.row.has_result" flat round dense size="sm"
-                    icon="download" color="primary" aria-label="Download result file again"
+                    icon="download" color="primary" aria-label="__DL_ARIA__"
                     @click.stop="() => $parent.$emit('downloadresult', props.row)">
-                    <q-tooltip>Download this result file again</q-tooltip>
+                    <q-tooltip>__DL_TIP__</q-tooltip>
                   </q-btn>
                   <q-btn flat round dense size="sm" icon="delete" color="grey-7"
-                    aria-label="Delete this conversion"
+                    aria-label="__DEL_ARIA__"
                     @click.stop="() => $parent.$emit('deletejob', props.row)">
-                    <q-tooltip>Delete this conversion</q-tooltip>
+                    <q-tooltip>__DELETE_TIP__</q-tooltip>
                   </q-btn>
-                </q-td>''')
+                </q-td>'''.replace("__DL_ARIA__", tr("reid.download_again"))
+                                 .replace("__DL_TIP__", tr("reid.download_again"))
+                                 .replace("__DEL_ARIA__", tr("reid.delete_tip"))
+                                 .replace("__DELETE_TIP__", tr("reid.delete_tip")))
 
             @ui.refreshable
             async def render_history():
                 try:
                     jobs = await client_jobs()
                 except BrowserStoreError as exc:
-                    ui.notify(f"Couldn't read the conversion history from this browser: {exc}",
+                    ui.notify(tr("reid.cant_read_history", error=exc),
                               color="negative", multi_line=True)
                     jobs = []
                 # Which results are still kept. This reads object-store KEYS
@@ -1641,8 +1539,8 @@ def build_reidentify_panel():
 
             def on_select(_):
                 sel["job_id"] = htable.selected[0]["job_id"] if htable.selected else None
-                selected_label.text = f"Selected: {sel['job_id']}" if sel["job_id"] else \
-                    "Selected: none — click a row above."
+                selected_label.text = tr("reid.selected", job=sel["job_id"]) if sel["job_id"] else \
+                    tr("reid.selected_none")
                 dl_selected.visible = any(r["job_id"] == sel["job_id"] and r["has_result"]
                                          for r in htable.rows)
 
@@ -1654,25 +1552,24 @@ def build_reidentify_panel():
                 if not jid:
                     return
                 with ui.dialog() as dlg, ui.card():
-                    ui.label("Delete this conversion?").classes("text-base font-medium")
-                    ui.label(f"This permanently removes the reversal key for job “{jid}”. "
-                             "You will NOT be able to re-identify that document afterwards.").classes(
+                    ui.label(tr("reid.delete_question")).classes("text-base font-medium")
+                    ui.label(tr("reid.delete_warn", job=jid)).classes(
                         "text-sm text-slate-600")
                     with ui.row().classes("justify-end gap-2 w-full"):
-                        ui.button("Cancel", on_click=lambda: dlg.submit(False)).props("flat no-caps")
-                        ui.button("Delete", color="negative",
+                        ui.button(tr("reid.cancel"), on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                        ui.button(tr("reid.delete"), color="negative",
                                   on_click=lambda: dlg.submit(True)).props("unelevated no-caps")
                 if await dlg:
                     try:
                         await client_delete_job(jid)
                     except BrowserStoreError as exc:
-                        ui.notify(f"Couldn't delete {jid} from this browser: {exc}",
+                        ui.notify(_store_error(tr, exc, "reid.cant_delete", job=jid),
                                   color="negative", multi_line=True)
                     if sel["job_id"] == jid:
                         sel["job_id"] = None
-                        selected_label.text = "Selected: none — click a row above."
+                        selected_label.text = tr("reid.selected_none")
                     await render_history.refresh()
-                    ui.notify(f"Deleted conversion {jid}", color="primary")
+                    ui.notify(tr("reid.deleted", job=jid), color="primary")
 
             htable.on("deletejob", on_delete)
 
@@ -1687,19 +1584,19 @@ def build_reidentify_panel():
                 try:
                     names = await client_download_output(jid)
                 except BrowserStoreError as exc:
-                    ui.notify(f"Couldn't download the result for {jid}: {exc}",
+                    ui.notify(_store_error(tr, exc, "reid.cant_download", job=jid),
                               color="warning", multi_line=True)
                     await render_history.refresh()
                     return
-                ui.notify(f"Downloading {', '.join(names)} again", color="primary")
+                ui.notify(tr("reid.downloading", names=", ".join(names)), color="primary")
 
             htable.on("downloadresult", on_download_result)
 
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("Bring the real names back").classes("text-base font-medium")
-            selected_label = ui.label("Selected: none — click a row above.").classes(
+            ui.label(tr("reid.bring_back")).classes("text-base font-medium")
+            selected_label = ui.label(tr("reid.selected_none")).classes(
                 "text-sm").style(f"color:{PRIMARY}")
-            pw = ui.input("Passphrase (if one was set)", password=True,
+            pw = ui.input(tr("reid.passphrase"), password=True,
                           password_toggle_button=True).props("outlined dense").classes("w-full")
 
             # Re-download of the selected conversion's result file: the same
@@ -1711,59 +1608,58 @@ def build_reidentify_panel():
                 try:
                     names = await client_download_output(jid)
                 except BrowserStoreError as exc:
-                    ui.notify(f"Couldn't download the result for {jid}: {exc}",
+                    ui.notify(_store_error(tr, exc, "reid.cant_download", job=jid),
                               color="warning", multi_line=True)
                     await render_history.refresh()
                     return
-                ui.notify(f"Downloading {', '.join(names)} again", color="primary")
+                ui.notify(tr("reid.downloading", names=", ".join(names)), color="primary")
 
             with ui.row().classes("items-center gap-2"):
-                dl_selected = ui.button("Download this result file again", icon="download",
+                dl_selected = ui.button(tr("reid.download_again"), icon="download",
                                         on_click=lambda: on_download_selected()).props(
                     "outline no-caps")
                 dl_selected.visible = False
 
-            ui.label("Give it the AI's reply — upload the file to get the SAME format back, "
-                     "or paste text.").classes("text-sm text-slate-500 mt-1")
+            ui.label(tr("reid.ai_hint")).classes("text-sm text-slate-500 mt-1")
             with ui.row().classes("items-center gap-2"):
-                ui.upload(label="Upload the AI's .docx / .pptx / .xlsx / .txt", auto_upload=True,
+                ui.upload(label=tr("reid.upload_ai"), auto_upload=True,
                           on_upload=lambda e: on_upload_ai(e)).props('accept=".docx,.pptx,.xlsx,.txt" flat bordered')
                 upload_note = ui.label("").classes("text-xs text-teal-700")
                 clear_btn = ui.button(icon="close", on_click=lambda: clear_upload()).props(
-                    "flat round dense color=grey-7").tooltip("Clear uploaded file")
+                    "flat round dense color=grey-7").tooltip(tr("reid.clear_upload_tip"))
                 clear_btn.visible = False
-            ai_text = ui.textarea("…or paste the AI output here").props("outlined").classes(
+            ai_text = ui.textarea(tr("reid.paste_ai")).props("outlined").classes(
                 "w-full").style("min-height:140px")
-            ui.button("Re-identify", icon="lock_open", on_click=lambda: on_restore()).props(
+            ui.button(tr("tab.reidentify"), icon="lock_open", on_click=lambda: on_restore()).props(
                 "unelevated no-caps")
             result = ui.column().classes("w-full")
 
         async def on_upload_ai(e):
             f = e.file
             upload.update(data=await f.read(), kind=file_kind(f.name) or "txt", name=f.name)
-            upload_note.text = f"Will regenerate: {f.name}"
+            upload_note.text = tr("reid.will_regenerate", name=f.name)
             clear_btn.visible = True
-            ui.notify(f"Loaded {f.name} — will be regenerated in the same format", color="primary")
+            ui.notify(tr("reid.loaded_gen", name=f.name), color="primary")
 
         def clear_upload():
             upload.update(data=None, kind=None, name=None)
             upload_note.text = ""
             clear_btn.visible = False
-            ui.notify("Cleared uploaded file — will use pasted text", color="primary")
+            ui.notify(tr("reid.cleared"), color="primary")
 
         async def on_restore():
             if not sel["job_id"]:
-                ui.notify("Select a conversion from the list above", color="warning")
+                ui.notify(tr("reid.select_conversion"), color="warning")
                 return
             if upload["data"] is None and not (ai_text.value or "").strip():
-                ui.notify("Upload the AI's file or paste its text", color="warning")
+                ui.notify(tr("reid.upload_or_paste"), color="warning")
                 return
             # The mapping is stored (encrypted) in this browser only — decrypt it
             # there with WebCrypto; the server never sees the passphrase.
             try:
                 mapping = await client_mapping(sel["job_id"], pw.value or "")
             except BrowserStoreError as exc:
-                ui.notify(f"Couldn't restore: {exc}", color="negative", multi_line=True)
+                ui.notify(_store_error(tr, exc, "reid.cant_restore"), color="negative", multi_line=True)
                 return
             restore = build_restorer(mapping)
             result.clear()
@@ -1774,22 +1670,22 @@ def build_reidentify_panel():
                 with result:
                     with ui.row().classes("items-center gap-2"):
                         ui.icon("check_circle", color="positive")
-                        ui.label(f"Restored {hits} token(s) — file regenerated.").classes("text-sm")
-                    ui.button(f"Download {fname}", icon="download",
+                        ui.label(tr("reid.restored_file", count=hits)).classes("text-sm")
+                    ui.button(tr("common.download_file", file=fname), icon="download",
                               on_click=lambda b=out_bytes, n=fname: ui.download(b, n)).props("unelevated no-caps")
             else:
                 restored, hits = restore(ai_text.value or "")
                 with result:
                     with ui.row().classes("items-center gap-2"):
                         ui.icon("check_circle", color="positive")
-                        ui.label(f"Restored {hits} token(s).").classes("text-sm")
-                    ui.textarea("Re-identified output", value=restored).props("outlined readonly").classes(
+                        ui.label(tr("reid.restored_paste", count=hits)).classes("text-sm")
+                    ui.textarea(tr("reid.output"), value=restored).props("outlined readonly").classes(
                         "w-full").style("min-height:140px")
-                    ui.button("Download as .txt", icon="download",
+                    ui.button(tr("common.download_txt"), icon="download",
                               on_click=lambda r=restored: ui.download(r.encode("utf-8"),
                                                                       f"{sel['job_id']}__reidentified.txt")).props(
                         "unelevated no-caps")
-            ui.notify("Re-identified", color="positive")
+            ui.notify(tr("reid.done"), color="positive")
         # Fill the table once the page is live (an un-awaited call to an async
         # refreshable never renders) and whenever the tab is opened.
         ui.timer(0.1, render_history, once=True)
@@ -1841,7 +1737,7 @@ def _restore_defaults(token: str, custom_types: list[str]) -> tuple[str, bool]:
     return "COUNTERPARTY", True
 
 
-def build_restore_panel(custom_types: list[str] | None = None):
+def build_restore_panel(tr, custom_types: list[str] | None = None):
     state: dict = {"data": None, "kind": None, "name": None}
     rows: list[dict] = []   # [{token, count, cb, inp, tsel, save}]
     custom_types = [t for t in (custom_types or []) if t not in BUILTIN_TYPES]
@@ -1849,39 +1745,34 @@ def build_restore_panel(custom_types: list[str] | None = None):
     with ui.column().classes("w-full gap-5 pt-5"):
         # ---- input: a tokenised document or pasted text ----
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("Restore tokens — when the de-identification happened outside Lethe").classes(
+            ui.label(tr("restore.title")).classes(
                 "text-base font-medium")
             ui.label(
-                "Already holding a document full of placeholder tokens in [SQUARE_BRACKETS] — made by "
-                "another tool, a colleague, or by hand — but with no Lethe Job ID to reverse? Drop it "
-                "in. Lethe finds the tokens and lets you type the real name behind each, then rebuilds "
-                "the document in the same format.").classes("text-sm text-slate-500")
-            ui.label("Everything stays on your machine; nothing is uploaded.").classes(
+                tr("restore.intro")).classes("text-sm text-slate-500")
+            ui.label(tr("restore.local")).classes(
                 "text-xs").style(f"color:{PRIMARY}")
             with ui.row().classes("items-center gap-2 mt-1"):
-                ui.upload(label="Upload a tokenised .docx / .pptx / .pdf / .xlsx / .txt / email",
+                ui.upload(label=tr("restore.upload_label"),
                           auto_upload=True, on_upload=lambda e: on_upload(e)).props(
                     'accept=".docx,.pptx,.pdf,.xlsx,.txt,.eml,.msg,.html,.htm" flat bordered')
                 up_note = ui.label("").classes("text-xs text-teal-700")
                 clear_btn = ui.button(icon="close", on_click=lambda: clear_upload()).props(
-                    "flat round dense color=grey-7").tooltip("Clear uploaded file")
+                    "flat round dense color=grey-7").tooltip(tr("reid.clear_upload_tip"))
                 clear_btn.visible = False
-            paste = ui.textarea("…or paste tokenised text here").props("outlined").classes(
+            paste = ui.textarea(tr("restore.paste")).props("outlined").classes(
                 "w-full").style("min-height:120px")
-            ui.button("Scan for tokens", icon="search", on_click=lambda: on_scan()).props(
+            ui.button(tr("restore.scan"), icon="search", on_click=lambda: on_scan()).props(
                 "unelevated no-caps")
 
         # ---- review: fill in the real value behind each token ----
         token_card = ui.card().classes("w-full rounded-xl shadow-sm")
         token_card.visible = False
         with token_card:
-            ui.label("Tokens found — fill in the real names").classes("text-base font-medium")
-            ui.label("Untick the left box for anything that isn't a placeholder (footnote markers, "
-                     "citations…); a token left blank or unticked keeps its bracketed form. Tick "
-                     "Save to also add that name to your dictionary under the Type you choose.").classes(
+            ui.label(tr("restore.tokens_found")).classes("text-base font-medium")
+            ui.label(tr("restore.tokens_hint")).classes(
                 "text-sm text-slate-500")
             tokens_box = ui.column().classes("w-full gap-2 mt-2")
-            ui.button("Restore document", icon="lock_open", on_click=lambda: on_restore()).props(
+            ui.button(tr("restore.restore_doc"), icon="lock_open", on_click=lambda: on_restore()).props(
                 "unelevated no-caps mt-1")
             result = ui.column().classes("w-full")
 
@@ -1890,14 +1781,14 @@ def build_restore_panel(custom_types: list[str] | None = None):
                 try:
                     return extract_text(state["data"], state["kind"])
                 except Exception as exc:  # noqa: BLE001 — surface any read failure to the user
-                    ui.notify(f"Couldn't read that file: {exc}", color="negative")
+                    ui.notify(tr("restore.cant_read", error=exc), color="negative")
                     return None
             return (paste.value or "").strip() or None
 
         async def on_upload(e):
             f = e.file
             state.update(data=await f.read(), kind=file_kind(f.name) or "txt", name=f.name)
-            up_note.text = f"Loaded: {f.name}"
+            up_note.text = tr("restore.loaded", name=f.name)
             clear_btn.visible = True
 
         def clear_upload():
@@ -1908,13 +1799,13 @@ def build_restore_panel(custom_types: list[str] | None = None):
         def on_scan():
             text = _read_text()
             if not text:
-                ui.notify("Upload a tokenised file or paste some text first", color="warning")
+                ui.notify(tr("restore.upload_first"), color="warning")
                 return
             counts: dict[str, int] = {}
             for m in _RESTORE_TOKEN_RE.finditer(text):
                 counts[m.group(0)] = counts.get(m.group(0), 0) + 1
             if not counts:
-                ui.notify("No [bracketed] tokens found in that document", color="warning")
+                ui.notify(tr("restore.no_tokens"), color="warning")
                 token_card.visible = False
                 return
             rows.clear()
@@ -1926,37 +1817,37 @@ def build_restore_panel(custom_types: list[str] | None = None):
             with tokens_box:
                 with ui.row().classes("w-full items-center text-xs text-slate-400 px-1"):
                     ui.label("").style("width:34px")
-                    ui.label("Token").style("width:190px")
-                    ui.label("count").style("width:44px")
-                    ui.label("Real name / value").classes("flex-1")
-                    ui.label("Type").style("width:150px")
-                    ui.label("Save").style("width:50px")
+                    ui.label(tr("col.token")).style("width:190px")
+                    ui.label(tr("col.count")).style("width:44px")
+                    ui.label(tr("col.real_name")).classes("flex-1")
+                    ui.label(tr("col.type")).style("width:150px")
+                    ui.label(tr("col.save")).style("width:50px")
                 for tok, n in ordered:
                     default_type, default_save = _restore_defaults(tok, custom_types)
                     # the left "include" box defaults off only for footnote-like [1]
                     include_on = not tok[1:-1].strip().isdigit()
                     with ui.row().classes("w-full items-center gap-2"):
                         cb = ui.checkbox(value=include_on).props("dense").tooltip(
-                            "Restore this token in the document")
+                            tr("restore.include_tip"))
                         ui.label(tok).classes("font-mono text-sm").style("width:190px")
                         ui.label(f"×{n}").classes("text-xs text-slate-400").style("width:44px")
-                        inp = ui.input(placeholder="leave blank to keep the token").props(
+                        inp = ui.input(placeholder=tr("restore.placeholder")).props(
                             "outlined dense").classes("flex-1")
                         tsel = ui.select(options=type_options, value=default_type).props(
                             "outlined dense options-dense").style("width:150px")
                         save_cb = ui.checkbox(value=default_save).props("dense").style(
-                            "width:50px").tooltip("Add this name to your dictionary")
+                            "width:50px").tooltip(tr("restore.save_tip"))
                     rows.append({"token": tok, "count": n, "cb": cb, "inp": inp,
                                  "tsel": tsel, "save": save_cb})
             result.clear()
             token_card.visible = True
-            ui.notify(f"Found {len(ordered)} distinct token(s)", color="primary")
+            ui.notify(tr("restore.found", count=len(ordered)), color="primary")
 
         async def on_restore():
             mapping = {r["token"]: (r["inp"].value or "").strip()
                        for r in rows if r["cb"].value and (r["inp"].value or "").strip()}
             if not mapping:
-                ui.notify("Fill in at least one token's real name (and keep it ticked)",
+                ui.notify(tr("restore.fill_first"),
                           color="warning")
                 return
             restore = build_restorer(mapping)
@@ -1970,12 +1861,12 @@ def build_restore_panel(custom_types: list[str] | None = None):
                 with result:
                     with ui.row().classes("items-center gap-2"):
                         ui.icon("check_circle", color="positive")
-                        ui.label(f"Restored {hits} token occurrence(s) — file rebuilt.").classes(
+                        ui.label(tr("restore.file_rebuilt", count=hits)).classes(
                             "text-sm")
                     if state["kind"] == "pdf":
-                        ui.label("A PDF is rebuilt as a Word (.docx) file.").classes(
+                        ui.label(tr("restore.pdf_as_word")).classes(
                             "text-xs text-slate-400")
-                    ui.button(f"Download {fname}", icon="download",
+                    ui.button(tr("common.download_file", file=fname), icon="download",
                               on_click=lambda b=out_bytes, n=fname: ui.download(b, n)).props(
                         "unelevated no-caps")
             else:
@@ -1983,10 +1874,10 @@ def build_restore_panel(custom_types: list[str] | None = None):
                 with result:
                     with ui.row().classes("items-center gap-2"):
                         ui.icon("check_circle", color="positive")
-                        ui.label(f"Restored {hits} token occurrence(s).").classes("text-sm")
-                    ui.textarea("Restored output", value=restored).props("outlined readonly").classes(
+                        ui.label(tr("restore.paste_rebuilt", count=hits)).classes("text-sm")
+                    ui.textarea(tr("restore.output"), value=restored).props("outlined readonly").classes(
                         "w-full").style("min-height:140px")
-                    ui.button("Download as .txt", icon="download",
+                    ui.button(tr("common.download_txt"), icon="download",
                               on_click=lambda r=restored: ui.download(r.encode("utf-8"),
                                                                       "restored.txt")).props(
                         "unelevated no-caps")
@@ -1999,32 +1890,30 @@ def build_restore_panel(custom_types: list[str] | None = None):
                 try:
                     added = await client_merge_entities(new_ents)
                 except BrowserStoreError as exc:
-                    ui.notify(f"Couldn't save the new name(s) to your dictionary: {exc}",
+                    ui.notify(tr("restore.cant_save_dict", error=exc),
                               color="negative", multi_line=True)
                     added = 0
                 dup = len(new_ents) - added
-                msg = f"Saved {added} name(s) to your dictionary"
+                msg = tr("restore.saved_to_dict", count=added)
                 if dup:
-                    msg += f" · {dup} already there"
+                    msg += tr("restore.dupes", count=dup)
                 ui.notify(msg, color="primary")
-            ui.notify("Restored", color="positive")
+            ui.notify(tr("restore.done"), color="positive")
 
 
 # ============================================================================
 # 3 · ENTITY DICTIONARY
 # ============================================================================
-def build_dictionary_panel(custom_types: list[str] | None = None):
+def build_dictionary_panel(tr, custom_types: list[str] | None = None):
     rows: list[dict] = []          # loaded from the browser store after page load
     dict_types = ["PERSON", "COUNTERPARTY"] + [t for t in (custom_types or [])
                                                if t not in ("PERSON", "COUNTERPARTY")]
 
     with ui.column().classes("w-full gap-5 pt-5"):
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("Your known people & counterparties").classes("text-base font-medium")
-            ui.label("A curated list is what makes detection reliable. Add aliases (short / legal / trading "
-                     "names) so every variant maps to the same token.").classes("text-sm text-slate-500")
-            ui.label("This dictionary is kept in this browser only (IndexedDB) — export a backup from "
-                     "Settings → Browser data.").classes("text-xs").style(f"color:{PRIMARY}")
+            ui.label(tr("dict.title")).classes("text-base font-medium")
+            ui.label(tr("dict.intro")).classes("text-sm text-slate-500")
+            ui.label(tr("dict.browser_note")).classes("text-xs").style(f"color:{PRIMARY}")
             editor = ui.column().classes("w-full gap-2 mt-2")
 
             @ui.refreshable
@@ -2032,12 +1921,12 @@ def build_dictionary_panel(custom_types: list[str] | None = None):
                 editor.clear()
                 with editor:
                     with ui.row().classes("w-full items-center text-xs text-slate-400 px-1"):
-                        ui.label("Canonical name").classes("flex-1")
-                        ui.label("Type").style("width:170px")
-                        ui.label("Aliases (comma-separated)").classes("flex-1")
+                        ui.label(tr("col.canonical_name")).classes("flex-1")
+                        ui.label(tr("col.type")).style("width:170px")
+                        ui.label(tr("col.aliases")).classes("flex-1")
                         ui.label("").style("width:40px")
                     if not rows:
-                        ui.label("No entities yet — add one below or bulk-import.").classes(
+                        ui.label(tr("dict.empty")).classes(
                             "text-sm text-slate-400 px-1 py-2")
                     for r in rows:
                         with ui.row().classes("w-full items-center gap-2"):
@@ -2075,37 +1964,37 @@ def build_dictionary_panel(custom_types: list[str] | None = None):
                 try:
                     await client_save_entities(ents)
                 except BrowserStoreError as exc:
-                    ui.notify(f"Couldn't save the dictionary in this browser: {exc}",
+                    ui.notify(tr("dict.cant_save", error=exc),
                               color="negative", multi_line=True)
                     return
-                ui.notify(f"Saved {len(ents)} entit(ies) in this browser", color="positive")
+                ui.notify(tr("dict.saved_browser", count=len(ents)), color="positive")
 
             async def reload_dict():
                 try:
                     ents = await client_entities()
                 except BrowserStoreError as exc:
-                    ui.notify(f"Couldn't read the dictionary from this browser: {exc}",
+                    ui.notify(tr("dict.cant_read", error=exc),
                               color="negative", multi_line=True)
                     return
                 rows.clear()
                 rows.extend({"canonical": e.canonical, "type": e.type, "aliases": ", ".join(e.aliases)}
                             for e in ents)
                 render_rows.refresh()
-                ui.notify("Reloaded from this browser", color="primary")
+                ui.notify(tr("dict.reloaded_browser"), color="primary")
 
             render_rows()
             with ui.row().classes("gap-2 mt-2"):
-                ui.button("Add entity", icon="add", on_click=add_row).props("outline no-caps")
-                ui.button("Save dictionary", icon="save", on_click=save).props("unelevated no-caps")
-                ui.button("Reload", icon="refresh", on_click=reload_dict).props("flat no-caps")
+                ui.button(tr("dict.add"), icon="add", on_click=add_row).props("outline no-caps")
+                ui.button(tr("dict.save"), icon="save", on_click=save).props("unelevated no-caps")
+                ui.button(tr("dict.reload"), icon="refresh", on_click=reload_dict).props("flat no-caps")
 
-            with ui.expansion("Bulk import from a list").classes("w-full mt-1"):
-                ui.label("Paste one name per line (e.g. your counterparty master list).").classes(
+            with ui.expansion(tr("dict.bulk_title")).classes("w-full mt-1"):
+                ui.label(tr("dict.bulk_hint")).classes(
                     "text-sm text-slate-500")
-                bulk = ui.textarea(label="Names").props("outlined").classes("w-full")
+                bulk = ui.textarea(label=tr("dict.bulk_names")).props("outlined").classes("w-full")
                 btype = ui.select(options=["COUNTERPARTY", "PERSON"] + [t for t in (custom_types or []) if t not in ("PERSON", "COUNTERPARTY")],
                                   value="COUNTERPARTY",
-                                  label="Add as type").props("outlined dense").style("width:200px")
+                                  label=tr("dict.bulk_type")).props("outlined dense").style("width:200px")
 
                 def append_bulk():
                     have = {r["canonical"].strip().lower() for r in rows if r["canonical"].strip()}
@@ -2118,16 +2007,16 @@ def build_dictionary_panel(custom_types: list[str] | None = None):
                             added += 1
                     bulk.value = ""
                     render_rows.refresh()
-                    ui.notify(f"Added {added} name(s) — remember to Save", color="primary")
+                    ui.notify(tr("dict.bulk_added", count=added), color="primary")
 
-                ui.button("Append to list", icon="playlist_add", on_click=append_bulk).props("outline no-caps")
+                ui.button(tr("dict.append"), icon="playlist_add", on_click=append_bulk).props("outline no-caps")
 
     async def load_from_browser():
         """Read the dictionary from IndexedDB once the page is live."""
         try:
             ents = await client_entities()
         except BrowserStoreError as exc:
-            ui.notify(f"Couldn't read your dictionary from this browser: {exc}",
+            ui.notify(tr("dict.cant_read", error=exc),
                       color="negative", multi_line=True)
             return
         rows.clear()
@@ -2160,25 +2049,14 @@ def _open_folder(path: str) -> bool:
         return False
 
 
-def build_settings_panel(custom_types: list[str] | None = None, storage: dict | None = None):
+def build_settings_panel(tr, custom_types: list[str] | None = None, storage: dict | None = None):
     with ui.column().classes("w-full gap-5 pt-5"):
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("Detection & OCR languages").classes("text-base font-medium")
-            ui.label("English name detection is built in and works fully offline. Scanned-page OCR "
-                     "uses a small local English model — bundled in the Windows app; on a pip install, "
-                     "add it once with the button. Every language offers several name-detection "
-                     "models: the larger ones catch more names but download more data. English and "
-                     "Chinese default to the largest model (`lg`) — download it once and detection "
-                     "uses it automatically, for maximum recall; the built-in small model keeps "
-                     "English working fully offline until then. Switch between models at any time — "
-                     "the switch applies to the next document you check. Adding a language also "
-                     "installs its OCR model, so scanned documents in that script are read too. "
-                     "Your dictionary works in every language regardless. Downloading any model "
-                     "needs internet (one-off); nothing else does.").classes(
+            ui.label(tr("settings.languages")).classes("text-base font-medium")
+            ui.label(tr("settings.languages_hint")).classes(
                 "text-sm text-slate-500")
             if not nlp_suggester.available():
-                ui.label("⚠ The NLP suggestion engine isn't available in this build — only the dictionary "
-                         "and patterns are active.").classes("text-sm text-amber-700 mt-1")
+                ui.label(tr("settings.nlp_unavailable")).classes("text-sm text-amber-700 mt-1")
             lst = ui.column().classes("w-full gap-0 mt-2")
 
             @ui.refreshable
@@ -2188,57 +2066,69 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                     for L in nlp_suggester.language_status():
                         with ui.column().classes("w-full border-b py-2 gap-1"):
                             with ui.row().classes("items-center gap-3 w-full"):
-                                ui.label(L["label"]).classes("font-medium").style("width:110px")
-                                ui.label(L["note"]).classes("text-xs text-slate-500")
+                                ui.label(_lang_name(tr, L["code"], L["label"])).classes(
+                                    "font-medium").style("width:110px")
+                                ui.label(_engine_note(tr, L["note"])).classes("text-xs text-slate-500")
                                 ui.space()
                                 if L["ocr"]:
-                                    ui.label(f"OCR model {L['ocr_size']}").classes("text-xs text-slate-400")
+                                    ui.label(tr("settings.ocr_size", size=L["ocr_size"])).classes(
+                                        "text-xs text-slate-400")
                                 # English name detection is bundled, but its OCR model can be
                                 # absent on a lean pip install — we never fetch it silently, so
                                 # offer an explicit one-off download when OCR is available.
                                 if (L["code"] == "en" and docio.ocr_available()
                                         and "eng" not in docio.installed_ocr_languages()):
-                                    ui.button("Add OCR model", icon="download",
+                                    ui.button(tr("settings.add_ocr"), icon="download",
                                               on_click=do_download_eng_ocr).props(
                                         "outline no-caps dense").tooltip(
-                                        "Download the English OCR model so scanned English pages are read")
+                                        tr("settings.add_ocr_tip"))
                             for m in L["models"]:
                                 with ui.row().classes("items-center gap-3 w-full pl-4"):
                                     ui.label(m["name"]).classes("text-sm").style("width:190px")
                                     ui.label(m["size"]).classes("text-xs text-slate-400").style("width:130px")
                                     if m["active"]:
-                                        ui.badge("In use", color="teal-7")
+                                        ui.badge(tr("settings.badge_in_use"), color="teal-7")
                                     elif m["installed"]:
-                                        ui.badge("Installed", color="grey-6")
+                                        ui.badge(tr("settings.installed"), color="grey-6")
                                     elif m["builtin"]:
-                                        ui.badge("Built-in", color="teal-7")
+                                        ui.badge(tr("settings.builtin"), color="teal-7")
                                     else:
-                                        ui.badge("Not installed", color="amber-8")
+                                        ui.badge(tr("settings.not_installed"), color="amber-8")
                                     if m["note"]:
-                                        ui.label(m["note"]).classes("text-xs text-slate-400")
+                                        ui.label(_engine_note(tr, m["note"])).classes(
+                                            "text-xs text-slate-400")
                                     ui.space()
                                     if not m["installed"]:
-                                        ui.button("Download", icon="download",
+                                        ui.button(tr("settings.download"), icon="download",
                                                   on_click=lambda mm=m, LL=L: do_download(mm, LL)).props(
                                             "outline no-caps dense")
                                     else:
                                         if not m["active"]:
-                                            ui.button("Use", icon="check_circle",
+                                            ui.button(tr("settings.use"), icon="check_circle",
                                                       on_click=lambda mm=m, LL=L: do_use(mm, LL)).props(
                                                 "outline no-caps dense").tooltip(
-                                                "Detect with this model from the next document on")
+                                                tr("settings.use_tip"))
                                         if not m["builtin"]:
-                                            ui.button("Remove", icon="delete",
+                                            ui.button(tr("settings.remove"), icon="delete",
                                                       on_click=lambda mm=m, LL=L: do_remove(mm, LL)).props(
                                                 "flat no-caps dense color=grey-7")
 
             def do_use(m, L):
                 ok, msg = nlp_suggester.set_active_model(L["code"], m["name"])
-                ui.notify(msg, color="positive" if ok else "negative", multi_line=True)
+                label = _lang_name(tr, L["code"], L["label"])
+                if ok:
+                    ui.notify(tr("settings.model_active", label=label, model=m["name"]),
+                              color="positive", multi_line=True)
+                elif msg.endswith("isn't installed yet — download it first."):
+                    ui.notify(tr("settings.model_not_installed", model=m["name"]),
+                              color="negative", multi_line=True)
+                else:
+                    ui.notify(tr("settings.model_switch_failed", error=msg),
+                              color="negative", multi_line=True)
                 render.refresh()
 
             async def do_download(m, L):
-                note = ui.notification(f"Downloading {m['name']}… this can take a few minutes",
+                note = ui.notification(tr("settings.downloading_model", model=m["name"]),
                                        spinner=True, timeout=None)
                 ok, log = await run.io_bound(nlp_suggester.download_model, m["name"])
                 # Pull the language's OCR model along with the name-detection model, so a
@@ -2255,36 +2145,37 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                     # point of downloading a bigger model.
                     nlp_suggester.set_active_model(L["code"], m["name"])
                 if ok and ocr_ok:
-                    ui.notify(f"{m['name']} installed — {L['label']} detection now uses it",
+                    ui.notify(tr("settings.model_installed", model=m["name"],
+                                 label=_lang_name(tr, L["code"], L["label"])),
                               color="positive", multi_line=True)
                 elif ok:
-                    ui.notify(f"{m['name']} installed and in use, but the {L['label']} OCR model "
-                              "didn't download (no internet, or blocked). See the console window.",
+                    ui.notify(tr("settings.model_installed_no_ocr", model=m["name"],
+                                 label=_lang_name(tr, L["code"], L["label"])),
                               color="warning", multi_line=True)
                     print(f"\n[OCR download: {L['label']}] FAILED:\n{log}\n")
                 else:
-                    ui.notify(f"Couldn't install {m['name']} (no internet, or blocked). "
-                              f"{L['label']} detection is unchanged. See the console window.",
+                    ui.notify(tr("settings.model_install_failed", model=m["name"],
+                                 label=_lang_name(tr, L["code"], L["label"])),
                               color="negative", multi_line=True)
                     print(f"\n[model download: {m['name']}] FAILED:\n{log}\n")
                 render.refresh()
 
             async def do_download_eng_ocr():
-                note = ui.notification("Downloading the English OCR model… one-off",
+                note = ui.notification(tr("settings.eng_ocr_downloading"),
                                        spinner=True, timeout=None)
                 ok, log = await run.io_bound(docio.download_ocr_language, ["eng"])
                 note.dismiss()
                 if ok:
-                    ui.notify("English OCR model installed — scanned English pages will now be read",
+                    ui.notify(tr("settings.eng_ocr_ok"),
                               color="positive")
                 else:
-                    ui.notify("Couldn't download the English OCR model (no internet, or blocked). "
-                              "See the console window.", color="negative", multi_line=True)
+                    ui.notify(tr("settings.eng_ocr_failed"), color="negative", multi_line=True)
                     print(f"\n[English OCR download] FAILED:\n{log}\n")
                 render.refresh()
 
             async def do_remove(m, L):
-                note = ui.notification(f"Removing {m['name']}…", spinner=True, timeout=None)
+                note = ui.notification(tr("settings.removing_model", model=m["name"]),
+                                       spinner=True, timeout=None)
                 ok, log = await run.io_bound(nlp_suggester.remove_model, m["name"])
                 # Drop the language's OCR model only when its last detection model goes,
                 # so removing one model doesn't break scanned-page OCR for the others.
@@ -2294,23 +2185,22 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                     await run.io_bound(docio.remove_ocr_language, L["ocr"])
                 note.dismiss()
                 if not ok:
-                    ui.notify(f"Couldn't remove {m['name']}", color="negative")
+                    ui.notify(tr("settings.model_remove_failed", model=m["name"]), color="negative")
                     print(f"\n[model remove: {m['name']}] FAILED:\n{log}\n")
                 elif last_one:
-                    ui.notify(f"{m['name']} removed — {L['label']} detection is inactive until a "
-                              "model is downloaded again", color="positive", multi_line=True)
+                    ui.notify(tr("settings.model_removed_inactive", model=m["name"],
+                                 label=_lang_name(tr, L["code"], L["label"])),
+                              color="positive", multi_line=True)
                 else:
-                    ui.notify(f"{m['name']} removed", color="positive")
+                    ui.notify(tr("settings.model_removed", model=m["name"]), color="positive")
                 render.refresh()
 
             render()
 
         # ---- user-defined token types ----
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("Token types").classes("text-base font-medium")
-            ui.label("Built-in: PERSON, COUNTERPARTY, OTHER (names) plus EMAIL, PHONE, ACCOUNT "
-                     "(patterns). Add your own categories — they appear in the Type dropdowns on "
-                     "the De-identify and Entity dictionary tabs, and tokenise as [PROJECT_001].").classes(
+            ui.label(tr("settings.token_types")).classes("text-base font-medium")
+            ui.label(tr("settings.token_types_hint")).classes(
                 "text-sm text-slate-500")
             custom_types = [t for t in (custom_types or []) if t not in BUILTIN_TYPES]
             types_box = ui.column().classes("w-full gap-1 mt-2")
@@ -2321,7 +2211,7 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 types_box.clear()
                 with types_box:
                     if not custom_types:
-                        ui.label("No custom types yet — add one below.").classes("text-sm text-slate-400")
+                        ui.label(tr("settings.no_custom_types")).classes("text-sm text-slate-400")
                     for t in custom_types:
                         with ui.row().classes("items-center gap-2"):
                             ui.badge(t).props("color=deep-purple-6")
@@ -2333,9 +2223,9 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 reload_row.clear()
                 with reload_row:
                     ui.icon("info", size="16px").classes("text-amber-700")
-                    ui.label("Reload the app to use the updated types in the dropdowns.").classes(
+                    ui.label(tr("settings.reload_note")).classes(
                         "text-xs text-amber-700")
-                    ui.button("Reload now", icon="refresh",
+                    ui.button(tr("settings.reload_now"), icon="refresh",
                               on_click=lambda: ui.run_javascript("location.reload()")).props(
                         "flat dense no-caps size=sm")
 
@@ -2343,25 +2233,25 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 t = _sanitize_type(new_type.value)
                 new_type.value = ""
                 if not t:
-                    ui.notify("Enter a type name (letters or numbers).", color="warning")
+                    ui.notify(tr("settings.enter_type"), color="warning")
                     return
                 if t in BUILTIN_TYPES:
-                    ui.notify(f"{t} is a built-in type.", color="warning")
+                    ui.notify(tr("settings.builtin_type", type=t), color="warning")
                     return
                 if t in custom_types:
-                    ui.notify(f"{t} already exists.", color="warning")
+                    ui.notify(tr("settings.type_exists", type=t), color="warning")
                     return
                 custom_types.append(t)
                 try:
                     await client_save_token_types(custom_types)
                 except BrowserStoreError as exc:
                     custom_types.remove(t)
-                    ui.notify(f"Couldn't save the token types in this browser: {exc}",
+                    ui.notify(tr("settings.cant_save_types", error=exc),
                               color="negative", multi_line=True)
                     return
                 render_types.refresh()
                 note_reload()
-                ui.notify(f"Added type {t}", color="positive")
+                ui.notify(tr("settings.added_type", type=t), color="positive")
 
             async def remove_type(t):
                 if t in custom_types:
@@ -2370,30 +2260,25 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                         await client_save_token_types(custom_types)
                     except BrowserStoreError as exc:
                         custom_types.append(t)
-                        ui.notify(f"Couldn't save the token types in this browser: {exc}",
+                        ui.notify(tr("settings.cant_save_types", error=exc),
                                   color="negative", multi_line=True)
                         return
                     render_types.refresh()
                     note_reload()
-                    ui.notify(f"Removed {t}", color="primary")
+                    ui.notify(tr("settings.removed_type", type=t), color="primary")
 
             render_types()
             with ui.row().classes("items-center gap-2 mt-2"):
-                new_type = ui.input(placeholder="New type, e.g. PROJECT").props(
+                new_type = ui.input(placeholder=tr("settings.new_type")).props(
                     "outlined dense").on("keydown.enter", lambda: add_type())
-                ui.button("Add type", icon="add", on_click=add_type).props("outline no-caps")
+                ui.button(tr("settings.add_type"), icon="add", on_click=add_type).props("outline no-caps")
 
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("Browser data (IndexedDB)").classes("text-base font-medium")
-            ui.label("Your entity dictionary, custom token types, conversion history and the encrypted "
-                     "token→name mappings are stored in THIS browser only and are never uploaded to the "
-                     "server — and so are the de-identified result files, so you can download the same "
-                     "file again from Re-identify → Past conversions. They survive refreshing and "
-                     "reopening the app; clearing the browser's site data for Lethe erases them — so "
-                     "keep a backup somewhere safe.").classes(
+            ui.label(tr("settings.browser_title")).classes("text-base font-medium")
+            ui.label(tr("settings.browser_hint")).classes(
                 "text-sm text-slate-500")
 
-            counts_label = ui.label("Checking…").classes("text-sm").style(f"color:{PRIMARY}")
+            counts_label = ui.label(tr("settings.checking")).classes("text-sm").style(f"color:{PRIMARY}")
             quota_label = ui.label("").classes("text-xs text-slate-400")
             kept_label = ui.label("").classes("text-xs text-slate-400")
             persist_label = ui.label("").classes("text-xs text-slate-400")
@@ -2403,12 +2288,12 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                     ents = await client_entities()
                     jobs = await client_jobs()
                 except BrowserStoreError as exc:
-                    counts_label.text = f"Browser storage unavailable: {exc}"
+                    counts_label.text = tr("settings.storage_unavailable", error=exc)
                     counts_label.style("color:var(--danger)")
                     kept_label.text = ""
                     persist_label.text = ""
                     return
-                counts_label.text = f"{len(ents)} entit(ies) · {len(jobs)} conversion(s) stored in this browser"
+                counts_label.text = tr("settings.counts", entities=len(ents), jobs=len(jobs))
                 stats = {}
                 try:
                     stats = await client_output_stats()
@@ -2417,10 +2302,9 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 limit = stats.get("limit") or RESULT_KEEP_LIMIT
                 kept = stats.get("count")
                 kept_label.text = (
-                    f"Result files: {kept} of the last {limit} kept "
-                    f"(the same file you downloaded, stored in this browser)"
+                    tr("settings.result_kept", kept=kept, limit=limit)
                     if kept is not None else
-                    f"Result files: the last {limit} are kept in this browser"
+                    tr("settings.result_keep_note", limit=limit)
                 )
                 try:
                     q = await _store_call("window.lethStore.quota()", timeout=5)
@@ -2428,23 +2312,19 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                     q = None
                 if q and q.get("quota"):
                     used_mb = (q.get("usage") or 0) / 1024 / 1024
-                    quota_label.text = (f"Storage: {used_mb:.2f} MB used of "
-                                        f"{q['quota'] / 1024 / 1024:.0f} MB (browser-managed)")
+                    quota_label.text = tr("settings.quota", used=f"{used_mb:.2f}",
+                                          total=f"{q['quota'] / 1024 / 1024:.0f}")
                 else:
-                    quota_label.text = "Storage usage not exposed by this browser."
+                    quota_label.text = tr("settings.quota_unknown")
                 persist = await client_persist_status()
                 if persist.get("persisted"):
-                    persist_label.text = ("Persistent storage is ON — the browser will not clear these "
-                                          "files on its own.")
+                    persist_label.text = tr("settings.persist_on")
                     persist_label.style("color:var(--ok, #3f7d4e)")
                 elif persist.get("supported"):
-                    persist_label.text = ("Persistent storage was not granted, so the browser may clear "
-                                          "stored result files on its own. Download what you need, or "
-                                          "install Lethe as an app to improve the odds.")
+                    persist_label.text = tr("settings.persist_denied")
                     persist_label.style("color:var(--warn, #9b6f16)")
                 else:
-                    persist_label.text = ("This browser does not offer persistent storage, so it may "
-                                          "clear stored result files on its own.")
+                    persist_label.text = tr("settings.persist_unsupported")
                     persist_label.style("color:var(--warn, #9b6f16)")
 
             async def clear_results():
@@ -2452,82 +2332,73 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 token types and every conversion mapping stay exactly as they
                 are — only the downloadable copies go."""
                 with ui.dialog() as dlg, ui.card():
-                    ui.label("Delete the stored result files?").classes("text-base font-medium")
-                    ui.label("This frees the space the de-identified files take in this browser. "
-                             "Your dictionary, custom token types, conversion history and "
-                             "re-identification mappings are NOT touched. Files you already "
-                             "downloaded are not affected; a file that was never downloaded "
-                             "would need to be generated again.").classes("text-sm text-slate-600")
+                    ui.label(tr("settings.clear_results_title")).classes("text-base font-medium")
+                    ui.label(tr("settings.clear_results_warn")).classes("text-sm text-slate-600")
                     with ui.row().classes("justify-end gap-2 w-full"):
-                        ui.button("Cancel", on_click=lambda: dlg.submit(False)).props("flat no-caps")
-                        ui.button("Delete result files", color="negative",
+                        ui.button(tr("reid.cancel"), on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                        ui.button(tr("settings.clear_results"), color="negative",
                                   on_click=lambda: dlg.submit(True)).props("unelevated no-caps")
                 if not await dlg:
                     return
                 try:
                     await client_clear_outputs()
                 except BrowserStoreError as exc:
-                    ui.notify(f"Couldn't clear the result files: {exc}", color="negative",
+                    ui.notify(tr("settings.cant_clear_results", error=exc), color="negative",
                               multi_line=True)
                     return
                 await refresh_browser_summary()
-                ui.notify("Stored result files deleted — dictionary and conversions kept",
-                          color="positive")
+                ui.notify(tr("settings.clear_results_done"), color="positive")
 
             with ui.row().classes("items-center gap-2 mt-1"):
-                ui.button("Export backup (.json)", icon="download",
+                ui.button(tr("settings.export_backup"), icon="download",
                           on_click=lambda: ui.run_javascript("window.lethStore.downloadBackup()")).props(
                     "outline no-caps").tooltip(
-                    "Dictionary, custom types and conversion mappings — result files stay in the "
-                    "browser and are not part of the backup")
-                ui.button("Clear result files", icon="delete_sweep",
+                    tr("settings.export_backup_tip"))
+                ui.button(tr("settings.clear_results"), icon="delete_sweep",
                           on_click=lambda: clear_results()).props("outline no-caps").tooltip(
-                    "Deletes only the stored result files")
+                    tr("settings.clear_results_tip"))
                 ui.html('<input type="file" id="leth-backup-file" accept=".json,application/json" '
                         'style="display:none">')
-                ui.button("Import backup (.json)", icon="upload",
+                ui.button(tr("settings.import_backup"), icon="upload",
                           on_click=lambda: ui.run_javascript(
                               "window.lethMigration.wireBackupImport('leth-backup-file');"
                               'document.getElementById("leth-backup-file").click();')).props(
                     "outline no-caps")
                 ui.button(icon="refresh", on_click=lambda: refresh_browser_summary()).props(
-                    "flat round dense").tooltip("Refresh counts")
+                    "flat round dense").tooltip(tr("settings.refresh_counts"))
 
             def on_backup_imported(e):
                 data = e.args if isinstance(e.args, dict) else {}
                 if data.get("ok"):
-                    ui.notify(f"Backup imported — {data.get('entities', 0)} entit(ies), "
-                              f"{data.get('jobs', 0)} conversion(s) added to this browser",
+                    ui.notify(tr("settings.backup_imported", entities=data.get("entities", 0),
+                                 jobs=data.get("jobs", 0)),
                               color="positive")
                 else:
-                    ui.notify(f"Backup couldn't be imported: {data.get('error')}",
+                    ui.notify(tr("settings.backup_import_failed", error=data.get("error")),
                               color="negative", multi_line=True)
 
             ui.on("leth-backup-imported", on_backup_imported)
 
             async def erase_all():
                 with ui.dialog() as dlg, ui.card():
-                    ui.label("Erase ALL browser data for Lethe?").classes("text-base font-medium")
-                    ui.label("This permanently deletes your dictionary, custom token types, conversion "
-                             "history, every re-identification mapping and every stored result file in "
-                             "this browser. "
-                             "Export a backup first if you might need any of it.").classes(
+                    ui.label(tr("settings.erase_title")).classes("text-base font-medium")
+                    ui.label(tr("settings.erase_warn")).classes(
                         "text-sm text-slate-600")
                     with ui.row().classes("justify-end gap-2 w-full"):
-                        ui.button("Cancel", on_click=lambda: dlg.submit(False)).props("flat no-caps")
-                        ui.button("Erase everything", color="negative",
+                        ui.button(tr("reid.cancel"), on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                        ui.button(tr("settings.erase_confirm"), color="negative",
                                   on_click=lambda: dlg.submit(True)).props("unelevated no-caps")
                 if await dlg:
                     ui.run_javascript("window.lethStore.clearAll().then(() => location.reload())")
 
-            ui.button("Erase all browser data", icon="delete_forever", on_click=erase_all).props(
+            ui.button(tr("settings.erase_all"), icon="delete_forever", on_click=erase_all).props(
                 "flat no-caps color=negative")
             _fire_soon(refresh_browser_summary)
 
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("Migrate old server-side data").classes("text-base font-medium")
-            mig_desc = ui.label("Checking…").classes("text-sm text-slate-500")
-            mig_btn = ui.button("Migrate old data into this browser", icon="sync",
+            ui.label(tr("settings.migrate_title")).classes("text-base font-medium")
+            mig_desc = ui.label(tr("settings.checking")).classes("text-sm text-slate-500")
+            mig_btn = ui.button(tr("settings.migrate_button"), icon="sync",
                                 on_click=lambda: run_migration()).props(
                 "unelevated no-caps mt-1")
             mig_btn.visible = False
@@ -2536,36 +2407,30 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                 try:
                     status = await _store_call("window.lethMigration.status()", timeout=10)
                 except BrowserStoreError as exc:
-                    mig_desc.text = f"Couldn't check the server data folder: {exc}"
+                    mig_desc.text = tr("settings.migrate_cant_check", error=exc)
                     return
                 if not status or not status.get("present"):
-                    mig_desc.text = ("No legacy server-side user data is present — the server data "
-                                     "folder only holds program resources (OCR models, session secret).")
+                    mig_desc.text = tr("settings.migrate_desc_none")
                     mig_btn.visible = False
                     return
-                mig_desc.text = (
-                    f"Found {status.get('entities', 0)} entit(ies), {status.get('token_types', 0)} "
-                    f"custom type(s) and {status.get('jobs', 0)} conversion(s) in the old data folder "
-                    f"({status.get('data_dir', '')}). Import them into this browser below; the server "
-                    "folder is archived, never deleted.")
+                mig_desc.text = tr("settings.migrate_desc_found", entities=status.get("entities", 0),
+                                   types=status.get("token_types", 0), jobs=status.get("jobs", 0),
+                                   path=status.get("data_dir", ""))
                 mig_btn.visible = True
 
             async def run_migration():
                 with ui.dialog() as dlg, ui.card().classes("w-full max-w-md"):
-                    ui.label("Import old data into this browser").classes("text-base font-medium")
-                    ui.label("The old vault mappings were encrypted with a passphrase. Enter it if you "
-                             "used one (leave blank if you didn't). Then choose a passphrase to encrypt "
-                             "the imported mappings in this browser.").classes("text-sm text-slate-500")
-                    old_pw = ui.input("Old passphrase (if any)", password=True,
+                    ui.label(tr("settings.migrate_dialog_title")).classes("text-base font-medium")
+                    ui.label(tr("settings.migrate_dialog_hint")).classes("text-sm text-slate-500")
+                    old_pw = ui.input(tr("settings.migrate_old_pw"), password=True,
                                       password_toggle_button=True).props("outlined dense").classes("w-full")
-                    new_pw = ui.input("New passphrase for this browser (optional)", password=True,
+                    new_pw = ui.input(tr("settings.migrate_new_pw"), password=True,
                                       password_toggle_button=True).props("outlined dense").classes("w-full")
-                    ui.label("A blank new passphrase stores the imported mappings unprotected in this "
-                             "browser — the same as the old app's blank passphrase.").classes(
+                    ui.label(tr("settings.migrate_blank_pw")).classes(
                         "text-xs text-slate-500")
                     with ui.row().classes("justify-end gap-2 w-full"):
-                        ui.button("Cancel", on_click=lambda: dlg.submit(None)).props("flat no-caps")
-                        ui.button("Import", on_click=lambda: dlg.submit(
+                        ui.button(tr("reid.cancel"), on_click=lambda: dlg.submit(None)).props("flat no-caps")
+                        ui.button(tr("settings.migrate_import"), on_click=lambda: dlg.submit(
                             (old_pw.value or "", new_pw.value or ""))).props("unelevated no-caps").classes(
                             "text-white")
                 vals = await dlg
@@ -2582,17 +2447,17 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
             def on_migration_done(e):
                 data = e.args if isinstance(e.args, dict) else {}
                 if not data.get("ok"):
-                    ui.notify(f"Migration failed: {data.get('error')}", color="negative", multi_line=True)
+                    ui.notify(tr("settings.migrate_failed", error=data.get("error")),
+                              color="negative", multi_line=True)
                     return
                 notes = data.get("notes") or []
-                msg = (f"Migrated {data.get('entitiesAdded', 0)} entit(ies), "
-                       f"{data.get('token_types', 0)} type(s), {data.get('jobs', 0)} conversion(s) into "
-                       "this browser")
+                msg = tr("settings.migrate_done", entities=data.get("entitiesAdded", 0),
+                         types=data.get("token_types", 0), jobs=data.get("jobs", 0))
                 if notes:
-                    msg += (f"; {data.get('errors', len(notes))} job(s) need the right old passphrase — "
-                            "the old server data was kept, so you can retry with the correct passphrase")
+                    msg += tr("settings.migrate_done_notes",
+                              errors=data.get("errors", len(notes)))
                 if data.get("archivedTo"):
-                    msg += " · old server data archived (not deleted)"
+                    msg += tr("settings.migrate_archived")
                 ui.notify(msg, color="positive" if not notes else "warning",
                           multi_line=bool(notes), timeout=8000)
                 if not notes:
@@ -2602,17 +2467,15 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
             _fire_soon(refresh_migration_status)
 
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("Files & folders").classes("text-base font-medium")
-            ui.label("The server no longer keeps your dictionary, conversion history or mappings. The "
-                     "data folder below now only holds program resources (OCR models) and the NiceGUI "
-                     "session secret — you don't need to back it up for your data.").classes(
+            ui.label(tr("settings.folders")).classes("text-base font-medium")
+            ui.label(tr("settings.folders_hint")).classes(
                 "text-sm text-slate-500")
 
             def reveal(p: str):
                 if _open_folder(p):
-                    ui.notify("Opened in your file manager", color="primary")
+                    ui.notify(tr("settings.opened"), color="primary")
                 else:
-                    ui.notify("Couldn't open it automatically — copy the path shown above",
+                    ui.notify(tr("settings.cant_open"),
                               color="warning")
 
             def folder_row(title: str, desc: str, path: str):
@@ -2623,23 +2486,22 @@ def build_settings_panel(custom_types: list[str] | None = None, storage: dict | 
                     with ui.row().classes("items-center gap-2 w-full no-wrap"):
                         ui.input(value=path).props("outlined dense readonly").classes(
                             "flex-1").style("font-family:monospace;font-size:12px")
-                        ui.button("Open", icon="folder_open",
+                        ui.button(tr("settings.open"), icon="folder_open",
                                   on_click=lambda p=path: reveal(p)).props(
-                            "outline no-caps").tooltip("Open this folder")
+                            "outline no-caps").tooltip(tr("settings.open_tip"))
 
-            folder_row("Server-side data folder (program resources only)",
-                       "OCR models and the session secret — no user data, nothing to back up.",
+            folder_row(tr("settings.server_folder"),
+                       tr("settings.server_folder_desc"),
                        DATA_DIR)
-            folder_row("Server-side temporary files (auto-deleted)",
-                       f"Working copies of uploaded documents and their extracted text are deleted "
-                       f"{_ttl_text()} after your last action.",
+            folder_row(tr("settings.runtime_folder"),
+                       tr("settings.runtime_folder_desc", ttl=_ttl_text(tr)),
                        RUNTIME_DIR)
-            folder_row("Program files (where Lethe runs from)", "",
+            folder_row(tr("settings.program_folder"), "",
                        os.path.dirname(os.path.abspath(__file__)))
 
         with ui.card().classes("w-full rounded-xl shadow-sm"):
-            ui.label("About Lethe").classes("text-base font-medium")
-            ui.html(ABOUT_HTML)
+            ui.label(tr("settings.about")).classes("text-base font-medium")
+            ui.html(tr("about.html", version=APP_VERSION, repo=REPO_URL, gh_svg=_GH_SVG))
 
     # Lets the tab handler refresh the browser-storage summary (counts, quota,
     # result-file retention, persistent-storage state) whenever Settings opens.
