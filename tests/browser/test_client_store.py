@@ -82,7 +82,10 @@ def _open_profile(pw, user_data_dir: str):
 
 
 def _goto(page, url: str) -> None:
-    page.goto(url, wait_until="networkidle")
+    # Pin the interface language to English: these assertions read the English
+    # labels, while the app's default interface language is Chinese (VYB-355).
+    sep = "&" if "?" in url else "?"
+    page.goto(f"{url}{sep}lang=en", wait_until="networkidle")
     page.get_by_text("Lethe", exact=True).first.wait_for(timeout=30000)
 
 
@@ -441,7 +444,7 @@ def test_result_file_survives_reload_and_redownloads(server, tmp_path):
         row.wait_for(timeout=20000)
 
         with page2.expect_download(timeout=30000) as again_dl:
-            row.locator('[aria-label="Download result file again"]').click()
+            row.locator('[aria-label="Download this result file again"]').click()
         again = again_dl.value
         assert again.suggested_filename == first.suggested_filename
         assert again.path().read_bytes() == first_bytes, "re-downloaded bytes differ"
@@ -449,7 +452,10 @@ def test_result_file_survives_reload_and_redownloads(server, tmp_path):
         # the same entry point is offered for the selected conversion
         row.locator("td").first.click()
         page2.get_by_text(f"Selected: {job_id}").wait_for(timeout=20000)
-        page2.get_by_role("button", name="Download this result file again").wait_for(timeout=20000)
+        # The row action and this button share a label, so match the labelled one
+        # (the icon-only row button carries the aria-label but no text).
+        page2.get_by_role("button", name="Download this result file again").filter(
+            has_text="Download this result file again").wait_for(timeout=20000)
 
         assert errors == [], f"browser console/page errors: {errors}"
         ctx2.close()
@@ -477,7 +483,7 @@ def test_history_list_does_not_read_result_blobs(server, tmp_path):
 
         # …and the blob is loaded the moment the user asks for the download
         with page.expect_download(timeout=30000):
-            page.locator('[aria-label="Download result file again"]').first.click()
+            page.locator('[aria-label="Download this result file again"]').first.click()
         assert page.evaluate("window.__idbReads.outputs.get") == 1
         ctx.close()
 

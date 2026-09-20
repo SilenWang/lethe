@@ -107,7 +107,10 @@ def _open(pw, user_data_dir: str):
 
 
 def _goto(page, url: str) -> None:
-    page.goto(url, wait_until="networkidle")
+    # Pin the interface language to English: these assertions read the English
+    # labels, while the app's default interface language is Chinese (VYB-355).
+    sep = "&" if "?" in url else "?"
+    page.goto(f"{url}{sep}lang=en", wait_until="networkidle")
     page.get_by_text("Lethe", exact=True).first.wait_for(timeout=30000)
 
 
