@@ -171,3 +171,22 @@ def test_suggest_spans_are_bounded():
         assert 0 <= s < e <= len(text)
         assert t in {"PERSON", "COUNTERPARTY"}
     assert nlp_suggester.suggest("   ") == []
+
+
+def test_place_names_map_to_counterparty():
+    """Place names are sensitive too: the geographic labels (GPE/LOC/NORP) map
+    to ORGANIZATION so a city/province is surfaced as a counterparty candidate
+    instead of being silently dropped."""
+    mapping = nlp_suggester._NER_CONFIG["ner_model_configuration"][
+        "model_to_presidio_entity_mapping"]
+    for label in ("GPE", "LOC", "NORP"):
+        assert mapping[label] == "ORGANIZATION"
+    # …and a real model run actually surfaces places as COUNTERPARTY spans.
+    model = "zh_core_web_lg"
+    if not nlp_suggester.is_installed(model):
+        return
+    text = "上海华信资本管理有限公司位于上海市浦东新区，项目在江苏省苏州市开展。"
+    places = [text[s:e] for s, e, t in
+              nlp_suggester._analyze("zh", model, text, 0.40)
+              if t == "COUNTERPARTY"]
+    assert any("上海市" in p or "江苏省" in p or "苏州市" in p for p in places), places

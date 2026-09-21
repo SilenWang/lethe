@@ -92,14 +92,18 @@ for _lang in LANGUAGES:
 _PRESIDIO_TO_TYPE = {"PERSON": "PERSON", "ORGANIZATION": "COUNTERPARTY"}
 # spaCy label -> Presidio entity, applied per language by the NlpEngineProvider
 # (PER/PERSON -> PERSON; ORG/FAC/COMPANY -> ORGANIZATION; the geographic labels
-# GPE/LOC/NORP are deliberately not mapped so cities/countries aren't flagged).
+# GPE/LOC/NORP also map to ORGANIZATION -- place names are sensitive too, so a
+# city/province/country is surfaced as a counterparty candidate like any other
+# organisation. They stay *suggestions*, so the reviewer still decides.)
 _NER_CONFIG = {
     "nlp_engine_name": "spacy",
     "models": [{"lang_code": "en", "model_name": "en_core_web_sm"}],  # replaced per language
     "ner_model_configuration": {
         "model_to_presidio_entity_mapping": {
             "PER": "PERSON", "PERSON": "PERSON", "ORG": "ORGANIZATION",
-            "FAC": "ORGANIZATION", "COMPANY": "ORGANIZATION"},
+            "FAC": "ORGANIZATION", "COMPANY": "ORGANIZATION",
+            "GPE": "ORGANIZATION", "LOC": "ORGANIZATION",
+            "NORP": "ORGANIZATION"},
         "low_confidence_score_multiplier": 0.4,
         "low_score_entity_names": [],
     },
