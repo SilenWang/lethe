@@ -235,6 +235,7 @@
   "modelnote.en_lg": "Default — best recall (word vectors)",
   "modelnote.en_trf": "Transformer — most accurate, heaviest",
   "modelnote.zh_lg": "Default — best recall for Chinese names",
+  "modelnote.zh_trf": "Transformer — best recall on contract/document text, ~8x slower",
   "settings.browser_title": "Browser data (IndexedDB)",
   "settings.browser_hint": "Your entity dictionary, custom token types, conversion history and the encrypted token→name mappings are stored in THIS browser only and are never uploaded to the server — and so are the de-identified result files, so you can download the same file again from Re-identify → Past conversions. They survive refreshing and reopening the app; clearing the browser's site data for Lethe erases them — so keep a backup somewhere safe.",
   "settings.checking": "Checking…",

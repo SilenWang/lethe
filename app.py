@@ -160,6 +160,7 @@ ENGINE_NOTE_KEYS = {
     "Default — best recall (word vectors)": "modelnote.en_lg",
     "Transformer — most accurate, heaviest": "modelnote.en_trf",
     "Default — best recall for Chinese names": "modelnote.zh_lg",
+    "Transformer — best recall on contract/document text, ~8x slower": "modelnote.zh_trf",
 }
 
 

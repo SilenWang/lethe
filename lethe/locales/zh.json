@@ -235,6 +235,7 @@
   "modelnote.en_lg": "默认——召回率最佳（词向量）",
   "modelnote.en_trf": "Transformer——最准确，体积最大",
   "modelnote.zh_lg": "默认——中文姓名召回率最佳",
+  "modelnote.zh_trf": "Transformer——合同/文档类文本召回最佳，速度约慢 8 倍",
   "settings.browser_title": "浏览器数据（IndexedDB）",
   "settings.browser_hint": "你的实体词典、自定义令牌类型、转换历史以及加密的令牌→名称映射仅保存在本浏览器中，绝不上传到服务器——脱敏后的结果文件也是如此，因此你可以在「再识别 → 历史转换」中再次下载同一个文件。刷新和重新打开应用后它们仍然保留；清除 Lethe 的浏览器站点数据会将其删除——请妥善保留一份备份。",
   "settings.checking": "检查中……",
