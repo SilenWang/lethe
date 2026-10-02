@@ -15,7 +15,9 @@ keywords = ["pii", "de-identification", "redaction", "privacy", "nicegui", "pres
 # Base engine + UI. The NLP suggestion engine is an optional extra (see below);
 # without it, Lethe falls back to a built-in regex name-guesser.
 dependencies = [
-    "nicegui",
+    # 3.16.0 is the version the client-side-storage / TTL work was verified against;
+    # keep a floor so an older NiceGUI can't silently change UI/session behaviour.
+    "nicegui>=3.16.0",
     "python-docx",
     "python-pptx",
     "openpyxl",
@@ -27,11 +29,36 @@ dependencies = [
 [project.optional-dependencies]
 # Microsoft Presidio + spaCy + the small English model. Needs Python <= 3.13
 # (spaCy has no 3.14 wheels yet). Install with:  pipx install "lethe[nlp] @ git+..."
+# Bigger name-detection models (md/lg/trf, Chinese/Japanese/Korean) are NOT here:
+# the app's Settings page downloads and switches between them on demand, so the
+# default install stays small. English and Chinese default to the lg models
+# (used automatically once installed); pre-install them with [nlp-models].
 nlp = [
     "presidio-analyzer",
     "presidio-anonymizer",
     "spacy",
     "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+]
+# The larger name-detection models, pre-installed (opt-in: ~2.8 GB in total).
+# Same wheels the Settings page downloads on demand; a plain `lethe[nlp]`
+# install works the same as before, these just save the one-off downloads and
+# make English detection use lg out of the box (its default). Chinese's default
+# is RaNER, which is not here (see below), so these wheels are what Chinese
+# falls back to until RaNER is downloaded — lg is the largest of them.
+# Chinese additionally offers zh_raner_base_generic (RaNER, Apache-2.0): it is
+# not a pip wheel, so Settings installs CPU-only torch + transformers and
+# fetches the checkpoint into <data dir>/nlp_models on demand. It is the
+# Chinese default, with by far the best person/organisation recall — see
+# docs/nlp-model-comparison.md.
+nlp-models = [
+    "en_core_web_md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl",
+    "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl",
+    "zh_core_web_md @ https://github.com/explosion/spacy-models/releases/download/zh_core_web_md-3.8.0/zh_core_web_md-3.8.0-py3-none-any.whl",
+    "zh_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/zh_core_web_lg-3.8.0/zh_core_web_lg-3.8.0-py3-none-any.whl",
+    "ja_core_news_md @ https://github.com/explosion/spacy-models/releases/download/ja_core_news_md-3.8.0/ja_core_news_md-3.8.0-py3-none-any.whl",
+    "ja_core_news_lg @ https://github.com/explosion/spacy-models/releases/download/ja_core_news_lg-3.8.0/ja_core_news_lg-3.8.0-py3-none-any.whl",
+    "ko_core_news_md @ https://github.com/explosion/spacy-models/releases/download/ko_core_news_md-3.8.0/ko_core_news_md-3.8.0-py3-none-any.whl",
+    "ko_core_news_lg @ https://github.com/explosion/spacy-models/releases/download/ko_core_news_lg-3.8.0/ko_core_news_lg-3.8.0-py3-none-any.whl",
 ]
 # Fully-local OCR for scanned / image-based PDF pages (PDFium + bundled
 # Tesseract, ~16 MB). Without it those pages are flagged but not read.
@@ -65,4 +92,4 @@ packages = ["lethe"]
 include-package-data = true
 
 [tool.setuptools.package-data]
-lethe = ["web_static/*", "web_static/fonts/*"]
+lethe = ["web_static/*", "web_static/fonts/*", "web_static/icons/*", "locales/*.json"]

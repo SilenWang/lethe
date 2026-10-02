@@ -1,0 +1,47 @@
+[workspace]
+name = "lethe"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+python = "3.12.*"
+pip = "*"
+
+[pypi-dependencies]
+# Base engine + UI (pyproject [project.dependencies]).
+nicegui = ">=3.16.0"
+python-docx = "*"
+python-pptx = "*"
+openpyxl = "*"
+pypdf = "*"
+pdfplumber = "*"
+cryptography = "*"
+# [nlp] extra — Presidio suggestion engine.
+presidio-analyzer = "*"
+presidio-anonymizer = "*"
+spacy = "*"
+spacy-transformers = "*"
+click = "*"
+# NER model evaluation (candidate HuggingFace models). CPU-only torch, per the
+# issue constraint — the CUDA wheel is ~2.5 GB and buys nothing here.
+transformers = "*"
+huggingface_hub = "*"
+safetensors = "*"
+# Reading the public CLUE-NER evaluation corpus (parquet).
+pyarrow = "*"
+torch = { version = ">=2.4", index = "https://download.pytorch.org/whl/cpu" }
+# [dev] extra.
+pytest = "*"
+# spaCy model wheels (pinned by direct URL, same ones the app's Settings page
+# downloads on demand) — installed here so the comparison tool runs offline-ish.
+en_core_web_sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+en_core_web_md = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl" }
+en_core_web_lg = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl" }
+zh_core_web_sm = { url = "https://github.com/explosion/spacy-models/releases/download/zh_core_web_sm-3.8.0/zh_core_web_sm-3.8.0-py3-none-any.whl" }
+zh_core_web_md = { url = "https://github.com/explosion/spacy-models/releases/download/zh_core_web_md-3.8.0/zh_core_web_md-3.8.0-py3-none-any.whl" }
+zh_core_web_lg = { url = "https://github.com/explosion/spacy-models/releases/download/zh_core_web_lg-3.8.0/zh_core_web_lg-3.8.0-py3-none-any.whl" }
+zh_core_web_trf = { url = "https://github.com/explosion/spacy-models/releases/download/zh_core_web_trf-3.8.0/zh_core_web_trf-3.8.0-py3-none-any.whl" }
+
+[tasks]
+test = "python -m pytest tests/ -q"
+compare-nlp = "python tools/compare_nlp_models.py"

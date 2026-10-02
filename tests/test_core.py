@@ -81,20 +81,22 @@ def test_restore_exact_match():
     assert n2 == 0 and "John Smith" not in bad
 
 
-# ---- vault round-trip + wrong-passphrase guard ------------------------------
-def test_vault_roundtrip_and_wrong_passphrase():
+# ---- legacy vault codec: round-trip + wrong-passphrase guard ----------------
+# Steady-state mapping storage moved to the browser (IndexedDB + WebCrypto);
+# this Fernet codec is kept for the one-time migration of an old DATA_DIR.
+def test_vault_codec_roundtrip_and_wrong_passphrase():
     mapping = {"[PERSON_001]": "John Smith", "[COUNTERPARTY_001]": "Acme Capital Partners"}
     jid = "test-job-0001"
-    vault.save_job(jid, mapping, "correct horse", meta={"source_file": "x", "replacements": 2})
-    got = vault.load_job(jid, "correct horse")
+    record = vault.encrypt_record(jid, mapping, "correct horse",
+                                  meta={"source_file": "x", "replacements": 2})
+    got = vault.decrypt_record(record, "correct horse")
     assert got["mapping"] == mapping
     raised = False
     try:
-        vault.load_job(jid, "wrong passphrase")
+        vault.decrypt_record(record, "wrong passphrase")
     except (ValueError, Exception):
         raised = True
     assert raised, "wrong passphrase must not decrypt the job"
-    vault.delete_job(jid)
 
 
 # ---- Excel: shared-string cells (a separate xl/sharedStrings.xml, the <si>

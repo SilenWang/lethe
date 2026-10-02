@@ -115,16 +115,52 @@ with a passphrase and stored only on your computer.
   for careful review since OCR isn't perfect. The Windows build **bundles the English
   model so OCR runs fully offline**; any page OCR still can't read is flagged rather than
   silently dropped.
-- **Encrypted vault:** each job's token→name map is sealed with your passphrase
-  (PBKDF2 → Fernet). Lose the passphrase and that job is unrecoverable *by design*.
+- **Encrypted mappings, stored in your browser:** each job's token→name map is sealed
+  with your passphrase in the browser (PBKDF2-SHA-256 480k → AES-GCM-256) and kept in
+  IndexedDB — never uploaded to the server. Lose the passphrase and that job is
+  unrecoverable *by design*. Export a JSON backup from Settings → Browser data.
+- **Your result file is kept too:** the de-identified file of each recent conversion is
+  stored in the same browser storage, exactly as downloaded, so **Past conversions** can
+  hand it back after a refresh, a closed tab or a restart (the ⤓ button on a row). The
+  most recent 20 are kept; older ones are dropped automatically, and
+  **Settings → Browser data → Clear result files** deletes them all without touching your
+  dictionary, token types or conversion list.
+- **No server-side leftovers:** the server holds only what one run needs — temporary
+  working copies of the uploaded documents and their extracted text. Those are deleted
+  automatically **5 minutes after your last action** (configurable via
+  `LETHE_JOB_TTL_SECONDS`), and immediately when you click *Start over*; a sweep also
+  clears any leftovers at startup and shutdown. Nothing user-identifying is written to
+  the server's logs.
 - **Review before anything is written:** Lethe shows every proposed redaction,
   highlighted in the document — nothing is changed until you confirm.
 - **Multi-language (detection + OCR):** adding a language in Settings (Chinese, Japanese,
-  Korean, …) installs both its name-detection model *and* its OCR model, so scanned
-  documents in that script are read too. English works offline out of the box; extra
-  languages are a one-off online download. Your dictionary works in every language regardless.
+  Korean, …) installs its OCR model, so scanned documents in that script are read too.
+  Each language offers several name-detection **spaCy models** — small through large, plus
+  an English transformer — downloadable and switchable from Settings at any time; bigger
+  models catch more names but download more data. **English defaults to the largest spaCy
+  model** (`en_core_web_lg`) and **Chinese defaults to RaNER** (`zh_raner_base_generic`):
+  install it once and detection uses it automatically, for maximum recall; until then
+  Chinese falls back to the largest spaCy model you do have, and the bundled
+  `en_core_web_sm` keeps English working fully offline. You can switch back to a smaller
+  model at any time. Every other model is a one-off online download. Your dictionary works
+  in every language regardless.
+- **Chinese names, organisations and schools — RaNER is the default.** On contract-style
+  text the spaCy Chinese models miss a lot: measured against the public CLUENER2020 corpus
+  they recall 72 % (lg) / 81 % (trf) of people and 58 % / 71 % of organisations, while
+  `zh_raner_base_generic` reaches 93 % / 80 % — with fewer false positives than `lg`. It
+  downloads from Settings like any other model (Apache-2.0, ~409 MB plus CPU-only PyTorch
+  ~200 MB), becomes the active Chinese model as soon as it lands, and takes effect on the
+  next document.
 - **Themed desktop UI:** a NiceGUI app with a classical light/dark "river of oblivion"
   skin.
+- **Bilingual interface (中文 / English):** a language switcher in the header flips the
+  whole UI between Chinese and English instantly — titles, buttons, hints, errors and
+  settings alike — and remembers your choice in the browser. First visit follows
+  `?lang=`, the saved cookie, then your browser language, defaulting to Chinese.
+- **Installable as an app (PWA):** Chromium browsers offer **Install Lethe**, after which
+  it runs in its own window from a launcher icon. The service worker caches **only the
+  app's own static assets** — never a document, a result or a mapping. See
+  [docs/pwa.md](docs/pwa.md).
 - **Ships everywhere:** a Windows installer and portable bundle (no Python needed), or
   `pipx install` on Windows / macOS / Linux.
 
@@ -143,11 +179,38 @@ model (otherwise Lethe falls back to a built-in regex name-guesser), `[ocr]` add
 fully-local OCR so scanned/image PDF pages are read (otherwise they're flagged, not read),
 and `[email]` adds Outlook `.msg` support (`.eml`/`.html` always work; without the extra,
 `.msg` is flagged). Either way, running `lethe` opens the app at `http://localhost:8731`.
+A fourth, optional extra — `[nlp-models]` — pre-installs the **larger** name-detection
+models (English md/lg, Chinese md/lg, Japanese md/lg, Korean md/lg, ~2.8 GB). Installing
+it makes English detection use `en_core_web_lg` immediately, and gives Chinese its
+`zh_core_web_lg` fallback; without it, Settings downloads and switches between those
+models on demand, per language. Chinese's actual default, the **RaNER** model, is not a
+pip wheel and is not in this extra — download it once from Settings and it is fetched into
+the app data directory (that also installs CPU-only PyTorch, ~200 MB).
 
 > spaCy/Presidio have no Python 3.14 wheels yet, so the `[nlp]` extra requires Python ≤ 3.13.
 
 The Windows installer and portable bundle embed their own Python, so they need **no
 Python on the target machine**.
+
+### Install it as an app (PWA)
+
+Chrome / Edge can install Lethe as a standalone-window app:
+
+1. Start Lethe and open it at `http://127.0.0.1:8731` (or `http://localhost:8731`).
+   Installation needs a **secure context** — `localhost` counts, a plain LAN IP does not,
+   so install from the machine running the server.
+2. Click the **Install** icon in the address bar (or *Cast, save and share → Install page
+   as app*) and accept.
+3. Lethe opens in its own window with a launcher icon; a first-launch prompt asks for
+   persistent storage so the browser is less likely to evict your dictionary and mappings.
+
+The service worker caches **only** the app's static shell — never your documents, results
+or mappings. Cache boundary, install requirements and update behaviour:
+[docs/pwa.md](docs/pwa.md).
+
+For a consolidated Chinese-language usage & deployment guide (PWA, language switching,
+model download/switch, the 5-minute TTL and where every kind of data lives), see
+[docs/user-guide.md](docs/user-guide.md).
 
 ## How it works — the tabs
 
@@ -190,17 +253,22 @@ app.py  (NiceGUI UI)
           core.py            detection + tokenisation + replace / restore
           docio.py           Word / PDF / Excel read & write
           nlp_suggester.py   Presidio + spaCy suggestions (optional)
-          vault.py           encrypted, reversible token → name store
-          store.py           entity dictionary (entities.json)
-          web_static/        bundled theme assets (Cinzel font, favicon)
+          vault.py           legacy vault codec (one-time DATA_DIR migration)
+          store.py           dictionary logic (pure; data lives in the browser)
+          runtime.py         5-minute TTL workspace for one-off computation files
+          web_static/        theme assets + client-store.js (IndexedDB/WebCrypto)
 ```
 
 The UI is a thin layer over the `lethe` package; all detection, redaction and storage
-logic lives there with no UI coupling. User data — your `entities.json` dictionary,
-custom token types and the encrypted `vault/` — lives in a per-user data directory
-(`%APPDATA%\Lethe` on Windows, `~/Library/Application Support/Lethe` on macOS,
-`~/.local/share/Lethe` on Linux), or wherever `$LETHE_DATA_DIR` points (the Windows
-portable bundle sets it to keep data in-folder). It never goes inside the package.
+logic lives there with no UI coupling. User data — your dictionary, custom token types,
+conversion history, the encrypted token→name mappings and the de-identified result files —
+lives in **the browser** (IndexedDB, isolated per browser profile) and never goes inside
+the package or on the server. The per-user data directory (`DATA_DIR`) only holds program
+resources such as the OCR models and the NiceGUI session secret, plus the `runtime/`
+workspace holding the temporary files of a run in progress (5-minute sliding TTL, then
+deleted); a legacy install's `entities.json`, `token_types.json` and `vault/` are imported
+into the browser once via Settings → Migrate old server-side data and then archived in
+place.
 
 ## Limitations
 
