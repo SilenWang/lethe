@@ -23,9 +23,10 @@ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0
 #   Japanese  ja_core_news_sm · ja_core_news_md · ja_core_news_lg
 #   Korean    ko_core_news_sm · ko_core_news_md · ko_core_news_lg
 #
-# Chinese additionally offers zh_raner_base_generic (RaNER, Apache-2.0). It is
-# NOT a pip wheel: Settings installs CPU-only torch + transformers and downloads
-# the checkpoint into <data dir>/nlp_models/, so there is nothing to add here.
+# Chinese *defaults* to zh_raner_base_generic (RaNER, Apache-2.0). It is NOT a
+# pip wheel: Settings installs CPU-only torch + transformers and downloads the
+# checkpoint into <data dir>/nlp_models/, so there is nothing to add here — and
+# the lg/md wheels above are only its fallback until RaNER is downloaded.
 # Measured recall (CLUENER2020 dev) — people/organisations: zh_core_web_lg
 # 72%/58%, zh_core_web_trf 81%/71%, RaNER 93%/80%. See
 # docs/nlp-model-comparison.md.

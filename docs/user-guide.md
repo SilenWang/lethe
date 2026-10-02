@@ -58,8 +58,8 @@ Lethe 自带 web app manifest 与 service worker，Chrome / Edge 可把它安装
 
 在 **Settings → Detection & OCR languages** 中管理：
 
-- 每种语言列出可用的检测模型（small → large，英文另有 transformer），可下载、切换、删除。**英文与中文默认使用最大的 `_lg` 模型**：装好后自动生效以获得最高召回；未装时英文用随包（`[nlp]` extra）的 `en_core_web_sm` 离线兜底，可随时切回小模型。
-- 中文另提供 **`zh_raner_base_generic`（RaNER）**：它不是 spaCy 包，设置页下载时会从 HuggingFace 取回模型文件（Apache-2.0，约 409 MB）并安装 CPU 版 PyTorch（约 200 MB），存到服务端数据目录的 `nlp_models/` 下；下载完成后自动切换为当前中文模型。
+- 每种语言列出可用的检测模型（small → large，英文另有 transformer），可下载、切换、删除。**英文默认用最大的 `en_core_web_lg`**，**中文默认用 RaNER**：装好后自动生效以获得最高召回；未装时中文回退到已安装的最大 spaCy 模型，英文用随包（`[nlp]` extra）的 `en_core_web_sm` 离线兜底，可随时切回小模型。
+- 中文默认模型 **`zh_raner_base_generic`（RaNER）** 不是 spaCy 包：设置页下载时会从 HuggingFace 取回模型文件（Apache-2.0，约 409 MB）并安装 CPU 版 PyTorch（约 200 MB），存到服务端数据目录的 `nlp_models/` 下；下载完成后自动切换为当前中文模型。`[nlp-models]` extra 不含它（它不在 pip 上），所以该 extra 装完后中文走 `zh_core_web_lg` 兜底。
 - 选择即时生效（下一份文档起）；未下载的模型无法切换，会给出明确提示；内置的 `en_core_web_sm` 不可删除。
 - 添加一门语言会同时安装其 OCR 语言包，使该文字体系的扫描页也能被读取。
 - 当前选择持久化在服务端数据目录的 `nlp_models.json`（属**程序配置**，不是用户文档数据）。

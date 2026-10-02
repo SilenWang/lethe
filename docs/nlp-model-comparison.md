@@ -24,7 +24,7 @@ Gold entities (14): `John Smith`, `Jane Doe`, `Michael Chen`, `Sarah Whitfield`,
 | Model | Spans | Distinct | Gold matched | Recall | False positives | Time |
 |---|---:|---:|---:|---:|---:|---:|
 | `en_core_web_sm` | 28 | 20 | 12/14 | 86% | 6 | 2.0s |
-| `en_core_web_md` | 29 | 18 | 13/14 | 93% | 6 | 0.7s |
+| `en_core_web_md` | 29 | 18 | 13/14 | 93% | 6 | 0.8s |
 | `en_core_web_lg` | 33 | 20 | 14/14 | 100% | 8 | 0.8s |
 | `en_core_web_trf` | n/a — not installed in this environment |
 
@@ -123,19 +123,22 @@ Gold: 1457 entities across 1343 sentences (465 people, 992 organisations).
   recalls 72% of people and 58% of organisations, `zh_core_web_trf` 81% / 71%, and the
   RaNER checkpoint 93% / 80% — with *fewer* false positives than lg (235 vs 320).
   School names land in RaNER's ORG class, and all six schools in the memo are found.
-- **RaNER is now in the Chinese catalogue** as `zh_raner_base_generic`
-  (Apache-2.0, ~409 MB, downloaded from Settings like any other model; it needs
-  CPU-only PyTorch, ~200 MB). `shibing624/bert4ner-base-chinese` was measured and
+- **RaNER is the Chinese default**, offered as `zh_raner_base_generic` (Apache-2.0,
+  ~409 MB, downloaded from Settings like any other model; it needs CPU-only
+  PyTorch, ~200 MB). Until it is downloaded, Chinese falls back to the largest
+  spaCy model that is installed — `lg` after the `[nlp-models]` extra, not `sm`.
+  `shibing624/bert4ner-base-chinese` was measured and
   rejected — its organisation recall (52%) is below `zh_core_web_lg`; the best row in
   the bake-off, `uer/...-cluener2020-chinese` (91% / 91%), declares no licence, so it
   cannot ship with an Apache-2.0 application.
-- **`lg` is the default for English and Chinese; RaNER is a one-click upgrade.** Install
-  `lg` once (Settings, or the `[nlp-models]` extra) and detection uses it automatically
-  — no further switch needed, which is what maximises recall out of the box; until it is
-  installed, the bundled `en_core_web_sm` keeps English working fully offline. For
-  Chinese, download RaNER and it becomes the active model straight away. A Settings
-  choice always wins, so switching back to `sm`/`md` (smaller download, faster) stays
-  available and takes effect on the next document.
+- **Defaults: `lg` for English, RaNER for Chinese.** Install `lg` once (Settings, or the
+  `[nlp-models]` extra) and English detection uses it automatically — no further switch
+  needed; until it is installed, the bundled `en_core_web_sm` keeps English working
+  fully offline. Chinese prefers RaNER, so downloading it is all it takes. If neither
+  default is installed, the most capable model that *is* installed is used (for Chinese
+  that is the largest spaCy model, not the smallest). A Settings choice always wins, so
+  switching back to `sm`/`md` (smaller download, faster) stays available and takes
+  effect on the next document.
 - **Not measured here:** `en_core_web_trf` (transformer) — it is offered in Settings but
   needs PyTorch on top of the wheel, so it was left out of this comparison; expect
   slower, higher-recall English detection on the same pipeline.

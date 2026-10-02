@@ -159,9 +159,9 @@ ENGINE_NOTE_KEYS = {
     "Bundled — works fully offline (fallback until lg is installed)": "modelnote.en_sm",
     "Default — best recall (word vectors)": "modelnote.en_lg",
     "Transformer — most accurate, heaviest": "modelnote.en_trf",
-    "Default — best recall for Chinese names": "modelnote.zh_lg",
+    "Largest spaCy model — fallback when RaNER isn't downloaded": "modelnote.zh_lg",
     "Transformer — best recall on contract/document text, ~8x slower": "modelnote.zh_trf",
-    "RaNER — highest recall for Chinese people/organisations (Apache-2.0)": "modelnote.zh_raner",
+    "Default — highest recall for Chinese people/organisations (Apache-2.0)": "modelnote.zh_raner",
 }
 
 

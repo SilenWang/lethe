@@ -137,18 +137,20 @@ with a passphrase and stored only on your computer.
   Korean, …) installs its OCR model, so scanned documents in that script are read too.
   Each language offers several name-detection **spaCy models** — small through large, plus
   an English transformer — downloadable and switchable from Settings at any time; bigger
-  models catch more names but download more data. **English and Chinese default to the
-  largest model** (`en_core_web_lg` / `zh_core_web_lg`): install it once and detection uses
-  it automatically, for maximum recall; the bundled `en_core_web_sm` keeps English working
-  fully offline until then, and you can switch back to a smaller model at any time. Every
-  other model is a one-off online download. Your dictionary works in every language
-  regardless.
-- **Chinese names, organisations and schools — RaNER is offered alongside spaCy.** On
-  contract-style text the spaCy Chinese models miss a lot: measured against the public
-  CLUENER2020 corpus they recall 72 % (lg) / 81 % (trf) of people and 58 % / 71 % of
-  organisations, while `zh_raner_base_generic` reaches 93 % / 80 % — with fewer false
-  positives than `lg`. It downloads from Settings like any other model (Apache-2.0,
-  ~409 MB plus CPU-only PyTorch ~200 MB) and takes effect on the next document.
+  models catch more names but download more data. **English defaults to the largest spaCy
+  model** (`en_core_web_lg`) and **Chinese defaults to RaNER** (`zh_raner_base_generic`):
+  install it once and detection uses it automatically, for maximum recall; until then
+  Chinese falls back to the largest spaCy model you do have, and the bundled
+  `en_core_web_sm` keeps English working fully offline. You can switch back to a smaller
+  model at any time. Every other model is a one-off online download. Your dictionary works
+  in every language regardless.
+- **Chinese names, organisations and schools — RaNER is the default.** On contract-style
+  text the spaCy Chinese models miss a lot: measured against the public CLUENER2020 corpus
+  they recall 72 % (lg) / 81 % (trf) of people and 58 % / 71 % of organisations, while
+  `zh_raner_base_generic` reaches 93 % / 80 % — with fewer false positives than `lg`. It
+  downloads from Settings like any other model (Apache-2.0, ~409 MB plus CPU-only PyTorch
+  ~200 MB), becomes the active Chinese model as soon as it lands, and takes effect on the
+  next document.
 - **Themed desktop UI:** a NiceGUI app with a classical light/dark "river of oblivion"
   skin.
 - **Bilingual interface (中文 / English):** a language switcher in the header flips the
@@ -179,10 +181,11 @@ and `[email]` adds Outlook `.msg` support (`.eml`/`.html` always work; without t
 `.msg` is flagged). Either way, running `lethe` opens the app at `http://localhost:8731`.
 A fourth, optional extra — `[nlp-models]` — pre-installs the **larger** name-detection
 models (English md/lg, Chinese md/lg, Japanese md/lg, Korean md/lg, ~2.8 GB). Installing
-it makes English and Chinese detection use `_lg` immediately (their default); without it,
-Settings downloads and switches between those models on demand, per language — including
-the Chinese **RaNER** model, which isn't a pip wheel and is fetched into the app data
-directory the first time you download it from Settings.
+it makes English detection use `en_core_web_lg` immediately, and gives Chinese its
+`zh_core_web_lg` fallback; without it, Settings downloads and switches between those
+models on demand, per language. Chinese's actual default, the **RaNER** model, is not a
+pip wheel and is not in this extra — download it once from Settings and it is fetched into
+the app data directory (that also installs CPU-only PyTorch, ~200 MB).
 
 > spaCy/Presidio have no Python 3.14 wheels yet, so the `[nlp]` extra requires Python ≤ 3.13.
 

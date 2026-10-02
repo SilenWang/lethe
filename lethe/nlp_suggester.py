@@ -6,9 +6,10 @@ Every language offers several spaCy models -- small (sm) through large (lg),
 plus the English transformer -- so detection recall can be raised without
 reinstalling the app: download a bigger model from Settings and switch to it;
 the switch takes effect immediately (and is remembered for next time).
-Chinese additionally offers RaNER, a non-spaCy (HuggingFace-hosted) model whose
-person/organisation recall is well ahead of every spaCy model on that text; it
-is fetched into the app data directory rather than pip-installed.
+Chinese otherwise defaults to RaNER: a non-spaCy (HuggingFace-hosted) model
+whose person/organisation recall is well ahead of every spaCy model on that
+text. It is fetched into the app data directory rather than pip-installed, so
+until it is downloaded Chinese falls back to the largest spaCy model installed.
 
 English sm ships bundled and works fully offline; every other model is a
 one-off online download. Downloaded models are detected by script: a Chinese
@@ -41,8 +42,8 @@ _SELECTION_PATH = os.path.join(DATA_DIR, "nlp_models.json")
 # download), and the spaCy models offered with their download sizes.
 # Model entries: "name", "size", "builtin" (ships with the app, can't be
 # removed), "default" (the preferred model: used as soon as it is installed,
-# so English and Chinese prefer the largest recall model, `lg`; falling back
-# to whatever is installed when it isn't),
+# so English prefers `lg` and Chinese prefers RaNER; falling back to the most
+# capable model that *is* installed when the default isn't),
 # "requires" (extra pip packages a model needs, e.g. Transformers for the
 # English transformer) and an optional "note".
 LANGUAGES = [
@@ -64,8 +65,8 @@ LANGUAGES = [
      "models": [
         {"name": "zh_core_web_sm", "size": "~48 MB"},
         {"name": "zh_core_web_md", "size": "~74 MB"},
-        {"name": "zh_core_web_lg", "size": "~575 MB", "default": True,
-         "note": "Default — best recall for Chinese names"},
+        {"name": "zh_core_web_lg", "size": "~575 MB",
+         "note": "Largest spaCy model — fallback when RaNER isn't downloaded"},
         {"name": "zh_core_web_trf", "size": "~396 MB (+ PyTorch)",
          "requires": ["spacy-transformers"],
          "note": "Transformer — best recall on contract/document text, ~8x slower"},
@@ -74,10 +75,10 @@ LANGUAGES = [
         # clearly ahead of every spaCy model on Chinese person/organisation
         # recall — see docs/nlp-model-comparison.md.
         {"name": "zh_raner_base_generic", "size": "~409 MB (+ PyTorch ~200 MB)",
-         "hf_id": "lijy0717/shhield-raner-chinese-base-generic",
+         "hf_id": "lijy0717/shhield-raner-chinese-base-generic", "default": True,
          "requires": ["torch", "transformers", "safetensors", "huggingface_hub>=0.23"],
          "torch_index_url": "https://download.pytorch.org/whl/cpu",
-         "note": "RaNER — highest recall for Chinese people/organisations (Apache-2.0)"},
+         "note": "Default — highest recall for Chinese people/organisations (Apache-2.0)"},
      ]},
     {"code": "ja", "label": "Japanese", "ranges": [(0x3040, 0x30FF), (0x4E00, 0x9FFF), (0xFF66, 0xFF9F)],
      "ocr": ["jpn"], "ocr_size": "~14 MB",
@@ -227,7 +228,10 @@ def active_model(code: str) -> str | None:
     for m in _models_for(code):
         if m.get("default") and m["name"] in installed:
             return m["name"]
-    return installed[0]
+    # The catalogue lists models smallest-first, so the last installed one is
+    # the most capable available: a user who has lg but not the default (RaNER)
+    # falls back to lg, not to sm.
+    return installed[-1]
 
 
 def set_active_model(code: str, model: str) -> tuple[bool, str]:

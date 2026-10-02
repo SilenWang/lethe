@@ -35,7 +35,8 @@ def _uninstalled_model(code: str = "en") -> str | None:
 
 
 def _default_model(code: str) -> str:
-    """The catalogue's preferred model for a language (English/Chinese: lg)."""
+    """The catalogue's preferred model for a language (English: lg,
+    Chinese: the RaNER checkpoint)."""
     for L in nlp_suggester.LANGUAGES:
         if L["code"] == code:
             return next(m["name"] for m in L["models"] if m.get("default"))
@@ -45,7 +46,8 @@ def _default_model(code: str) -> str:
 def test_catalogue_shape():
     """Every language offers models, exactly one preferred (default) model, and
     the English one ships built-in (so the suggester is usable offline out of
-    the box). English and Chinese prefer the largest recall model, `lg`."""
+    the box). English prefers its largest recall model `lg`; Chinese prefers
+    RaNER, which is downloaded on demand and isn't a spaCy package."""
     codes = [L["code"] for L in nlp_suggester.LANGUAGES]
     assert {"en", "zh"} <= set(codes)
     for L in nlp_suggester.LANGUAGES:
@@ -56,7 +58,7 @@ def test_catalogue_shape():
     en = next(L for L in nlp_suggester.LANGUAGES if L["code"] == "en")
     assert [m["name"] for m in en["models"] if m.get("builtin")] == ["en_core_web_sm"]
     assert _default_model("en") == "en_core_web_lg"
-    assert _default_model("zh") == "zh_core_web_lg"
+    assert _default_model("zh") == "zh_raner_base_generic"
     # The bundled English model stays in the catalogue as the offline fallback.
     assert "en_core_web_sm" in [m["name"] for m in en["models"]]
     # English is not script-gated (Latin text never "contains English script").
@@ -235,8 +237,20 @@ def test_hf_catalogue_entry_shape():
     assert m is not None, "RaNER is missing from the Chinese catalogue"
     assert m["hf_id"] and "torch" in m["requires"]
     assert m.get("torch_index_url", "").endswith("/whl/cpu")
-    assert not m.get("default") and not m.get("builtin")
+    assert m.get("default") and not m.get("builtin")
     assert m["note"] in lethe_app.ENGINE_NOTE_KEYS
+
+
+def test_active_model_falls_back_to_the_most_capable_installed(monkeypatch):
+    """Chinese prefers RaNER, which most installs don't have yet: the fallback
+    must be the largest spaCy model that *is* installed (the catalogue lists
+    them smallest-first), not the first one."""
+    _with_temp_selection()
+    have = {"zh_core_web_md", "zh_core_web_lg"}
+    monkeypatch.setattr(nlp_suggester, "is_installed", lambda name: name in have)
+    assert nlp_suggester.active_model("zh") == "zh_core_web_lg"
+    have.add("zh_raner_base_generic")
+    assert nlp_suggester.active_model("zh") == "zh_raner_base_generic"
 
 
 def test_hf_model_install_probe_is_the_app_data_folder():

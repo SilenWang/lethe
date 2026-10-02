@@ -42,11 +42,14 @@ nlp = [
 # The larger name-detection models, pre-installed (opt-in: ~2.8 GB in total).
 # Same wheels the Settings page downloads on demand; a plain `lethe[nlp]`
 # install works the same as before, these just save the one-off downloads and
-# make English/Chinese detection use lg out of the box (their default).
+# make English detection use lg out of the box (its default). Chinese's default
+# is RaNER, which is not here (see below), so these wheels are what Chinese
+# falls back to until RaNER is downloaded — lg is the largest of them.
 # Chinese additionally offers zh_raner_base_generic (RaNER, Apache-2.0): it is
 # not a pip wheel, so Settings installs CPU-only torch + transformers and
-# fetches the checkpoint into <data dir>/nlp_models on demand. It has by far
-# the best Chinese person/organisation recall — see docs/nlp-model-comparison.md.
+# fetches the checkpoint into <data dir>/nlp_models on demand. It is the
+# Chinese default, with by far the best person/organisation recall — see
+# docs/nlp-model-comparison.md.
 nlp-models = [
     "en_core_web_md @ https://github.com/explosion/spacy-models/releases/download/en_core_web_md-3.8.0/en_core_web_md-3.8.0-py3-none-any.whl",
     "en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl",
