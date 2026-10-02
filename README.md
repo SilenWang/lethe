@@ -143,6 +143,12 @@ with a passphrase and stored only on your computer.
   fully offline until then, and you can switch back to a smaller model at any time. Every
   other model is a one-off online download. Your dictionary works in every language
   regardless.
+- **Chinese names, organisations and schools — RaNER is offered alongside spaCy.** On
+  contract-style text the spaCy Chinese models miss a lot: measured against the public
+  CLUENER2020 corpus they recall 72 % (lg) / 81 % (trf) of people and 58 % / 71 % of
+  organisations, while `zh_raner_base_generic` reaches 93 % / 80 % — with fewer false
+  positives than `lg`. It downloads from Settings like any other model (Apache-2.0,
+  ~409 MB plus CPU-only PyTorch ~200 MB) and takes effect on the next document.
 - **Themed desktop UI:** a NiceGUI app with a classical light/dark "river of oblivion"
   skin.
 - **Bilingual interface (中文 / English):** a language switcher in the header flips the
@@ -174,7 +180,9 @@ and `[email]` adds Outlook `.msg` support (`.eml`/`.html` always work; without t
 A fourth, optional extra — `[nlp-models]` — pre-installs the **larger** name-detection
 models (English md/lg, Chinese md/lg, Japanese md/lg, Korean md/lg, ~2.8 GB). Installing
 it makes English and Chinese detection use `_lg` immediately (their default); without it,
-Settings downloads and switches between those models on demand, per language.
+Settings downloads and switches between those models on demand, per language — including
+the Chinese **RaNER** model, which isn't a pip wheel and is fetched into the app data
+directory the first time you download it from Settings.
 
 > spaCy/Presidio have no Python 3.14 wheels yet, so the `[nlp]` extra requires Python ≤ 3.13.
 

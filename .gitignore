@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 .venv/
 .venv313/
+.pixi/
 *.egg-info/
 
 # ---- Build artifacts (large; regenerate via build_portable.ps1 + installer.iss) ----

@@ -161,6 +161,7 @@ ENGINE_NOTE_KEYS = {
     "Transformer — most accurate, heaviest": "modelnote.en_trf",
     "Default — best recall for Chinese names": "modelnote.zh_lg",
     "Transformer — best recall on contract/document text, ~8x slower": "modelnote.zh_trf",
+    "RaNER — highest recall for Chinese people/organisations (Apache-2.0)": "modelnote.zh_raner",
 }
 
 

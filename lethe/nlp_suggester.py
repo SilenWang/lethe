@@ -6,6 +6,9 @@ Every language offers several spaCy models -- small (sm) through large (lg),
 plus the English transformer -- so detection recall can be raised without
 reinstalling the app: download a bigger model from Settings and switch to it;
 the switch takes effect immediately (and is remembered for next time).
+Chinese additionally offers RaNER, a non-spaCy (HuggingFace-hosted) model whose
+person/organisation recall is well ahead of every spaCy model on that text; it
+is fetched into the app data directory rather than pip-installed.
 
 English sm ships bundled and works fully offline; every other model is a
 one-off online download. Downloaded models are detected by script: a Chinese
@@ -20,6 +23,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from functools import lru_cache
@@ -65,6 +69,15 @@ LANGUAGES = [
         {"name": "zh_core_web_trf", "size": "~396 MB (+ PyTorch)",
          "requires": ["spacy-transformers"],
          "note": "Transformer — best recall on contract/document text, ~8x slower"},
+        # Not a spaCy package: a ModelScope AdaSeq transformer-CRF checkpoint,
+        # fetched from its HuggingFace mirror into the app data dir. Measured
+        # clearly ahead of every spaCy model on Chinese person/organisation
+        # recall — see docs/nlp-model-comparison.md.
+        {"name": "zh_raner_base_generic", "size": "~409 MB (+ PyTorch ~200 MB)",
+         "hf_id": "lijy0717/shhield-raner-chinese-base-generic",
+         "requires": ["torch", "transformers", "safetensors", "huggingface_hub>=0.23"],
+         "torch_index_url": "https://download.pytorch.org/whl/cpu",
+         "note": "RaNER — highest recall for Chinese people/organisations (Apache-2.0)"},
      ]},
     {"code": "ja", "label": "Japanese", "ranges": [(0x3040, 0x30FF), (0x4E00, 0x9FFF), (0xFF66, 0xFF9F)],
      "ocr": ["jpn"], "ocr_size": "~14 MB",
@@ -161,7 +174,30 @@ def _wheel_url(model: dict) -> str:
     return f"{_BASE}/{model['name']}-{_VERSION}/{model['name']}-{_VERSION}-py3-none-any.whl"
 
 
+# HuggingFace-backed models (currently the Chinese RaNER checkpoint) aren't pip
+# packages, so they live in a folder we own and can delete again.
+_HF_MODELS_DIR = os.path.join(DATA_DIR, "nlp_models")
+
+
+def _is_hf(model: dict) -> bool:
+    return bool(model.get("hf_id"))
+
+
+def _hf_model_dir(model: dict) -> str:
+    return os.path.join(_HF_MODELS_DIR, model["hf_id"].replace("/", "--"))
+
+
+def _hf_installed(model: dict) -> bool:
+    d = _hf_model_dir(model)
+    return (os.path.exists(os.path.join(d, "config.json"))
+            and any(os.path.exists(os.path.join(d, f))
+                    for f in ("model.safetensors", "pytorch_model.bin")))
+
+
 def is_installed(model: str) -> bool:
+    _lang, m = _find_model(model)
+    if m is not None and _is_hf(m):
+        return _hf_installed(m)
     try:
         return importlib.util.find_spec(model) is not None
     except (ImportError, ValueError):
@@ -214,6 +250,7 @@ def set_active_model(code: str, model: str) -> tuple[bool, str]:
     _reset_selection()
     _analyzer.cache_clear()
     _spacy_model.cache_clear()
+    _raner.cache_clear()
     return True, f"{lang['label']} detection now uses {model}."
 
 
@@ -236,9 +273,50 @@ def language_status() -> list[dict]:
 
 
 # ---- install / download -------------------------------------------------------
+def _pip(args: list[str], index_url: str | None = None) -> tuple[bool, str]:
+    cmd = [sys.executable, "-m", "pip", "install", "--no-warn-script-location",
+           "--disable-pip-version-check"]
+    if index_url:
+        # CPU-only PyTorch: the default Windows wheel pulls ~2.5 GB of CUDA.
+        cmd += ["--index-url", index_url]
+    cmd += args
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"pip failed: {exc}"
+    return proc.returncode == 0, (proc.stdout + "\n" + proc.stderr).strip()
+
+
+def _download_hf_model(m: dict) -> tuple[bool, str]:
+    """pip-install the model's runtime, then fetch the checkpoint itself into
+    the app data directory. Returns (ok, log_tail)."""
+    log = ""
+    deps = list(m.get("requires", []))
+    index_url = m.get("torch_index_url")
+    if index_url and "torch" in deps:
+        deps.remove("torch")
+        ok, part = _pip(["torch"], index_url=index_url)
+        log += part
+        if not ok:
+            return False, log[-1500:]
+    if deps:
+        ok, part = _pip(deps)
+        log += "\n" + part
+        if not ok:
+            return False, log[-1500:]
+    try:
+        from huggingface_hub import snapshot_download
+        snapshot_download(m["hf_id"], local_dir=_hf_model_dir(m),
+                          allow_patterns=["*.json", "*.txt", "*.safetensors"])
+    except Exception as exc:  # noqa: BLE001
+        return False, (log + f"\nModel download failed: {exc}")[-1500:]
+    _raner.cache_clear()
+    return True, log[-1500:]
+
+
 def download_model(model: str) -> tuple[bool, str]:
-    """pip-install one spaCy model wheel (plus any extra deps it needs) into
-    this Python. Needs internet. Returns (ok, log_tail)."""
+    """Install one model. spaCy models arrive as a pip wheel; HuggingFace ones
+    are fetched into the app data dir. Needs internet. Returns (ok, log_tail)."""
     _lang, m = _find_model(model)
     if m is None:
         return False, f"Unknown model: {model}"
@@ -246,6 +324,8 @@ def download_model(model: str) -> tuple[bool, str]:
         return True, "Built-in."
     if is_installed(model):
         return True, "Already installed."
+    if _is_hf(m):
+        return _download_hf_model(m)
     cmd = [sys.executable, "-m", "pip", "install", "--no-warn-script-location",
            "--disable-pip-version-check"]
     # Transformer models need their runtime on top of the wheel.
@@ -273,6 +353,13 @@ def remove_model(model: str) -> tuple[bool, str]:
         return False, f"Unknown model: {model}"
     if m.get("builtin"):
         return False, "A built-in model can't be removed."
+    if _is_hf(m):
+        # Only the downloaded checkpoint goes; torch/transformers stay, like
+        # the spaCy wheels pulled in by a transformer model.
+        shutil.rmtree(_hf_model_dir(m), ignore_errors=True)
+        _reset_selection()
+        _raner.cache_clear()
+        return True, f"Removed {m['hf_id']}."
     try:
         proc = subprocess.run(
             [sys.executable, "-m", "pip", "uninstall", "-y", "-q", model],
@@ -368,8 +455,12 @@ _ZH_NAME_RE = re.compile(
 
 
 def _analyze(lang_code: str, model: str, text: str, min_score: float) -> list[tuple[int, int, str]]:
-    """Run one language through its Presidio analyzer; falls back to a bare
-    spaCy pass if Presidio can't analyse the language."""
+    """Run one model over one document. spaCy models go through Presidio (with
+    a bare-spaCy fallback if Presidio can't analyse the language); the
+    HuggingFace-backed model has its own recognizer."""
+    _lang, m = _find_model(model)
+    if m is not None and _is_hf(m):
+        return _raner_spans(text, m)
     try:
         results = _analyzer(lang_code, model).analyze(
             text=text, language=lang_code, entities=["PERSON", "ORGANIZATION"],
@@ -382,6 +473,116 @@ def _analyze(lang_code: str, model: str, text: str, min_score: float) -> list[tu
         return out
     except Exception:  # noqa: BLE001 — fall back to raw spaCy for this language
         return _spacy_lang(text, model)
+
+
+# ---- RaNER (ModelScope AdaSeq transformer-CRF) ------------------------------
+# The suggestion lane's internal types: the spaCy path returns PERSON and
+# COUNTERPARTY, so the HuggingFace path must speak the same vocabulary.
+_RANER_FAMILY = {"PER": "PERSON", "ORG": "COUNTERPARTY",
+                 "LOC": "COUNTERPARTY", "GPE": "COUNTERPARTY"}
+
+
+def _chunks(text: str, size: int = 480, overlap: int = 30) -> list[tuple[int, str]]:
+    """Split on line boundaries into <=size windows: the checkpoint is a
+    512-token BERT and documents are longer than that."""
+    out, start = [], 0
+    while start < len(text):
+        end = min(start + size, len(text))
+        if end < len(text):
+            cut = text.rfind("\n", start, end)
+            end = cut + 1 if cut > start else end
+        out.append((start, text[start:end]))
+        if end >= len(text):
+            break
+        start = max(end - overlap, start + 1)
+    return out
+
+
+@lru_cache(maxsize=2)
+def _raner(model_dir: str):
+    """(tokenizer, encoder, weights, label names) for an AdaSeq
+    transformer-CRF checkpoint exported to safetensors."""
+    import torch
+    from safetensors.torch import load_file
+    from transformers import AutoConfig, AutoTokenizer, BertModel
+
+    cfg = AutoConfig.from_pretrained(model_dir)
+    encoder = BertModel(cfg)
+    state = load_file(os.path.join(model_dir, "model.safetensors"))
+    encoder.load_state_dict({k[len("encoder."):]: v for k, v in state.items()
+                             if k.startswith("encoder.")}, strict=False)
+    encoder.eval()
+    torch.set_num_threads(min(8, os.cpu_count() or 1))
+    weights = (state["linear.weight"], state["linear.bias"],
+               state["crf.transitions"], state["crf.start_transitions"],
+               state["crf.end_transitions"])
+    labels = [cfg.id2label[i] for i in range(cfg.num_labels)]
+    return AutoTokenizer.from_pretrained(model_dir), encoder, weights, labels
+
+
+def _raner_spans(text: str, m: dict) -> list[tuple[int, int, str]]:
+    """BIOES tags from a Viterbi decode over the CRF emissions. The CRF has no
+    calibrated per-entity score, so `min_score` doesn't apply here — fine for a
+    lane whose output is always human-reviewed."""
+    try:
+        import torch
+        tok, encoder, (linear_w, linear_b, trans, start_t, end_t), labels = \
+            _raner(_hf_model_dir(m))
+    except Exception as exc:  # noqa: BLE001 — model not loadable: no candidates
+        print(f"[nlp_suggester] {m['name']} unavailable: {exc}")
+        return []
+
+    def viterbi(emissions):
+        score = start_t + emissions[0]
+        back = []
+        for t in range(1, len(emissions)):
+            score, arg = (score.unsqueeze(1) + trans).max(dim=0)
+            back.append(arg)
+            score = score + emissions[t]
+        best = int((score + end_t).argmax())
+        path = [best]
+        for arg in reversed(back):
+            best = int(arg[best])
+            path.append(best)
+        return path[::-1]
+
+    out: list[tuple[int, int, str]] = []
+    for off, chunk in _chunks(text):
+        enc = tok(chunk, return_offsets_mapping=True, return_tensors="pt")
+        offsets = enc["offset_mapping"][0].tolist()
+        with torch.no_grad():
+            hidden = encoder(input_ids=enc["input_ids"],
+                             attention_mask=enc["attention_mask"]).last_hidden_state[0]
+        # Drop [CLS]/[SEP]: AdaSeq decodes the content tokens only.
+        path = viterbi(hidden @ linear_w.T + linear_b)[1:-1]
+        cur = None
+        for tag_id, (s, e) in zip(path, offsets[1:-1]):
+            tag = labels[tag_id]
+            if tag == "O":
+                if cur:
+                    out.append(cur)
+                    cur = None
+                continue
+            prefix, _, kind = tag.partition("-")
+            entity = _RANER_FAMILY.get(kind)
+            if not entity:
+                cur = None
+                continue
+            if prefix in ("B", "S"):
+                if cur:
+                    out.append(cur)
+                cur = (off + s, off + e, entity)
+                if prefix == "S":
+                    out.append(cur)
+                    cur = None
+            elif prefix in ("I", "E") and cur:
+                cur = (cur[0], off + e, cur[2])
+                if prefix == "E":
+                    out.append(cur)
+                    cur = None
+        if cur:
+            out.append(cur)
+    return out
 
 
 def _spacy_lang(text: str, model: str) -> list[tuple[int, int, str]]:

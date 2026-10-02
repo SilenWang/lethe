@@ -4,6 +4,7 @@ Function-based tests, so pytest discovers them (pytest tests/). The tests that
 need spaCy/Presidio/an actual model skip themselves when those aren't installed,
 so the suite still runs on a lean install.
 """
+import contextlib
 import os
 import sys
 import tempfile
@@ -65,9 +66,12 @@ def test_catalogue_shape():
 
 
 def test_wheel_urls():
-    """Wheel URLs point at the pinned spaCy-models release."""
+    """Wheel URLs point at the pinned spaCy-models release. HuggingFace-backed
+    entries aren't pip wheels and are fetched into the app data dir instead."""
     for L in nlp_suggester.LANGUAGES:
         for m in L["models"]:
+            if m.get("hf_id"):
+                continue
             url = nlp_suggester._wheel_url(m)
             assert url.startswith("https://github.com/explosion/spacy-models/releases/download/")
             assert f"/{m['name']}-{nlp_suggester._VERSION}/" in url
@@ -198,3 +202,70 @@ def test_place_names_map_to_counterparty():
               nlp_suggester._analyze("zh", model, text, 0.40)
               if t == "COUNTERPARTY"]
     assert any("上海市" in p or "江苏省" in p or "苏州市" in p for p in places), places
+
+
+# ---- the HuggingFace-backed Chinese model (RaNER) ---------------------------
+def _fake_hf_model(root: str, hf_id: str, complete: bool = True) -> str:
+    """Impersonate what the Settings download leaves on disk."""
+    folder = os.path.join(root, hf_id.replace("/", "--"))
+    os.makedirs(folder, exist_ok=True)
+    with open(os.path.join(folder, "config.json"), "w", encoding="utf-8") as fh:
+        fh.write("{}")
+    if complete:
+        with open(os.path.join(folder, "model.safetensors"), "wb") as fh:
+            fh.write(b"")
+    return folder
+
+
+@contextlib.contextmanager
+def _hf_models_dir(root: str):
+    old = nlp_suggester._HF_MODELS_DIR
+    nlp_suggester._HF_MODELS_DIR = root
+    try:
+        yield
+    finally:
+        nlp_suggester._HF_MODELS_DIR = old
+
+
+def test_hf_catalogue_entry_shape():
+    """The RaNER entry is offered in Chinese but is not a pip package: it
+    carries a repo id, a CPU-only PyTorch runtime, and no wheel URL."""
+    import app as lethe_app
+    _lang, m = nlp_suggester._find_model("zh_raner_base_generic")
+    assert m is not None, "RaNER is missing from the Chinese catalogue"
+    assert m["hf_id"] and "torch" in m["requires"]
+    assert m.get("torch_index_url", "").endswith("/whl/cpu")
+    assert not m.get("default") and not m.get("builtin")
+    assert m["note"] in lethe_app.ENGINE_NOTE_KEYS
+
+
+def test_hf_model_install_probe_is_the_app_data_folder():
+    """`is_installed` looks at the download folder (config + weights), not at
+    the Python import path, and a half-finished download doesn't count."""
+    _lang, m = nlp_suggester._find_model("zh_raner_base_generic")
+    with tempfile.TemporaryDirectory() as tmp, _hf_models_dir(tmp):
+        assert not nlp_suggester.is_installed("zh_raner_base_generic")
+        folder = _fake_hf_model(tmp, m["hf_id"])
+        assert folder == nlp_suggester._hf_model_dir(m)
+        assert os.path.basename(folder) == m["hf_id"].replace("/", "--")
+        assert nlp_suggester.is_installed("zh_raner_base_generic")
+        os.remove(os.path.join(folder, "model.safetensors"))
+        assert not nlp_suggester.is_installed("zh_raner_base_generic")
+
+
+def test_hf_model_can_be_selected_status_shown_and_removed():
+    """The downloaded RaNER model is switchable like any other: it shows up in
+    `language_status`, becomes the active model, and removing it falls back."""
+    _with_temp_selection()
+    _lang, m = nlp_suggester._find_model("zh_raner_base_generic")
+    with tempfile.TemporaryDirectory() as tmp, _hf_models_dir(tmp):
+        folder = _fake_hf_model(tmp, m["hf_id"])
+        ok, msg = nlp_suggester.set_active_model("zh", "zh_raner_base_generic")
+        assert ok and "zh_raner_base_generic" in msg
+        assert nlp_suggester.active_model("zh") == "zh_raner_base_generic"
+        status = next(x for x in nlp_suggester.language_status() if x["code"] == "zh")
+        assert [x["name"] for x in status["models"] if x["active"]] == \
+            ["zh_raner_base_generic"]
+        ok, _log = nlp_suggester.remove_model("zh_raner_base_generic")
+        assert ok and not os.path.exists(folder)
+        assert nlp_suggester.active_model("zh") != "zh_raner_base_generic"

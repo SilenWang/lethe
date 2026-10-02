@@ -58,11 +58,12 @@ Lethe 自带 web app manifest 与 service worker，Chrome / Edge 可把它安装
 
 在 **Settings → Detection & OCR languages** 中管理：
 
-- 每种语言列出可用的 spaCy 检测模型（small → large，英文另有 transformer），可下载、切换、删除。**英文与中文默认使用最大的 `_lg` 模型**：装好后自动生效以获得最高召回；未装时英文用随包（`[nlp]` extra）的 `en_core_web_sm` 离线兜底，可随时切回小模型。
+- 每种语言列出可用的检测模型（small → large，英文另有 transformer），可下载、切换、删除。**英文与中文默认使用最大的 `_lg` 模型**：装好后自动生效以获得最高召回；未装时英文用随包（`[nlp]` extra）的 `en_core_web_sm` 离线兜底，可随时切回小模型。
+- 中文另提供 **`zh_raner_base_generic`（RaNER）**：它不是 spaCy 包，设置页下载时会从 HuggingFace 取回模型文件（Apache-2.0，约 409 MB）并安装 CPU 版 PyTorch（约 200 MB），存到服务端数据目录的 `nlp_models/` 下；下载完成后自动切换为当前中文模型。
 - 选择即时生效（下一份文档起）；未下载的模型无法切换，会给出明确提示；内置的 `en_core_web_sm` 不可删除。
 - 添加一门语言会同时安装其 OCR 语言包，使该文字体系的扫描页也能被读取。
 - 当前选择持久化在服务端数据目录的 `nlp_models.json`（属**程序配置**，不是用户文档数据）。
-- 扩充前后的识别效果对比见 [模型对比报告](nlp-model-comparison.md)：英文 sm 86% → md 93% → lg 100%；中文 sm 86% → md/lg 100%（14 / 7 个金标实体）。
+- 识别效果对比见 [模型对比报告](nlp-model-comparison.md)：中文在真实新闻语料（CLUENER2020 dev，1343 句）上，人名/机构召回 `lg` 72%/58%、`trf` 81%/71%、RaNER 93%/80%；尽调备忘录样本上学校名六所全部命中（走 ORG 类）。
 
 模型下载是**唯一**会联网的动作，且只在显式安装时发生；下载内容不含任何用户数据，文档处理全程不触网。
 
