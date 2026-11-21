@@ -1,33 +1,29 @@
-# P0 handoff — what Sylens must click/push
+# P0 handoff — GitHub state and the one remaining decision
 
-## Status of this delivery
+## Status
 
-The runtime that produced P0 has **no GitHub credentials** (no `gh` login, no
-git credential helper). Therefore:
+P0 is on GitHub and the required checks are green.
 
-- branches `next/rewrite` and `next/p0-foundation` exist **only in the local
-  bundle/patch**, not on GitHub;
-- no PR was opened;
-- `main` was not touched, no tag was pushed;
-- the five CI jobs were run locally with `pixi run …`; they were **not
-  triggered on GitHub**. See the result table at the bottom.
+- `next/rewrite` pushed from `dev@64b1953` (no v1 code changed).
+- `next/p0-foundation` pushed; PR **#13** is open with base `next/rewrite`:
+  <https://github.com/SilenWang/lethe/pull/13>.
+- `next/rewrite` protection is set from `docs/p0/branch-protection.json`:
+  no direct/force pushes, no deletions, 1 approval, conversation resolution,
+  up-to-date branch, five required checks.
+- Repository merge method is squash-only (`allow_merge_commit=false`,
+  `allow_rebase_merge=false`).
+- All five jobs passed on the PR: `lint + typecheck`, `unit (pytest)`,
+  `browser (Playwright, offline assets)`, `fidelity corpus (90 files + asset
+  lock)`, `guard (no bare save/toBytes)`.
+- `main` was not touched and no tag was pushed.
 
-Everything below is copy-pasteable after `git clone` / `gh auth login`.
+## Remaining decision (Sylens)
 
-## 1. Baseline tag (main already contains dev@64b1953)
-
-Verified in the delivered repository:
-
-```
-git merge-base --is-ancestor 64b1953 cf93bd2   # exit 0
-git log --oneline 64b1953..cf93bd2             # 3 commits, PR #12
-```
-
-So "merge dev into main" is a no-op: `main@cf93bd2` already contains
-`dev@64b1953`. The tag is the only baseline step. `pyproject.toml` still says
-`1.3.1`, so the recommended path is a one-line hotfix PR, then tag the merge:
+`pyproject.toml` still says `1.3.1`. The `v1.3.2` tag is intentionally not
+created yet; pick one:
 
 ```bash
+# A. version bump first (recommended)
 git checkout main && git pull --ff-only
 git checkout -b hotfix/v1.3.2
 # set version = "1.3.2" in pyproject.toml
@@ -41,84 +37,41 @@ git tag -a v1.3.2 -m "Lethe v1.3.2 (v1 baseline before next/rewrite)"
 git push origin v1.3.2
 ```
 
-If the team wants the tag without a version bump, tag `cf93bd2` directly:
-
 ```bash
+# B. tag the current main without a version bump
 git tag -a v1.3.2 cf93bd2 -m "Lethe v1.3.2"
 git push origin v1.3.2
 ```
 
-## 2. Create `next/rewrite` (from dev@64b1953)
+`main@cf93bd2` already contains `dev@64b1953`, so no dev→main merge is needed.
 
-```bash
-git fetch origin --tags
-git checkout -b next/rewrite 64b1953
-git push -u origin next/rewrite
-```
+## How the branch was built (reproducible)
 
-## 3. Branch protection
-
-`docs/p0/branch-protection.json` is ready. The check names match the five job
-names in `ci.yml`:
-
-```bash
-gh api -X PUT repos/SilenWang/lethe/branches/next/rewrite/protection \
-  --input docs/p0/branch-protection.json
-```
-
-Squash-only is a repository-level setting (GitHub has no per-branch merge
-method):
-
-```bash
-gh api -X PATCH repos/SilenWang/lethe \
-  -F allow_squash_merge=true \
-  -F allow_merge_commit=false \
-  -F allow_rebase_merge=false
-```
-
-Manual UI checklist if `gh` is unavailable:
-
-1. Settings → Branches → add rule for `next/rewrite`.
-2. Require a pull request before merging; 1 approval; dismiss stale approvals.
-3. Require status checks: the five names above; require branches to be
-   up-to-date.
-4. Require conversation resolution; block force pushes; block deletions.
-5. Settings → General → Pull requests: allow squash only.
-
-## 4. Apply P0 and open the PR
-
-From the bundle:
-
-```bash
-git fetch ../p0-foundation.bundle next/p0-foundation:next/p0-foundation
-git checkout next/p0-foundation
-```
-
-From the patch (equivalent, base `next/rewrite`):
+The P0 code-only patch is attached to VYB-2674. It excludes the 65.2MB
+vendored assets and the 90 generated corpus files; both are reproducible:
 
 ```bash
 git checkout next/rewrite
 git checkout -b next/p0-foundation
-git apply /path/to/p0-foundation-code.patch
+git apply p0-foundation.patch
 pixi install
-pixi run assets-fetch        # re-downloads the pinned 65.2MB and verifies sha256
-git add -A
-git commit -m "P0: foundations, guard, gates, corpus, vendored assets"
+pixi run corpus        # 90 files, sha256 identical to corpus/manifest.csv
+pixi run assets-fetch  # 201 files / 65.2MB, sha256 identical to manifest.json
 ```
 
-The code-only patch deliberately excludes `web/assets/vendor/**`; the fetch
-script reproduces those 201 files and the manifest verifies every hash.
-
-Then push and open the PR **against `next/rewrite`, never `main`**:
+## Branch protection (applied)
 
 ```bash
-git push -u origin next/p0-foundation
-gh pr create --base next/rewrite --head next/p0-foundation \
-  --title "P0: branch/CI foundations, guard, gates, corpus, vendored assets" \
-  --body-file docs/p0/pr-body.md
+gh api -X PUT repos/SilenWang/lethe/branches/next/rewrite/protection \
+  --input docs/p0/branch-protection.json
+gh api -X PATCH repos/SilenWang/lethe \
+  -F allow_squash_merge=true -F allow_merge_commit=false -F allow_rebase_merge=false
 ```
 
-## 5. Local result snapshot (not a GitHub run)
+The five contexts in the protection rule match the five job `name:` fields in
+`.github/workflows/ci.yml` exactly.
+
+## Local result snapshot (pre-push)
 
 | job | command | result |
 |---|---|---|
@@ -127,7 +80,3 @@ gh pr create --base next/rewrite --head next/p0-foundation \
 | browser | `pixi run browser` | 1 passed (offline load, sha256, wasm compile) |
 | fidelity corpus | `pixi run fidelity-corpus` | 90 files OK; 201 assets / 65.2MB sha256 OK |
 | guard | `pixi run guard` | 9 passed; product paths clean |
-
-The exact output is pasted in the VYB-2674 delivery comment.
-
-Local browser runs need Chromium once: `pixi run python -m playwright install chromium`.

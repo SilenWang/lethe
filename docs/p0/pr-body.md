@@ -53,8 +53,8 @@ CONTRACT FAILED: C3:compressed-stream FAILED part='word/document.xml': compress_
 | `fidelity corpus (90 files + asset lock)` | `pixi run fidelity-corpus` | `90 files, all applicable elements present`; `201 files, 65.2 MB, all sha256 verified` |
 | `guard (no bare save/toBytes)` | `pixi run guard` | `9 passed`; `guard: clean (lethe, web)` |
 
-The GitHub Actions run on this PR is the authoritative result; the table above
-is the same command set executed locally before pushing.
+**GitHub Actions result: all five required checks passed on this PR** (run
+`44876583339`). Local and CI use the same `pixi run` commands.
 
 ### Corpus coverage (every element 30/30)
 

@@ -4,9 +4,9 @@ name: CI (dual track)
 # Every PR whose base is next/rewrite runs these five jobs; the branch is
 # expected to require all five before merge.
 #
-# P0 status: the five jobs are runnable locally with `pixi run <task>` and are
-# wired here for next/rewrite. They have NOT been triggered on GitHub yet —
-# the runtime that produced P0 has no push credentials (see docs/p0/handoff.md).
+# P0 status: all five jobs are wired for next/rewrite and passed on the P0 PR
+# (github.com/SilenWang/lethe/pull/13). Run any of them locally with
+# `pixi run <task>`.
 
 on:
   push:
