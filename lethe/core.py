@@ -5,9 +5,9 @@ Strategy (in order of reliability for a compliance gate):
   1. Known-entity dictionary  -- your real people / counterparties + aliases.
      Deterministic, ~100% recall on the names that actually matter.
   2. Pattern detectors        -- emails, phone numbers, account/IBAN-like IDs.
-  3. Heuristic name suggester -- flags Capitalised multi-word phrases that look
-     like names but are NOT in your dictionary, so the reviewer can catch gaps.
-     (Best-effort only; the human review step is the real safety net.)
+  3. Preset context rules     -- two deterministic rules that need no model:
+     Chinese names anchored on a surname + title/contact label, and Japanese
+     company names anchored on their legal-form suffix/prefix.
 
 Everything funnels into a list of "items" that the UI presents for human
 confirmation before anything is written out.
@@ -45,22 +45,6 @@ PATTERNS = {
     "ACCOUNT": re.compile(r"\b(?:[A-Z]{2}\d{2}[A-Z0-9]{10,30}|\d[\d\- ]{6,}\d)\b"),
 }
 
-# Heuristic: 1-4 Capitalised tokens on a single line, allowing common entity
-# suffixes. Uses [ \t] (not \s) so a candidate never spans a line break.
-_NAME_CANDIDATE = re.compile(
-    r"\b([A-Z][a-zA-Z&.\-']+(?:[ \t]+(?:[A-Z][a-zA-Z&.\-']+|of|and|the|de|van|von|bin|binte))*"
-    r"(?:[ \t]+(?:Ltd|Limited|LLC|LLP|Inc|Corp|Pte|Plc|GmbH|AG|SA|NV|Co|Fund|Capital|Partners|Holdings))?)\b"
-)
-
-# Words we never want to treat as a name candidate on their own.
-_STOPWORDS = {
-    "The", "This", "That", "These", "Those", "From", "Dear", "Sincerely", "Regards",
-    "January", "February", "March", "April", "May", "June", "July", "August",
-    "September", "October", "November", "December", "Monday", "Tuesday", "Wednesday",
-    "Thursday", "Friday", "Saturday", "Sunday", "Subject", "Re", "To", "Attn",
-}
-
-
 @dataclass
 class Entity:
     """A known person or counterparty from the user's dictionary."""
@@ -84,7 +68,7 @@ class Item:
     type: str
     canonical: str          # value the token maps back to (the "real" value)
     surfaces: list[str]     # every string form that should be replaced
-    source: str             # "dictionary" | "pattern" | "suggestion"
+    source: str             # "dictionary" | "pattern" | "preset_rule" | "manual"
     count: int = 0
     include: bool = True
     token: str = ""
@@ -105,14 +89,11 @@ def _whole_word_regex(surface: str) -> re.Pattern:
     return re.compile(rf"(?<![\w]){body}(?![\w])", re.IGNORECASE)
 
 
-# Overlap resolution happens in two phases:
-#   - "primary" sources (dictionary + pattern) are all MUST-redact. Among them the
-#     longest span wins, so a whole-email pattern beats a dictionary name that
-#     happens to sit inside it. Dictionary breaks length ties.
-#   - "suggestion" spans are candidates (off by default); they only fill regions
-#     no primary span claimed, so an unchecked suggestion can never shadow and
-#     silently un-redact a real dictionary/pattern hit.
-_TIER = {"dictionary": 2, "pattern": 1}
+# Overlap resolution: longest span wins, so a whole-email pattern beats a
+# dictionary name that happens to sit inside it. Ties break by source tier:
+# dictionary > preset_rule > pattern. "manual" items are added by the reviewer
+# in the UI and are not produced by detect().
+_TIER = {"dictionary": 3, "preset_rule": 2, "pattern": 1, "manual": 0}
 _TYPE_RANK = {"EMAIL": 4, "ACCOUNT": 3, "PHONE": 2}  # account/email beat phone on a tie
 
 
@@ -130,26 +111,9 @@ class _Span:
         return self.end - self.start
 
 
-def _regex_suggestions(text: str) -> list[_Span]:
-    """Fallback name suggester (people only) when NER isn't available."""
-    out: list[_Span] = []
-    for m in _NAME_CANDIDATE.finditer(text):
-        cand = m.group(1).strip().rstrip(".,;:")
-        if not cand:
-            continue
-        if cand.split()[0] in _STOPWORDS:
-            continue
-        if len(cand.split()) == 1 and not re.search(
-            r"(Ltd|Limited|LLC|LLP|Inc|Corp|Pte|Plc|GmbH|Fund|Capital|Partners|Holdings)$", cand):
-            continue
-        start = m.start(1)
-        out.append(_Span(start, start + len(cand), "PERSON", cand, cand, "suggestion"))
-    return out
-
-
-# Japanese company-name detector. The spaCy JA model often mislabels companies
-# (e.g. tags a 株式会社 as EVENT), so we catch them by their legal-form suffix /
-# prefix directly. \uXXXX escapes work inside re patterns even in raw strings.
+# Japanese company-name rule. A data-driven model often mislabels companies
+# (e.g. tags 株式会社 as EVENT), so we anchor on the legal-form suffix/prefix.
+# \uXXXX escapes work inside re patterns even in raw strings.
 # Name body = Katakana, Kanji, half-width kana, Latin, full-width Latin/digits,
 # digits, middle-dot, long-vowel mark -- but NOT Hiragana, so grammatical
 # particles (は/が/の…) cleanly bound the company name.
@@ -166,33 +130,45 @@ def _jp_company_spans(text: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in _JP_COMPANY.finditer(text)]
 
 
-def _suggestion_spans(text: str) -> list[_Span]:
-    """NLP suggestions (Presidio+spaCy if installed, else the regex heuristic)
-    plus the Japanese company-suffix detector (always on)."""
+# Chinese name rule: anchored on a common surname AND on either a title /
+# honorific ("张三先生") or a form/contact label ("联系人：张三"). Anchoring on
+# both keeps arbitrary 2-4 character CJK runs (brands, places, job titles) out.
+_ZH_SURNAMES = ("赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
+                "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐"
+                "费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄和"
+                "穆萧尹姚邵湛汪祁毛禹狄米贝明臧计伏成戴谈宋茅庞熊纪舒屈项祝董梁杜阮"
+                "蓝闵席季麻强贾路娄危江童颜郭梅盛林刁钟徐邱骆高夏蔡田胡凌霍虞万支柯"
+                "昝管卢莫经房裘缪干解应宗丁宣贲邓郁单杭洪包诸左石崔吉钮龚程嵇邢滑裴")
+_ZH_TITLE = ("先生|女士|小姐|老师|经理|总监|董事长|总裁|总经理|副经理|主任|教授|博士|"
+             "律师|医师|会计|工程师|代表|同志|局长|部长|院长|校长")
+_ZH_PREFIX = ("姓名|名字|联系人|联络人|负责人|签署人|签字人|授权代表|法定代表人|委托代表|"
+              "甲方|乙方|丙方|由|致|尊敬的|给")
+_ZH_NAME = rf"[{_ZH_SURNAMES}][\u4e00-\u9fff]{{1,2}}"
+_ZH_NAME_RE = re.compile(
+    rf"({_ZH_NAME})(?=(?:{_ZH_TITLE}))"
+    rf"|(?:(?:{_ZH_PREFIX})[：: \u3000]{{0,2}})({_ZH_NAME})(?![\u4e00-\u9fff])")
+
+
+def _preset_rule_spans(text: str) -> list[_Span]:
+    """The two deterministic context rules; both are default-checked."""
     out: list[_Span] = []
-    used_nlp = False
-    try:
-        from . import nlp_suggester
-        if nlp_suggester.available():
-            used_nlp = True
-            for s, e, t in nlp_suggester.suggest(text):
-                surface = text[s:e].rstrip(".,;:")
-                if surface:
-                    out.append(_Span(s, s + len(surface), t, surface, surface, "suggestion"))
-    except Exception:
-        used_nlp = False
-    if not used_nlp:
-        out.extend(_regex_suggestions(text))
-    for s, e in _jp_company_spans(text):
-        surface = text[s:e]
-        if surface:
-            out.append(_Span(s, e, "COUNTERPARTY", surface, surface, "suggestion"))
+    for match in _ZH_NAME_RE.finditer(text):
+        group = 1 if match.group(1) else 2
+        surface = match.group(group)
+        out.append(_Span(match.start(group), match.end(group), "PERSON", surface, surface,
+                         "preset_rule"))
+    for start, end in _jp_company_spans(text):
+        surface = text[start:end]
+        out.append(_Span(start, end, "COUNTERPARTY", surface, surface, "preset_rule"))
     return out
 
 
 def detect(text: str, entities: list[Entity], enable_patterns: bool = True,
-           enable_suggestions: bool = True) -> list[Item]:
+           enable_preset_rules: bool = True, *,
+           enable_suggestions: bool | None = None) -> list[Item]:
     """Span-based detection with overlap resolution, grouped into review items."""
+    if enable_suggestions is not None:  # v1 compatibility: no NLP lane any more
+        enable_preset_rules = enable_suggestions
     spans: list[_Span] = []
 
     # 1. Dictionary entities --------------------------------------------------
@@ -216,17 +192,15 @@ def detect(text: str, entities: list[Entity], enable_patterns: bool = True,
                 start = m.start() + m.group(0).find(v)
                 spans.append(_Span(start, start + len(v), ptype, v, v, "pattern"))
 
-    # 3. Name / organisation suggestions -------------------------------------
-    #    Prefer Presidio+spaCy NER when available (people AND counterparties);
-    #    otherwise fall back to the built-in regex heuristic (people only).
-    if enable_suggestions:
-        spans.extend(_suggestion_spans(text))
+    # 3. Deterministic context rules -----------------------------------------
+    if enable_preset_rules:
+        spans.extend(_preset_rule_spans(text))
 
-    # ---- phase 1: resolve primary (dictionary + pattern) by longest-wins ----
+    # ---- resolve overlaps by longest-wins, then source tier -----------------
     def _overlaps(sp: _Span, taken: list[tuple[int, int]]) -> bool:
         return any(sp.start < e and s < sp.end for s, e in taken)
 
-    primary = [s for s in spans if s.source != "suggestion"]
+    primary = list(spans)
     primary.sort(key=lambda s: (s.length, _TIER[s.source], _TYPE_RANK.get(s.type, 0)), reverse=True)
     accepted: list[_Span] = []
     taken: list[tuple[int, int]] = []
@@ -236,24 +210,15 @@ def detect(text: str, entities: list[Entity], enable_patterns: bool = True,
         accepted.append(sp)
         taken.append((sp.start, sp.end))
 
-    # ---- phase 2: suggestions only fill regions no primary span claimed -----
-    suggestions = [s for s in spans if s.source == "suggestion"]
-    suggestions.sort(key=lambda s: s.length, reverse=True)
-    for sp in suggestions:
-        if _overlaps(sp, taken):
-            continue
-        accepted.append(sp)
-        taken.append((sp.start, sp.end))
-
     # ---- group accepted spans into items by canonical value ----------------
-    groups: dict[tuple[str, str], Item] = {}
-    order: list[tuple[str, str]] = []
+    groups: dict[str, Item] = {}
+    order: list[str] = []
     for sp in accepted:
-        key = (sp.source if sp.source != "dictionary" else "dictionary", sp.canonical)
+        key = sp.canonical
         if key not in groups:
             groups[key] = Item(type=sp.type, canonical=sp.canonical, surfaces=[],
                                source=sp.source, count=0,
-                               include=(sp.source != "suggestion"))
+                               include=True)
             order.append(key)
         it = groups[key]
         it.count += 1
@@ -261,8 +226,8 @@ def detect(text: str, entities: list[Entity], enable_patterns: bool = True,
             it.surfaces.append(sp.surface)
 
     items = [groups[k] for k in order]
-    # stable, readable ordering: dictionary, then patterns, then suggestions
-    rank = {"dictionary": 0, "pattern": 1, "suggestion": 2}
+    # stable, readable ordering: dictionary, preset rules, then patterns
+    rank = {"dictionary": 0, "preset_rule": 1, "pattern": 2, "manual": 3}
     items.sort(key=lambda it: (rank[it.source], -it.count, it.canonical.lower()))
     return items
 
