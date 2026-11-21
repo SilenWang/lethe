@@ -1,27 +1,34 @@
-// Minimal P1 harness: proves the built app can load the pinned Pyodide runtime
-// from this origin only. The worker pipeline is added in next/p1-foundation.
-import { loadPyodide } from "../assets/vendor/pyodide/pyodide.mjs";
+// P1 harness: the debug surface UI work builds against. It owns no document
+// logic; the worker and the bridge do.
+import { createBridge, classifyError } from "../lib/pyodide_bridge.js";
 
 const status = document.getElementById("status");
 const detail = document.getElementById("detail");
 
-window.p1 = {
-  state: "loading",
-  async load() {
-    const py = await loadPyodide({ indexURL: "../assets/vendor/pyodide/" });
-    this.pyodide = py;
-    this.state = "ready";
-    status.textContent = "ready";
-    detail.textContent = py.version;
-    return py;
-  },
-};
+function render(event) {
+  if (window.p1) {
+    window.p1.state = event.state;
+    window.p1.lastStatus = event;
+  }
+  status.textContent = event.state;
+  const phase = event.phase ? ` (${event.phase})` : "";
+  const reason = event.reason ? ` — ${event.reason}` : "";
+  detail.textContent = `${event.state}${phase}${reason}`;
+}
 
-window.p1
-  .load()
-  .catch((error) => {
-    window.p1.state = "init-error";
-    window.p1.error = String(error);
-    status.textContent = "init-error";
-    detail.textContent = window.p1.error;
-  });
+window.p1 = { state: "starting", createBridge, classifyError };
+const bridge = createBridge({ onStatus: render });
+
+window.p1.bridge = bridge;
+window.p1.ready = bridge.ready;
+
+bridge.ready.then(
+  (info) => {
+    window.p1.runtime = info;
+    render({ state: "ready" });
+  },
+  (error) => {
+    window.p1.error = `${error.code || "INIT_FAILED"}: ${error.message}`;
+    render({ state: "init-error" });
+  },
+);

@@ -61,6 +61,6 @@ def test_built_harness_loads_pyodide_offline(tmp_path: Path) -> None:
         page.route("**/*", route)
         page.goto(f"{server.base_url}/p1/harness.html")
         page.wait_for_function("window.p1 && window.p1.state === 'ready'")
-        assert page.evaluate("window.p1.pyodide.runPython('1 + 2')") == 3
+        assert page.evaluate("window.p1.runtime.pyodide") == "0.29.5"
         browser.close()
     assert external == [], f"build pulled remote assets: {external}"
