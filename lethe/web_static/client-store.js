@@ -6,8 +6,11 @@
  * value mappings. Nothing here is ever sent to the server for keeping; the
  * server only computes (see the client-side storage architecture doc).
  *
- * Backing stores (IndexedDB database "lethe", schema version 2):
- *   entities     keyPath "key"     { key, canonical, type, aliases, updatedAt }
+ * Backing stores (IndexedDB database "lethe", schema version 3):
+ *   user_entities keyPath "key"    { key, canonical, type, aliases, source, updatedAt }
+ *   entities     keyPath "key"     v1/v2 legacy rows (migrated once into
+ *                                  user_entities; kept so older builds can
+ *                                  still read a database a newer build opened)
  *   token_types  keyPath "id"      { id: "token_types", types: [...], updatedAt }
  *   jobs         keyPath "jobId"   metadata + (encrypted) token -> real mapping
  *   outputs      keyPath "jobId"   the de-identified result file(s), as binary
@@ -22,11 +25,14 @@
   'use strict';
 
   var DB_NAME = 'lethe';
-  // version 2 adds the "outputs" store (result files); the upgrade is purely
-  // additive, so entities / token_types / jobs / meta are untouched.
-  var DB_VERSION = 2;
-  var SCHEMA_VERSION = 2;
-  var SCHEMA_VERSION_KEY = 'lethe.schema.v2';
+  // version 2 adds the "outputs" store (result files); version 3 separates the
+  // user dictionary ("user_entities", with a `source` field) from the preset
+  // layer. Both upgrades are purely additive: old stores are never rewritten
+  // in place, and the v2 "entities" rows are copied over once.
+  var DB_VERSION = 3;
+  var SCHEMA_VERSION = 3;
+  var SCHEMA_VERSION_KEY = 'lethe.schema.v3';
+  var SCHEMA_VERSION_KEY_V2 = 'lethe.schema.v2';
   var SCHEMA_VERSION_KEY_V1 = 'lethe.schema.v1';
   var INSTALLED_AT_KEY = 'lethe.installed.v1';
   var PERSIST_KEY = 'lethe.persisted.v1';
@@ -104,6 +110,25 @@
         if (!db.objectStoreNames.contains('entities')) {
           var ents = db.createObjectStore('entities', { keyPath: 'key' });
           ents.createIndex('by_type', 'type', { unique: false });
+        }
+        if (!db.objectStoreNames.contains('user_entities')) {
+          var userEnts = db.createObjectStore('user_entities', { keyPath: 'key' });
+          userEnts.createIndex('by_type', 'type', { unique: false });
+          userEnts.createIndex('by_source', 'source', { unique: false });
+          // Copy v2 rows over once. `source` defaults to "user": everything
+          // the old build stored was user data (the preset layer arrives in
+          // P3 and is never written into IndexedDB by the app).
+          if (ev.oldVersion > 0 && db.objectStoreNames.contains('entities')) {
+            var legacy = ev.target.transaction.objectStore('entities');
+            legacy.openCursor().onsuccess = function (cursorEvent) {
+              var cursor = cursorEvent.target.result;
+              if (!cursor) return;
+              var row = cursor.value || {};
+              if (!row.source) row.source = 'user';
+              userEnts.put(row);
+              cursor.continue();
+            };
+          }
         }
         if (!db.objectStoreNames.contains('token_types')) {
           db.createObjectStore('token_types', { keyPath: 'id' });
@@ -199,12 +224,13 @@
       canonical: canonical,
       type: String((row && row.type) || 'COUNTERPARTY'),
       aliases: aliases,
+      source: String((row && row.source) || 'user'),
       updatedAt: (row && row.updatedAt) || nowIso()
     };
   }
 
   function getEntities() {
-    return getAll('entities').then(function (rows) {
+    return getAll('user_entities').then(function (rows) {
       return rows.filter(function (r) { return r && r.canonical; });
     });
   }
@@ -216,7 +242,7 @@
       if (e.key) byKey[e.key] = e;
     });
     var out = Object.keys(byKey).map(function (k) { return byKey[k]; });
-    return putAll('entities', out).then(function () {
+    return putAll('user_entities', out).then(function () {
       announce('entities');
       return out.length;
     });
@@ -248,7 +274,7 @@
         }
       });
       var out = Object.keys(byKey).map(function (k) { return byKey[k]; });
-      return putAll('entities', out).then(function () {
+      return putAll('user_entities', out).then(function () {
         announce('entities');
         return added;
       });
@@ -539,6 +565,7 @@
           exportedAt: nowIso(),
           installedAt: parts[3] || null,
           entities: parts[0],
+          user_entities: parts[0],
           token_types: parts[1],
           jobs: parts[2]
         };
@@ -546,7 +573,8 @@
   }
 
   function importBackup(backup) {
-    if (!backup || typeof backup !== 'object' || !Array.isArray(backup.entities)) {
+    var incoming = (backup && (backup.user_entities || backup.entities)) || null;
+    if (!backup || typeof backup !== 'object' || !Array.isArray(incoming)) {
       return Promise.reject(new Error('That file is not a Lethe backup.'));
     }
     var version = Number(backup.schemaVersion || 1);
@@ -554,7 +582,7 @@
       return Promise.reject(new Error('That backup was written by a newer Lethe version.'));
     }
     var added = 0;
-    return mergeEntities(backup.entities).then(function (n) {
+      return mergeEntities(incoming).then(function (n) {
       added = n;
       return saveTokenTypes((backup.token_types || []).concat([]));
     }).then(function () {
@@ -567,7 +595,7 @@
       });
     }).then(function (n) {
       announce('jobs');
-      return { entities: (backup.entities || []).length, added: added, jobs: n.__value || n };
+      return { entities: incoming.length, added: added, jobs: n.__value || n };
     });
   }
 
@@ -667,9 +695,17 @@
       // Read both so an existing browser reports its real version and the
       // upgrade (new "outputs" store, applied by onupgradeneeded) is recorded
       // without touching any existing record.
-      return Promise.all([getMeta(SCHEMA_VERSION_KEY), getMeta(SCHEMA_VERSION_KEY_V1)]);
+      return Promise.all([
+        getMeta(SCHEMA_VERSION_KEY),
+        getMeta(SCHEMA_VERSION_KEY_V2),
+        getMeta(SCHEMA_VERSION_KEY_V1)
+      ]);
     }).then(function (versions) {
-      var known = Math.max(Number(versions[0]) || 0, Number(versions[1]) || 0);
+      var known = Math.max(
+        Number(versions[0]) || 0,
+        Number(versions[1]) || 0,
+        Number(versions[2]) || 0
+      );
       out.upgradedFrom = known && known < SCHEMA_VERSION ? known : null;
       return known;
     }).then(function (storedVersion) {
