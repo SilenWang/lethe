@@ -1,0 +1,1 @@
+import'../chunk-TTRUPDAB.mjs';var o=40,A=12;function S(_,E){if(E<_.top+40){let O=Math.max(0,_.top+40-E);return -Math.min(12,O/40*12)}if(E>_.bottom-40){let O=Math.max(0,E-(_.bottom-40));return Math.min(12,O/40*12)}return 0}export{o as AUTO_SCROLL_EDGE_ZONE,A as AUTO_SCROLL_MAX_SPEED,S as computeAutoScrollDelta};

@@ -1,0 +1,17 @@
+{
+  "assetBase": "assets/vendor/",
+  "pyodide": {
+    "version": "0.29.5",
+    "indexURL": "assets/vendor/pyodide/",
+    "lock": "assets/vendor/pyodide/pyodide-lock.json"
+  },
+  "betteroffice": {
+    "version": "0.5.1",
+    "base": "assets/vendor/betteroffice/"
+  },
+  "policy": {
+    "cdn": false,
+    "micropip": false,
+    "sameOrigin": true
+  }
+}

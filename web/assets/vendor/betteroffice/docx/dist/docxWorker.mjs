@@ -1,0 +1,1 @@
+import './yrs/docxWorker.mjs';

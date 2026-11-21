@@ -290,5 +290,17 @@
   "lang.ja": "日语",
   "lang.ko": "韩语",
   "reid.wrong_passphrase": "口令错误，或该转换的还原密钥已损坏。",
-  "reid.key_missing": "找不到该转换的还原密钥——它可能已被删除。"
+  "reid.key_missing": "找不到该转换的还原密钥——它可能已被删除。",
+  "gate.file_warn": "该文件为 {size_mb} MB。超过 {warn_mb} MB 的文件在本机可能较慢且占用较多内存；硬性上限为 50 MB。",
+  "gate.file_reject": "该文件为 {size_mb} MB，超过 {max_mb} MB 上限，未做任何处理。",
+  "gate.xml_part_reject": "部件 {part} 解压后为 {size_mb} MB，超过单部件 {max_mb} MB 上限。",
+  "gate.xml_total_reject": "XML 部件解压后合计 {size_mb} MB，超过 {max_mb} MB 上限。",
+  "gate.zip_total_reject": "压缩包解压后合计 {size_mb} MB，超过 {max_mb} MB 上限。",
+  "gate.zip_entries_reject": "压缩包包含 {count} 个条目，超过 {max} 个条目上限。",
+  "gate.zip_ratio_reject": "部件 {part} 的压缩比为 {ratio}:1，超过 {max}:1，疑似压缩炸弹。",
+  "gate.encrypted_reject": "部件 {part} 已加密。不支持加密或已签名的文件。",
+  "gate.invalid_zip": "这不是有效的 Office 包：{error}",
+  "gate.tip.split": "把文档拆成更小的文件，分别处理。",
+  "gate.tip.convert": "先转换成更简单的格式（例如只导出一张工作表或一段幻灯片）。",
+  "gate.tip.machine": "换一台内存更大的机器处理（50 MB 的 docx 建议 16 GB 以上）。"
 }

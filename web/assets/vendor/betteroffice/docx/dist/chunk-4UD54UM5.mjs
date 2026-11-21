@@ -1,0 +1,1 @@
+var a=["CONFIDENTIAL","DRAFT","DO NOT COPY","SAMPLE","URGENT","ASAP"];function i(t,n){if(!(t>0)||!(n>0))return;let e=t/n;return e>=1?{widthEmu:3954780,heightEmu:Math.round(3954780/e)}:{widthEmu:Math.round(3954780*e),heightEmu:3954780}}export{a,i as b};

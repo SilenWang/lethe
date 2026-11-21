@@ -290,5 +290,17 @@
   "lang.ja": "Japanese",
   "lang.ko": "Korean",
   "reid.wrong_passphrase": "Wrong passphrase, or this conversion's reversal key is corrupted.",
-  "reid.key_missing": "This conversion's reversal key is missing — it may have been deleted."
+  "reid.key_missing": "This conversion's reversal key is missing — it may have been deleted.",
+  "gate.file_warn": "This file is {size_mb} MB. Files over {warn_mb} MB can be slow and memory-hungry on this machine; the hard limit is 50 MB.",
+  "gate.file_reject": "This file is {size_mb} MB, over the {max_mb} MB limit. Nothing was processed.",
+  "gate.xml_part_reject": "Part {part} expands to {size_mb} MB, over the {max_mb} MB single-part limit.",
+  "gate.xml_total_reject": "The XML parts expand to {size_mb} MB in total, over the {max_mb} MB limit.",
+  "gate.zip_total_reject": "The package expands to {size_mb} MB, over the {max_mb} MB limit.",
+  "gate.zip_entries_reject": "The package contains {count} entries, over the {max} entry limit.",
+  "gate.zip_ratio_reject": "Part {part} is compressed at {ratio}:1, over {max}:1. This looks like a zip bomb.",
+  "gate.encrypted_reject": "Part {part} is encrypted. Encrypted and signed files are not supported.",
+  "gate.invalid_zip": "This is not a valid Office package: {error}",
+  "gate.tip.split": "Split the document into smaller files and process each one.",
+  "gate.tip.convert": "Convert it to a simpler format first (for example, export one sheet or one slide deck section).",
+  "gate.tip.machine": "Process it on a machine with more memory (16 GB or more is recommended for 50 MB docx)."
 }

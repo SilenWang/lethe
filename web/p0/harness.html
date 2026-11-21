@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Lethe P0 offline asset harness</title>
+  </head>
+  <body>
+    <p>P0 harness: loads the vendored Pyodide runtime from this origin only.</p>
+    <script type="module">
+      import { loadPyodide } from "/web/assets/vendor/pyodide/pyodide.mjs";
+      window.p0 = {
+        ready: true,
+        async load() {
+          return loadPyodide({ indexURL: "/web/assets/vendor/pyodide/" });
+        },
+      };
+    </script>
+  </body>
+</html>

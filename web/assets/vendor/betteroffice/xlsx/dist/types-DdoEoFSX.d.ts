@@ -1,0 +1,350 @@
+/**
+ * TS mirror of the Rust display list.
+ *
+ * Hand-mirrored from crates/xlsx-render/src/display_list.rs — keep in sync.
+ * The renderer front-half (Rust) emits a target-agnostic list of draw commands;
+ * a backend (Canvas2D in the browser, tiny-skia on servers) executes them. These
+ * types are plain data with no DOM or framework dependency so the same list
+ * flows across the wasm boundary as JSON and into either backend unchanged.
+ */
+/**
+ * Axis-aligned rectangle in device-independent pixels.
+ */
+interface Rect {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
+/**
+ * Horizontal alignment for a text command, matching the spreadsheet cell
+ * alignment values the renderer resolves before emitting.
+ */
+type TextAlign = 'left' | 'center' | 'right';
+/**
+ * Fill a solid rectangle — cell backgrounds, selection bands, header fills.
+ */
+interface FillRectCmd {
+    op: 'fillRect';
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    /** css color string (`#rrggbb`, `rgba(...)`), resolved from theme + tint in Rust. */
+    color: string;
+    clip?: Rect;
+}
+type PatternType = 'gray125' | 'gray0625' | 'mediumGray' | 'darkGray' | 'lightGray' | 'darkHorizontal' | 'darkVertical' | 'darkDown' | 'darkUp' | 'darkGrid' | 'darkTrellis' | 'lightHorizontal' | 'lightVertical' | 'lightDown' | 'lightUp' | 'lightGrid' | 'lightTrellis';
+interface PatternFillCmd {
+    op: 'patternFill';
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    pattern: PatternType;
+    fg: string;
+    bg: string;
+    originX: number;
+    originY: number;
+    clip?: Rect;
+}
+/**
+ * Stroke a straight line — gridlines, cell borders, frozen-pane dividers.
+ */
+interface LineCmd {
+    op: 'line';
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    width: number;
+    color: string;
+    /**
+     * Stroke pattern. Absent/`undefined` is solid; `'dashed'`/`'dotted'` apply a
+     * dash pattern; `'double'` draws two thin parallel passes offset by ±. Skip-
+     * serialized at its default in Rust, so a solid line omits the field.
+     */
+    style?: 'dashed' | 'dotted' | 'double' | 'mediumDashed' | 'dashDot' | 'mediumDashDot' | 'dashDotDot' | 'mediumDashDotDot' | 'slantDashDot';
+    /**
+     * Rail width of a `'double'` line: two rails this wide on the outer edges of
+     * `width`. Absent, painters keep the legacy rails derived from `width`.
+     */
+    rail?: number;
+    clip?: Rect;
+}
+type GeometryPathCommand = {
+    type: 'move';
+    x: number;
+    y: number;
+} | {
+    type: 'line';
+    x: number;
+    y: number;
+} | {
+    type: 'quad';
+    cpx: number;
+    cpy: number;
+    x: number;
+    y: number;
+} | {
+    type: 'cubic';
+    cp1x: number;
+    cp1y: number;
+    cp2x: number;
+    cp2y: number;
+    x: number;
+    y: number;
+} | {
+    type: 'close';
+};
+interface PathStroke {
+    color: string;
+    width: number;
+}
+interface PathCmd {
+    op: 'path';
+    commands: GeometryPathCommand[];
+    fill: string;
+    stroke?: PathStroke;
+    clip?: Rect;
+}
+/**
+ * Wrapped cell text: the painter breaks the run into lines no wider than
+ * `width` and steps their baselines by `lineHeight`, the block anchored by
+ * `valign` on the single-line baseline `y`.
+ */
+interface TextWrap {
+    width: number;
+    lineHeight: number;
+    valign: 'top' | 'center' | 'bottom';
+}
+/**
+ * Paint a text run clipped to the cell box: `clip` is the cell rect and
+ * `align` places the run within it. A run without `wrap` is one line.
+ */
+interface TextCmd {
+    op: 'text';
+    x: number;
+    y: number;
+    text: string;
+    /** Font size in points. */
+    fontSize: number;
+    /** resolved font color (`#rrggbb`); a number-format color prefix wins upstream. */
+    color: string;
+    /** clip rectangle; the backend saves/clips/restores around the fill. */
+    clip?: Rect;
+    align?: TextAlign;
+    /**
+     * Font style facets resolved from the cell's style. All skip-serialized at
+     * `false` in Rust, so an unstyled run omits them; treat absent as `false`.
+     */
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    strike?: boolean;
+    highlight?: string;
+    dashedUnderline?: boolean;
+    /** css/font family from the style font; the backend falls back to its default. */
+    fontFamily?: string;
+    numberFormat?: NumberFormatLayout;
+    /**
+     * Preview text that is not the cell's committed value (a proposal ghost's
+     * `new` text). Painted normally, but excluded from a11y text recovery.
+     */
+    ghost?: boolean;
+    chart?: boolean;
+    rotationDeg?: number;
+    rotationBox?: Rect;
+    rotationValign?: 'top' | 'center' | 'bottom';
+    stacked?: boolean;
+    wrap?: TextWrap;
+}
+interface NumberFormatLayout {
+    left: number;
+    width: number;
+    parts: {
+        offset: number;
+        kind: 'padding' | 'fill';
+        character: string;
+    }[];
+    general?: number;
+    overflow?: boolean;
+}
+/**
+ * One draw command; discriminated on `op`.
+ */
+type DrawCmd = FillRectCmd | PatternFillCmd | LineCmd | PathCmd | TextCmd;
+/**
+ * Grid metadata for the frame: which sheet cells the visible tracks map to and
+ * their viewport-local pixel boundaries. `rowOffsets[i]`/`colOffsets[i]` is the
+ * leading edge of the i-th visible row/col in device-independent px from the
+ * frame origin; both arrays have length `visible count + 1`, the last entry
+ * being one-past-end (the trailing edge of the last visible track). The pure
+ * hit-test and a11y seams read this to place clicks and mirror the grid without
+ * re-deriving geometry.
+ *
+ * Hand-mirrored from crates/xlsx-render/src/display_list.rs — keep in sync.
+ */
+interface GridMeta {
+    startRow: number;
+    startCol: number;
+    hiddenRowSpans?: [number, number][];
+    hiddenColSpans?: [number, number][];
+    rowIndices?: number[];
+    colIndices?: number[];
+    rowOffsets: number[];
+    colOffsets: number[];
+}
+interface HyperlinkRegion {
+    top: number;
+    left: number;
+    bottom: number;
+    right: number;
+    externalTarget?: string;
+    location?: string;
+    tooltip?: string;
+}
+/**
+ * A chart's placement in the frame: the id that addresses it across the wasm
+ * boundary, what a screen reader reads, whether the renderer managed to draw
+ * it, its full viewport-local rect and the visible part after pane clipping. A
+ * chart that degraded to a placeholder still gets a region, so it stays an
+ * addressable object on the sheet.
+ *
+ * Hand-mirrored from crates/xlsx-render/src/display_list.rs — keep in sync.
+ */
+interface ChartRegion {
+    /**
+     * the drawing part and the anchor in it, unique within a sheet. Opaque —
+     * never the chart part's path, which two anchors may share.
+     */
+    id: string;
+    label: string;
+    /**
+     * the chart could not be drawn; a neutral box occupies its rect instead.
+     * skip-serialized at `false` in Rust, so treat absent as `false`.
+     */
+    placeholder?: boolean;
+    rect: Rect;
+    /** `rect` intersected with the pane band it paints in — the hit area. */
+    clip: Rect;
+    /** whether the anchor can be repinned; an absolute one cannot. */
+    movable: boolean;
+}
+/** Former name of {@link ChartRegion}, when it carried the label alone. */
+type ChartA11yAttrs = ChartRegion;
+/**
+ * A full frame to paint: logical size plus the ordered command stream. `grid`
+ * is optional so a synthetic or pre-grid-metadata frame still type-checks; the
+ * hit-test and a11y builders treat its absence as "no addressable cells".
+ */
+interface DisplayList {
+    width: number;
+    height: number;
+    commands: DrawCmd[];
+    grid?: GridMeta;
+    hyperlinks?: HyperlinkRegion[];
+    charts?: ChartRegion[];
+    /** The cell budget omitted the bottom of this viewport. */
+    truncated?: boolean;
+}
+
+/**
+ * Pure selection types. Plain data only — no DOM, no framework — so the model
+ * is golden-testable. The chrome layer interprets the
+ * declarative {@link SelectionAction}s the reducer emits.
+ */
+/**
+ * A single cell coordinate. `row`/`col` are zero-based sheet indices, not px.
+ */
+interface CellAddr {
+    row: number;
+    col: number;
+}
+/**
+ * `anchor` is the fixed starting cell; `focus` is the active cell.
+ * `range` overrides their bounds for region selection.
+ */
+interface Selection {
+    anchor: CellAddr;
+    focus: CellAddr;
+    /** Explicit bounds when the active cell is inside a selected region. */
+    range?: CellRange;
+}
+/**
+ * A normalized, inclusive rectangle of cells. `top <= bottom`, `left <= right`.
+ * Derived from a {@link Selection} by {@link normalizeRange}; the natural shape
+ * for hit-testing, overlay rects, and range reads.
+ */
+interface CellRange {
+    top: number;
+    left: number;
+    bottom: number;
+    right: number;
+}
+/**
+ * A cardinal move direction for {@link moveFocus} and arrow-key handling.
+ */
+type Direction = 'up' | 'down' | 'left' | 'right';
+/** Sheet bounds and the viewport height in whole rows. */
+interface SelectionLimits {
+    rows: number;
+    cols: number;
+    rowsPerPage: number;
+}
+/**
+ * Options for {@link moveFocus}: whether to extend (keep the anchor) or collapse
+ * to a single cell, how many cells to step, and the grid bounds to clamp into.
+ */
+interface MoveOpts {
+    extend?: boolean;
+    step?: number;
+    limits: SelectionLimits;
+    hidden?: SelectionHidden;
+    merges?: SelectionMerges;
+}
+/**
+ * A keyboard event reduced to the fields the reducer reads. `metaKey`/`ctrlKey`
+ * are both accepted so a caller need not normalize mac cmd vs win/linux ctrl.
+ */
+interface KeyInput {
+    key: string;
+    shiftKey?: boolean;
+    metaKey?: boolean;
+    ctrlKey?: boolean;
+    altKey?: boolean;
+}
+/**
+ * The declarative outcome of a keystroke. The chrome interprets it: `move`
+ * replaces the selection, `startEdit` opens the in-cell editor (seeding it with
+ * `initialInput` when a printable key triggered it), `clear` deletes the
+ * selected cells' contents, and `none` means the key was not handled here.
+ */
+type SelectionAction = {
+    type: 'move';
+    selection: Selection;
+} | {
+    type: 'startEdit';
+    initialInput?: string;
+} | {
+    type: 'clear';
+} | {
+    type: 'none';
+};
+/** Precomputed model answers for one keyboard navigation request. */
+interface SelectionData {
+    merge?: CellRange | null;
+    edge?: CellAddr | null;
+    region?: CellRange | null;
+    usedRange?: CellRange | null;
+}
+interface SelectionHidden {
+    isRowHidden(row: number): boolean;
+    isColHidden(col: number): boolean;
+}
+/** Merged areas, so navigation treats each one as a single cell. */
+interface SelectionMerges {
+    mergeAt(row: number, col: number): CellRange | null;
+}
+
+export type { CellAddr as C, DisplayList as D, FillRectCmd as F, GeometryPathCommand as G, HyperlinkRegion as H, KeyInput as K, LineCmd as L, MoveOpts as M, PathCmd as P, Rect as R, Selection as S, TextAlign as T, CellRange as a, ChartA11yAttrs as b, ChartRegion as c, Direction as d, DrawCmd as e, GridMeta as f, PathStroke as g, PatternFillCmd as h, PatternType as i, SelectionAction as j, SelectionData as k, SelectionHidden as l, SelectionLimits as m, SelectionMerges as n, TextCmd as o, TextWrap as p };

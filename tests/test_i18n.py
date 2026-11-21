@@ -137,8 +137,19 @@ def test_every_tr_key_resolves():
 
 def test_every_locale_key_is_used():
     """No dead strings: every key is referenced by the UI."""
-    unused = sorted(k for k in EN if k not in _tr_keys(_app_source()) | _dynamic_keys())
+    unused = sorted(
+        k
+        for k in EN
+        if k not in _tr_keys(_app_source()) | _dynamic_keys() | _gate_keys()
+    )
     assert not unused, f"locale keys never used by the app: {unused}"
+
+
+def _gate_keys() -> set[str]:
+    """P0 gate copy is rendered by the Pyodide engine, not by app.py yet."""
+    with open(os.path.join(ROOT, "lethe", "gates.py"), encoding="utf-8") as fh:
+        source = fh.read()
+    return set(re.findall(r'"(gate\.[a-z_.]+)"', source))
 
 
 def _dynamic_keys() -> set[str]:

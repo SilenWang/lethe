@@ -1,0 +1,1 @@
+export{a as createDefaultFindOptions,c as createSearchPattern,b as escapeRegexString,d as findAllMatches,j as findInDocument,k as findInParagraph,i as getDefaultHighlightOptions,g as getMatchCountText,h as isEmptySearch,e as replaceAllInContent,f as replaceFirstInContent,l as scrollToMatch}from'../chunk-N5RE2S3U.mjs';import'../chunk-TTRUPDAB.mjs';
