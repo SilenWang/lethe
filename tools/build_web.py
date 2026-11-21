@@ -25,6 +25,7 @@ REPO = Path(__file__).resolve().parents[1]
 WEB = REPO / "web"
 VENDOR = WEB / "assets" / "vendor"
 TEXT_SUFFIXES = {".html", ".js", ".mjs", ".css", ".json"}
+PY_MODULES = ("gates.py", "web_entry.py")
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
@@ -81,6 +82,11 @@ def build(out: Path) -> None:
         source = WEB / entry
         if source.is_dir():
             _copy_tree(source, out / entry)
+    py_out = out / "py" / "lethe"
+    py_out.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(WEB / "py" / "lethe" / "__init__.py", py_out / "__init__.py")
+    for module in PY_MODULES:
+        shutil.copy2(REPO / "lethe" / module, py_out / module)
 
 
 def main(argv: list[str] | None = None) -> int:
