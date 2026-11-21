@@ -46,6 +46,42 @@ START_WORKER = """async () => {
   return waitFor((message) => message.type === "ready");
 }"""
 
+ROUNDTRIP = """async () => {
+    const buf = await (await fetch("/samples/docx-001.docx")).arrayBuffer();
+    window.__worker.postMessage(
+        {
+            type: "run", id: "r1", op: "redact", fileName: "x.docx",
+            options: {entities: [{canonical: "John Smith", type: "PERSON", aliases: []}]},
+            bytes: buf,
+        },
+        [buf],
+    );
+    const red = await window.__waitFor(
+        (item) => item.id === "r1" && (item.type === "result" || item.type === "error"),
+    );
+    if (red.type !== "result") return {error: red};
+    const tokenMap = Object.fromEntries(
+        red.result.items.filter((item) => item.token).map((item) => [item.token, item.canonical]),
+    );
+    window.__worker.postMessage(
+        {
+            type: "run", id: "r2", op: "restore", fileName: "x.docx",
+            options: {token_map: tokenMap}, bytes: red.result.bytes.buffer,
+        },
+        [red.result.bytes.buffer],
+    );
+    const restored = await window.__waitFor(
+        (item) => item.id === "r2" && (item.type === "result" || item.type === "error"),
+    );
+    window.__worker.terminate();
+    return {
+        hits: red.result.hits,
+        tokens: red.result.tokens,
+        restoredType: restored.type,
+        restoredSize: restored.result && restored.result.size,
+    };
+}"""
+
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
@@ -146,47 +182,37 @@ def test_gate_rejection_is_too_large(page) -> None:
 
 def test_redact_then_restore_roundtrip(page) -> None:
     page.evaluate(START_WORKER)
-    outcome = page.evaluate(
-        """async () => {
-            const buf = await (await fetch("/samples/docx-001.docx")).arrayBuffer();
-            window.__worker.postMessage(
-                {
-                    type: "run", id: "r1", op: "redact", fileName: "x.docx",
-                    options: {entities: [{canonical: "John Smith", type: "PERSON", aliases: []}]},
-                    bytes: buf,
-                },
-                [buf],
-            );
-            const red = await window.__waitFor(
-                (item) => item.id === "r1" && (item.type === "result" || item.type === "error"),
-            );
-            if (red.type !== "result") return {error: red};
-            const tokenMap = Object.fromEntries(
-                red.result.items.filter((item) => item.token).map((item) => [item.token, item.canonical]),
-            );
-            window.__worker.postMessage(
-                {
-                    type: "run", id: "r2", op: "restore", fileName: "x.docx",
-                    options: {token_map: tokenMap}, bytes: red.result.bytes.buffer,
-                },
-                [red.result.bytes.buffer],
-            );
-            const restored = await window.__waitFor(
-                (item) => item.id === "r2" && (item.type === "result" || item.type === "error"),
-            );
-            window.__worker.terminate();
-            return {
-                hits: red.result.hits,
-                tokens: red.result.tokens,
-                restoredType: restored.type,
-                restoredSize: restored.result && restored.result.size,
-            };
-        }"""
-    )
+    outcome = page.evaluate(ROUNDTRIP)
     assert outcome["hits"] > 0, outcome
     assert "[PERSON_001]" in outcome["tokens"]
     assert outcome["restoredType"] == "result", outcome
     assert outcome["restoredSize"] > 0
+
+
+def test_offline_cold_start_roundtrip(built: Path) -> None:
+    assert sync_playwright is not None
+    external: list[str] = []
+    with StaticServer(built) as server, sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page()
+        page.set_default_timeout(180_000)
+
+        def route(route_obj) -> None:
+            url = route_obj.request.url
+            if url.startswith((server.base_url, "data:", "blob:")):
+                route_obj.continue_()
+            else:
+                external.append(url)
+                route_obj.abort()
+
+        page.route("**/*", route)
+        page.goto(f"{server.base_url}/p1/harness.html")
+        page.wait_for_function("window.p1 && window.p1.state === 'ready'")
+        page.evaluate(START_WORKER)
+        outcome = page.evaluate(ROUNDTRIP)
+        browser.close()
+    assert external == [], f"offline round-trip reached the network: {external}"
+    assert outcome["restoredType"] == "result", outcome
 
 
 def test_cancel_during_init_keeps_worker_alive(built: Path) -> None:
