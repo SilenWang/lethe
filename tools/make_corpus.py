@@ -24,8 +24,10 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import re
 import sys
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -306,6 +308,10 @@ def _add_xlsx_textbox(parts: dict[str, bytes], marker: str, case: int) -> None:
 def build_xlsx(case: int) -> bytes:
     marker = f"CASE-XLSX-{case:03d}"
     wb = Workbook()
+    wb.properties.creator = "tools/make_corpus.py"
+    wb.properties.lastModifiedBy = "tools/make_corpus.py"
+    wb.properties.created = datetime(2026, 1, 1, 0, 0, 0)
+    wb.properties.modified = datetime(2026, 1, 1, 0, 0, 0)
     ws = wb.active
     ws.title = "Data"
     ws["A1"] = marker
@@ -347,6 +353,14 @@ def build_xlsx(case: int) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     parts = read_parts(buf.getvalue())
+    # openpyxl stamps the save time into core.xml; freeze it for reproducible hashes.
+    core = parts["docProps/core.xml"].decode("utf-8")
+    core = re.sub(
+        r"(<dcterms:(?:created|modified)[^>]*>)[^<]+",
+        r"\g<1>2026-01-01T00:00:00Z",
+        core,
+    )
+    parts["docProps/core.xml"] = core.encode("utf-8")
     _add_xlsx_textbox(parts, marker, case)
     return normalize_zip(write_parts(parts))
 
