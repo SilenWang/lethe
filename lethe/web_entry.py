@@ -13,11 +13,10 @@ import time
 import zipfile
 from pathlib import Path
 
-from lethe import gates
+from lethe import core, docx_engine, gates, postprocess
 
 PROTOCOL = 1
-IMPLEMENTED_OPS = ("echo", "inspect")
-PENDING_OPS = ("redact", "restore")
+IMPLEMENTED_OPS = ("echo", "inspect", "redact", "restore", "finish")
 
 
 def _ok(**payload: object) -> str:
@@ -72,6 +71,47 @@ def _inspect(path: str, file_name: str) -> str:
     )
 
 
+def _entities(raw_entities: list[dict[str, object]]) -> list[core.Entity]:
+    entities: list[core.Entity] = []
+    for item in raw_entities:
+        raw_aliases = item.get("aliases")
+        aliases = [str(alias) for alias in raw_aliases] if isinstance(raw_aliases, list) else []
+        entities.append(
+            core.Entity(
+                canonical=str(item["canonical"]),
+                type=str(item.get("type", "PERSON")),
+                aliases=aliases,
+            )
+        )
+    return entities
+
+
+def _redact(path: str, raw_entities: list[dict[str, object]]) -> str:
+    result = docx_engine.redact(Path(path).read_bytes(), _entities(raw_entities))
+    return _ok(
+        updates=result.updates,
+        tokens=result.tokens,
+        items=result.items,
+        counts=result.counts,
+        hits=result.hits,
+    )
+
+
+def _restore(path: str, token_map: dict[str, str]) -> str:
+    result = docx_engine.restore(Path(path).read_bytes(), token_map)
+    return _ok(updates=result.updates, tokens=result.tokens, counts=result.counts,
+               hits=result.hits)
+
+
+def _finish(source: str, library: str, tokens: list[str]) -> str:
+    """Route the library output through postprocess and write the final file."""
+    final = postprocess.postprocess(
+        Path(source).read_bytes(), Path(library).read_bytes(), tokens
+    )
+    Path("/tmp/final.docx").write_bytes(final)
+    return _ok(path="/tmp/final.docx", size=len(final))
+
+
 def dispatch(request_json: str) -> str:
     """Single entry point; always returns JSON, including for unknown ops."""
     try:
@@ -82,8 +122,16 @@ def dispatch(request_json: str) -> str:
             return _echo(options)
         if op == "inspect":
             return _inspect(str(request["path"]), str(request.get("file_name", "upload.docx")))
-        if op in PENDING_OPS:
-            return _err("INTERNAL", f"op {op} arrives with next/p1-docx-core")
+        if op == "redact":
+            return _redact(str(request["path"]), list(request.get("entities") or []))
+        if op == "restore":
+            return _restore(str(request["path"]), dict(request.get("token_map") or {}))
+        if op == "finish":
+            return _finish(
+                str(request["source"]),
+                str(request["library"]),
+                [str(token) for token in request.get("tokens") or []],
+            )
         return _err("INTERNAL", f"unknown op {op!r}")
     except Exception as exc:  # noqa: BLE001 - a malformed request must not kill the worker
         return _err("INTERNAL", f"{type(exc).__name__}: {exc}")

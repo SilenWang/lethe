@@ -28,12 +28,22 @@ bridge.stats();       // {runs, recycles, lastBytes, lastDurationMs}
 | op | status | result |
 |---|---|---|
 | `inspect` | P1 foundation | `{parts, paragraphs, status, warnings}` |
-| `redact` | `next/p1-docx-core` | redacted docx bytes |
-| `restore` | `next/p1-docx-core` | restored docx bytes |
+| `redact` | P1 docx | `{bytes, tokens, items, counts, hits, size}` |
+| `restore` | P1 docx | `{bytes, tokens, counts, hits, size}` |
 | `echo` | diagnostics only | `{payload, protocol}` |
 
 `inspect` runs the four hard gates in Pyodide **before** BetterOffice
 `parseDocx`, then reports the part count and paragraph count.
+
+`redact` options: `{entities: [{canonical, type, aliases}]}`. It replaces every
+text container (body, headers, footers, footnotes, endnotes, comments,
+tracked-change text, author attributes, `docProps/core.xml`), then repacks via
+BetterOffice and routes the result through `postprocess()`.
+
+`restore` options: `{token_map: {"[PERSON_001]": "John Smith"}}`.
+
+Both return `bytes` as a transferred `Uint8Array`; the worker also emits
+`detect → write → postprocess` progress phases.
 
 ## Worker messages
 

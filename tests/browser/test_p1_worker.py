@@ -144,6 +144,51 @@ def test_gate_rejection_is_too_large(page) -> None:
     assert message["detail"]["gate"] == "G4c:zip.ratio"
 
 
+def test_redact_then_restore_roundtrip(page) -> None:
+    page.evaluate(START_WORKER)
+    outcome = page.evaluate(
+        """async () => {
+            const buf = await (await fetch("/samples/docx-001.docx")).arrayBuffer();
+            window.__worker.postMessage(
+                {
+                    type: "run", id: "r1", op: "redact", fileName: "x.docx",
+                    options: {entities: [{canonical: "John Smith", type: "PERSON", aliases: []}]},
+                    bytes: buf,
+                },
+                [buf],
+            );
+            const red = await window.__waitFor(
+                (item) => item.id === "r1" && (item.type === "result" || item.type === "error"),
+            );
+            if (red.type !== "result") return {error: red};
+            const tokenMap = Object.fromEntries(
+                red.result.items.filter((item) => item.token).map((item) => [item.token, item.canonical]),
+            );
+            window.__worker.postMessage(
+                {
+                    type: "run", id: "r2", op: "restore", fileName: "x.docx",
+                    options: {token_map: tokenMap}, bytes: red.result.bytes.buffer,
+                },
+                [red.result.bytes.buffer],
+            );
+            const restored = await window.__waitFor(
+                (item) => item.id === "r2" && (item.type === "result" || item.type === "error"),
+            );
+            window.__worker.terminate();
+            return {
+                hits: red.result.hits,
+                tokens: red.result.tokens,
+                restoredType: restored.type,
+                restoredSize: restored.result && restored.result.size,
+            };
+        }"""
+    )
+    assert outcome["hits"] > 0, outcome
+    assert "[PERSON_001]" in outcome["tokens"]
+    assert outcome["restoredType"] == "result", outcome
+    assert outcome["restoredSize"] > 0
+
+
 def test_cancel_during_init_keeps_worker_alive(built: Path) -> None:
     assert sync_playwright is not None
     with StaticServer(built) as server, sync_playwright() as playwright:

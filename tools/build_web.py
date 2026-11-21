@@ -25,7 +25,8 @@ REPO = Path(__file__).resolve().parents[1]
 WEB = REPO / "web"
 VENDOR = WEB / "assets" / "vendor"
 TEXT_SUFFIXES = {".html", ".js", ".mjs", ".css", ".json"}
-PY_MODULES = ("gates.py", "web_entry.py")
+PY_MODULES = ("core.py", "docx_engine.py", "gates.py", "postprocess.py", "web_entry.py")
+TOOL_MODULES = ("__init__.py", "postprocess_contract.py")
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
@@ -87,6 +88,10 @@ def build(out: Path) -> None:
     shutil.copy2(WEB / "py" / "lethe" / "__init__.py", py_out / "__init__.py")
     for module in PY_MODULES:
         shutil.copy2(REPO / "lethe" / module, py_out / module)
+    tools_out = out / "py" / "tools"
+    tools_out.mkdir(parents=True, exist_ok=True)
+    for module in TOOL_MODULES:
+        shutil.copy2(REPO / "tools" / module, tools_out / module)
 
 
 def main(argv: list[str] | None = None) -> int:
