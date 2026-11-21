@@ -33,6 +33,7 @@ boot.*
 
 # Python build artifacts
 /build/
+dist/web/
 
 # scratch test venvs
 /_itest/
