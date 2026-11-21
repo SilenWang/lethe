@@ -1,0 +1,67 @@
+# P1 worker interface (frozen v1)
+
+The UI talks to exactly one document worker through
+`web/lib/pyodide_bridge.js`. Pyodide and BetterOffice share that worker and run
+one request at a time. `PROTOCOL_VERSION` in `web/lib/protocol.js` is `1`; a
+shape change needs a version bump and an interface review, because the UI line
+is built against this page.
+
+## Main thread API
+
+```js
+const bridge = createBridge({ onStatus });
+await bridge.ready; // {protocol, pyodide, ops}
+const result = await bridge.run({ op, bytes, fileName, options, onProgress });
+bridge.cancel();      // rejects the active run with CANCELLED
+bridge.dispose();
+bridge.stats();       // {runs, recycles, lastBytes, lastDurationMs}
+```
+
+- `bytes` is a `Uint8Array`; its buffer is transferred (zero-copy) and is
+  detached afterwards.
+- Only one run may be active; a second call rejects with `BUSY`.
+- `onProgress({id, phase, done, total})` fires with `phase` from `PHASES`.
+- `onStatus({state, reason, stats})` tracks `initializing | ready | failed`.
+
+## Ops
+
+| op | status | result |
+|---|---|---|
+| `inspect` | P1 foundation | `{parts, paragraphs, status, warnings}` |
+| `redact` | `next/p1-docx-core` | redacted docx bytes |
+| `restore` | `next/p1-docx-core` | restored docx bytes |
+| `echo` | diagnostics only | `{payload, protocol}` |
+
+`inspect` runs the four hard gates in Pyodide **before** BetterOffice
+`parseDocx`, then reports the part count and paragraph count.
+
+## Worker messages
+
+| direction | message |
+|---|---|
+| main → worker | `{type:"run", id, op, fileName, options, bytes}` |
+| worker → main | `{type:"ready", protocol, pyodide, ops}` |
+| worker → main | `{type:"init-progress", phase}` |
+| worker → main | `{type:"init-error", code, message}` |
+| worker → main | `{type:"progress", id, phase, done?, total?}` |
+| worker → main | `{type:"result", id, result}` |
+| worker → main | `{type:"error", id, code, message, detail?}` |
+
+## Error codes
+
+`OOM`, `TOO_LARGE`, `PARSE_FAILED`, `CANCELLED`, `TIMEOUT`, `BUSY`,
+`INIT_FAILED`, `INTERNAL`.
+
+Gate rejections come back as `TOO_LARGE` with `detail.gate` / `detail.part`
+(`G0`/`G5` invalid or encrypted packages are `PARSE_FAILED`). Every gate line
+is also in `detail.findings`.
+
+## Liveness
+
+Watchdog defaults: first byte 60s, between progress ticks 4s, packing 120s.
+A stalled or cancelled executing worker is terminated and respawned; the UI
+sees `initializing`, never a stuck `init-error` badge. Cancelling while the
+worker is still initialising does not touch initialisation at all.
+
+Files above 35MiB recycle the worker after the result is delivered
+(`reason: "large-task"`). OOM errors recycle immediately.

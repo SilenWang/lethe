@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -141,3 +142,110 @@ def test_gate_rejection_is_too_large(page) -> None:
     assert message["type"] == "error"
     assert message["code"] == "TOO_LARGE"
     assert message["detail"]["gate"] == "G4c:zip.ratio"
+
+
+def test_cancel_during_init_keeps_worker_alive(built: Path) -> None:
+    assert sync_playwright is not None
+    with StaticServer(built) as server, sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page()
+        page.set_default_timeout(180_000)
+        page.route("**/pyodide.asm.wasm", lambda route: (time.sleep(1.5), route.continue_()))
+        page.goto(f"{server.base_url}/p1/harness.html")
+        page.wait_for_function("window.p1 && window.p1.state === 'ready'")
+        outcome = page.evaluate(
+            """async () => {
+                const bridge = window.p1.createBridge({});
+                const run = bridge.run({op: "echo", bytes: new TextEncoder().encode("x")});
+                const cancelled = bridge.cancel();
+                const first = await run.then(() => "resolved", (e) => e.code);
+                const stateAfterCancel = bridge.state();
+                const info = await bridge.ready;
+                const echo = await bridge.run({
+                    op: "echo", bytes: new TextEncoder().encode("x"), options: {payload: "ok"},
+                });
+                bridge.dispose();
+                return {cancelled, first, stateAfterCancel, pyodide: info.pyodide, echo};
+            }"""
+        )
+        browser.close()
+    assert outcome["cancelled"] is True
+    assert outcome["first"] == "CANCELLED"
+    assert outcome["stateAfterCancel"] == "initializing"
+    assert outcome["pyodide"] == "0.29.5"
+    assert outcome["echo"]["payload"] == "ok"
+
+
+def test_watchdog_times_out_and_restarts(page) -> None:
+    outcome = page.evaluate(
+        """async () => {
+            const bridge = window.p1.createBridge({limits: {firstByteMs: 300}});
+            await bridge.ready;
+            const slow = bridge.run({
+                op: "echo", bytes: new TextEncoder().encode("x"), options: {sleepMs: 1500},
+            });
+            const code = await slow.then(() => "resolved", (e) => e.code);
+            await bridge.ready;
+            const echo = await bridge.run({
+                op: "echo", bytes: new TextEncoder().encode("x"), options: {payload: "after"},
+            });
+            const recycles = bridge.stats().recycles;
+            bridge.dispose();
+            return {code, payload: echo.payload, recycles};
+        }"""
+    )
+    assert outcome["code"] == "TIMEOUT"
+    assert outcome["payload"] == "after"
+    assert outcome["recycles"] >= 1
+
+
+def test_large_task_recycles_worker(page) -> None:
+    outcome = page.evaluate(
+        """async () => {
+            const bridge = window.p1.createBridge({recycleThresholdBytes: 0});
+            await bridge.ready;
+            await bridge.run({op: "echo", bytes: new TextEncoder().encode("x")});
+            const after = bridge.stats().recycles;
+            const state = bridge.state();
+            await bridge.ready;
+            const echo = await bridge.run({
+                op: "echo", bytes: new TextEncoder().encode("x"), options: {payload: "next"},
+            });
+            bridge.dispose();
+            return {after, state, payload: echo.payload};
+        }"""
+    )
+    assert outcome["after"] == 1
+    assert outcome["state"] == "initializing"
+    assert outcome["payload"] == "next"
+
+
+def test_second_run_is_busy(page) -> None:
+    outcome = page.evaluate(
+        """async () => {
+            const bridge = window.p1.createBridge({});
+            await bridge.ready;
+            const first = bridge.run({
+                op: "echo", bytes: new TextEncoder().encode("x"), options: {sleepMs: 300},
+            });
+            const second = await bridge.run({
+                op: "echo", bytes: new TextEncoder().encode("x"),
+            }).then(() => "resolved", (e) => e.code);
+            await first;
+            bridge.dispose();
+            return second;
+        }"""
+    )
+    assert outcome == "BUSY"
+
+
+def test_error_classification(page) -> None:
+    codes = page.evaluate(
+        """() => [
+            window.p1.classifyError(new Error("WebAssembly.Memory.grow failed")),
+            window.p1.classifyError(new Error("BadZipFile: File is not a zip file")),
+            window.p1.classifyError(new Error("worker stopped")),
+            window.p1.classifyError({code: "TOO_LARGE", message: "gate"}),
+        ]"""
+    )
+    assert codes == ["OOM", "PARSE_FAILED", "INTERNAL", "TOO_LARGE"]
