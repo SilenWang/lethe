@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#6a4690" />
+    <meta
+      name="description"
+      content="Local, reversible document de-identification. Documents are processed in this browser and never uploaded."
+    />
+    <title>Lethe — Document De-identifier</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="./ui/favicon.svg" />
+    <link rel="stylesheet" href="./ui/app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>Lethe</h1>
+        <p class="tagline" data-i18n="p1.tagline"></p>
+      </div>
+      <div class="topbar-actions">
+        <span id="runtime-badge" class="badge badge-wait" data-i18n="p1.runtime.initializing"></span>
+        <label class="lang-picker">
+          <span data-i18n="p1.lang"></span>
+          <select id="lang-select" aria-label="Language">
+            <option value="en">English</option>
+            <option value="zh">中文</option>
+          </select>
+        </label>
+        <button id="install-btn" type="button" class="btn btn-ghost" hidden data-i18n="p1.install"></button>
+      </div>
+    </header>
+
+    <nav class="steps" role="tablist" aria-label="Workflow">
+      <button role="tab" type="button" data-panel="upload" aria-selected="true" class="step is-active">
+        <span class="step-no">1</span><span data-i18n="p1.step.upload"></span>
+      </button>
+      <button role="tab" type="button" data-panel="review" aria-selected="false" class="step" disabled>
+        <span class="step-no">2</span><span data-i18n="p1.step.review"></span>
+      </button>
+      <button role="tab" type="button" data-panel="generate" aria-selected="false" class="step" disabled>
+        <span class="step-no">3</span><span data-i18n="p1.step.generate"></span>
+      </button>
+      <button role="tab" type="button" data-panel="restore" aria-selected="false" class="step">
+        <span class="step-no">4</span><span data-i18n="p1.step.restore"></span>
+      </button>
+    </nav>
+
+    <main>
+      <section id="panel-upload" class="panel" role="tabpanel">
+        <h2 data-i18n="p1.upload.title"></h2>
+        <p class="hint" data-i18n="p1.upload.hint"></p>
+        <div id="upload-drop" class="dropzone" tabindex="0" role="button">
+          <p data-i18n="p1.upload.drop"></p>
+          <p class="hint" data-i18n="p1.upload.formats"></p>
+        </div>
+        <input id="upload-input" type="file" accept=".docx" hidden />
+        <p id="upload-file" class="file-line" hidden></p>
+        <p id="upload-note" class="note" hidden></p>
+        <p id="upload-inspect" class="meta" hidden></p>
+        <div class="actions">
+          <button id="inspect-btn" type="button" class="btn" disabled data-i18n="p1.upload.inspect"></button>
+          <button id="detect-btn" type="button" class="btn btn-primary" disabled data-i18n="p1.upload.continue"></button>
+          <button id="clear-btn" type="button" class="btn btn-ghost" disabled data-i18n="p1.upload.clear"></button>
+        </div>
+      </section>
+
+      <section id="panel-review" class="panel" role="tabpanel" hidden>
+        <h2 data-i18n="p1.review.title"></h2>
+        <p class="hint" data-i18n="p1.review.hint"></p>
+        <div class="review-tools">
+          <span id="review-count" class="meta"></span>
+          <button id="select-all-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.check_all"></button>
+          <button id="select-none-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.uncheck_all"></button>
+        </div>
+        <div class="table-wrap">
+          <table class="review-table">
+            <thead>
+              <tr>
+                <th scope="col"></th>
+                <th scope="col" data-i18n="p1.review.value"></th>
+                <th scope="col" data-i18n="p1.review.type"></th>
+                <th scope="col" data-i18n="p1.review.source"></th>
+                <th scope="col" data-i18n="p1.review.count"></th>
+                <th scope="col" data-i18n="p1.review.token"></th>
+              </tr>
+            </thead>
+            <tbody id="review-rows"></tbody>
+          </table>
+        </div>
+        <p id="review-empty" class="note" hidden data-i18n="p1.review.empty"></p>
+        <div class="actions">
+          <button id="rescan-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.rescan"></button>
+          <button id="generate-btn" type="button" class="btn btn-primary" data-i18n="p1.review.generate"></button>
+        </div>
+      </section>
+
+      <section id="panel-generate" class="panel" role="tabpanel" hidden>
+        <h2 data-i18n="p1.generate.title"></h2>
+        <div id="generate-card" class="card">
+          <p id="generate-summary" class="result-line"></p>
+          <p id="generate-job" class="meta"></p>
+          <p id="generate-saved" class="meta"></p>
+          <label id="generate-dict-label" class="check">
+            <input id="generate-dict" type="checkbox" />
+            <span id="generate-dict-text"></span>
+          </label>
+          <div class="actions">
+            <button id="download-btn" type="button" class="btn btn-primary" data-i18n="p1.generate.download"></button>
+            <button id="goto-restore-btn" type="button" class="btn" data-i18n="p1.generate.to_restore"></button>
+            <button id="restart-btn" type="button" class="btn btn-ghost" data-i18n="p1.generate.restart"></button>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-restore" class="panel" role="tabpanel" hidden>
+        <h2 data-i18n="p1.restore.title"></h2>
+        <p class="hint" data-i18n="p1.restore.hint"></p>
+        <div class="field">
+          <label for="restore-job" data-i18n="p1.restore.job"></label>
+          <select id="restore-job"></select>
+        </div>
+        <p id="restore-no-jobs" class="note" hidden data-i18n="p1.restore.no_jobs"></p>
+        <div class="field">
+          <label for="restore-passphrase" data-i18n="p1.restore.passphrase"></label>
+          <input id="restore-passphrase" type="password" autocomplete="off" />
+        </div>
+        <div id="restore-drop" class="dropzone" tabindex="0" role="button">
+          <p data-i18n="p1.restore.file"></p>
+        </div>
+        <input id="restore-input" type="file" accept=".docx" hidden />
+        <p id="restore-file" class="file-line" hidden></p>
+        <div class="actions">
+          <button id="restore-btn" type="button" class="btn btn-primary" data-i18n="p1.restore.run"></button>
+        </div>
+        <div id="restore-result" class="card" hidden>
+          <p id="restore-summary" class="result-line"></p>
+          <button id="restore-download" type="button" class="btn btn-primary" data-i18n="p1.restore.download"></button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span data-i18n="p1.privacy"></span>
+      <span id="storage-line" class="meta"></span>
+    </footer>
+
+    <div id="progress" class="progress" hidden>
+      <progress id="progress-bar" max="100"></progress>
+      <span id="progress-label"></span>
+      <button id="cancel-btn" type="button" class="btn btn-ghost" data-i18n="p1.cancel"></button>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <script src="./client-store.js"></script>
+    <script type="module" src="./ui/app.js"></script>
+  </body>
+</html>
