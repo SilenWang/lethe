@@ -87,11 +87,15 @@ def build(out: Path) -> None:
     if (WEB / "sw.js").is_file():
         shutil.copy2(WEB / "sw.js", out / "sw.js")
     if (WEB / "ui").is_dir():
-        _copy_tree(WEB / "ui", out / "ui")
+        # Plain copies (not hard links): the UI test re-stages these files over
+        # the build output, and copytree must not collide with the repo inode.
+        shutil.copytree(WEB / "ui", out / "ui", dirs_exist_ok=True)
     for entry in ("client-store.js", "manifest.webmanifest"):
         shutil.copy2(REPO / "lethe" / "web_static" / entry, out / entry)
-    _copy_tree(REPO / "lethe" / "web_static" / "icons", out / "static" / "icons")
-    _copy_tree(REPO / "lethe" / "locales", out / "locales")
+    shutil.copytree(
+        REPO / "lethe" / "web_static" / "icons", out / "static" / "icons", dirs_exist_ok=True
+    )
+    shutil.copytree(REPO / "lethe" / "locales", out / "locales", dirs_exist_ok=True)
     py_out = out / "py" / "lethe"
     py_out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(WEB / "py" / "lethe" / "__init__.py", py_out / "__init__.py")
