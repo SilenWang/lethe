@@ -46,6 +46,7 @@ export function createBridge(options = {}) {
   let readyPromise;
   let resolveReady;
   let rejectReady;
+  const statsWaiters = new Map();
   const stats = { runs: 0, recycles: 0, lastBytes: 0, lastDurationMs: 0 };
 
   // Every spawned worker gets a fresh init promise. A cancelled init therefore
@@ -87,6 +88,12 @@ export function createBridge(options = {}) {
         failPending(bridgeError(message.code || "INIT_FAILED", message.message));
       } else if (message.type === "init-progress") {
         onStatus({ state: "initializing", phase: message.phase });
+      } else if (message.type === "stats") {
+        const waiter = statsWaiters.get(message.id);
+        if (waiter) {
+          statsWaiters.delete(message.id);
+          waiter.resolve(message.heapBytes);
+        }
       } else if (pending && message.id === pending.id) {
         pending.lastSeen = Date.now();
         if (message.type === "progress") {
@@ -212,8 +219,26 @@ export function createBridge(options = {}) {
     failPending(bridgeError(ERROR_CODES.CANCELLED, "bridge disposed"));
   }
 
+  async function heapBytes() {
+    await whenReady();
+    return new Promise((resolve, reject) => {
+      const id = `stats-${++counter}`;
+      const timer = setTimeout(() => {
+        if (statsWaiters.delete(id)) reject(new Error("heap stats timed out"));
+      }, 5000);
+      statsWaiters.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject,
+      });
+      worker.postMessage({ type: "stats", id });
+    });
+  }
+
   spawn();
-  return {
+  const api = {
     protocol: PROTOCOL_VERSION,
     get ready() {
       return readyPromise;
@@ -221,7 +246,13 @@ export function createBridge(options = {}) {
     run,
     cancel,
     dispose,
+    heapBytes,
     stats: () => ({ ...stats }),
     state: () => state,
   };
+  // Diagnostic handle for the DoD tests and DevTools; the UI path is unchanged.
+  if (typeof window !== "undefined") {
+    window.__letheBridge = api;
+  }
+  return api;
 }

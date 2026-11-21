@@ -32,6 +32,10 @@ let opcReady = null;
 let initPromise = null;
 
 const post = (message, transfer = []) => self.postMessage(message, transfer);
+// WASM memory only grows, so reading this after a phase is the high-water
+// mark reached by that phase — that is what the DoD peak numbers report.
+const heapBytes = () => pyodide?._module?.HEAPU8?.byteLength ?? 0;
+const progress = (message) => ({ ...message, heapBytes: heapBytes() });
 
 async function initRuntime() {
   if (pyodide) return pyodide;
@@ -113,17 +117,17 @@ function callPython(payload) {
 }
 
 async function runInspect(id, bytes, fileName) {
-  post({ type: "progress", id, phase: "gates" });
+  post(progress({ type: "progress", id, phase: "gates" }));
   pyodide.FS.writeFile("/tmp/input.docx", bytes);
   const gated = callPython({ op: "inspect", path: "/tmp/input.docx", file_name: fileName });
   if (!gated.ok) return gated;
 
-  post({ type: "progress", id, phase: "parse" });
+  post(progress({ type: "progress", id, phase: "parse" }));
   const { parseDocx } = await loadDocx();
   const document = await parseDocx(bytes);
   const paragraphs = countParagraphs(document.package.document.content);
 
-  post({ type: "progress", id, phase: "postprocess" });
+  post(progress({ type: "progress", id, phase: "postprocess" }));
   pyodide.runPython(`
 import os
 try:
@@ -138,13 +142,14 @@ except OSError:
     paragraphs,
     status: gated.status,
     warnings: gated.warnings,
+    heapBytes: heapBytes(),
   };
 }
 
 async function runWrite(id, op, bytes, options) {
   const pyodideRuntime = await initRuntime();
   pyodideRuntime.FS.writeFile("/tmp/source.docx", bytes);
-  post({ type: "progress", id, phase: "detect" });
+  post(progress({ type: "progress", id, phase: "detect" }));
   const plan = callPython({
     op,
     path: "/tmp/source.docx",
@@ -153,7 +158,7 @@ async function runWrite(id, op, bytes, options) {
   });
   if (!plan.ok) return plan;
 
-  post({ type: "progress", id, phase: "write" });
+  post(progress({ type: "progress", id, phase: "write" }));
   const { updateMultipleFiles } = await loadDocx();
   const library = await updateMultipleFiles(
     bytes.buffer,
@@ -161,7 +166,7 @@ async function runWrite(id, op, bytes, options) {
   );
   pyodideRuntime.FS.writeFile("/tmp/library.docx", new Uint8Array(library));
 
-  post({ type: "progress", id, phase: "postprocess" });
+  post(progress({ type: "progress", id, phase: "postprocess" }));
   const done = callPython({
     op: "finish",
     source: "/tmp/source.docx",
@@ -178,6 +183,7 @@ async function runWrite(id, op, bytes, options) {
     counts: plan.counts,
     hits: plan.hits,
     size: output.byteLength,
+    heapBytes: heapBytes(),
   };
 }
 
@@ -249,6 +255,10 @@ export function classifyError(error) {
 
 self.onmessage = async (event) => {
   const message = event.data;
+  if (message?.type === "stats") {
+    post({ type: "stats", id: message.id, heapBytes: heapBytes() });
+    return;
+  }
   if (message?.type !== "run") return;
   await handleRun(message);
 };

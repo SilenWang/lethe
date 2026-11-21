@@ -28,8 +28,8 @@ bridge.stats();       // {runs, recycles, lastBytes, lastDurationMs}
 | op | status | result |
 |---|---|---|
 | `inspect` | P1 foundation | `{parts, paragraphs, status, warnings}` |
-| `redact` | P1 docx | `{bytes, tokens, items, counts, hits, size}` |
-| `restore` | P1 docx | `{bytes, tokens, counts, hits, size}` |
+| `redact` | P1 docx | `{bytes, tokens, items, counts, hits, size, heapBytes}` |
+| `restore` | P1 docx | `{bytes, tokens, counts, hits, size, heapBytes}` |
 | `echo` | diagnostics only | `{payload, protocol}` |
 
 `inspect` runs the four hard gates in Pyodide **before** BetterOffice
@@ -44,6 +44,10 @@ BetterOffice and routes the result through `postprocess()`.
 
 Both return `bytes` as a transferred `Uint8Array`; the worker also emits
 `detect → write → postprocess` progress phases.
+
+`heapBytes` is `pyodide._module.HEAPU8.byteLength` after the run (WASM memory
+only grows, so it is the run's high-water mark). `bridge.heapBytes()` asks the
+idle worker for the same value; the DoD tests use both.
 
 ## Worker messages
 
