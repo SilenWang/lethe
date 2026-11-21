@@ -1,0 +1,80 @@
+{
+  "name": "@betteroffice/xlsx",
+  "version": "0.5.1",
+  "description": "Excel-faithful XLSX spreadsheet editor and viewer core: full OOXML fidelity, real-time human + AI agent collaboration. Framework-free (Rust/Wasm).",
+  "keywords": [
+    "xlsx",
+    "excel",
+    "spreadsheet",
+    "ooxml",
+    "office",
+    "editor",
+    "viewer",
+    "xlsx-editor",
+    "xlsx-viewer",
+    "xlsx-parser",
+    "spreadsheet-editor",
+    "formula",
+    "collaborative",
+    "real-time",
+    "crdt",
+    "yjs",
+    "ai-agent",
+    "headless",
+    "wasm",
+    "rust"
+  ],
+  "type": "module",
+  "sideEffects": [
+    "**/xlsxSessionWorker.*",
+    "**/session/worker.*"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./headless": {
+      "types": "./dist/headless.d.ts",
+      "import": "./dist/headless.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "import": "./dist/worker.js"
+    },
+    "./collaboration": {
+      "types": "./dist/collaboration.d.ts",
+      "import": "./dist/collaboration.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "bun run build:wasm && tsup",
+    "build:wasm": "bun ../../scripts/build-xlsx-wasm.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/node": "^26.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3"
+  },
+  "license": "Apache-2.0",
+  "homepage": "https://betteroffice.dev/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/openooxml/betteroffice.git",
+    "directory": "packages/xlsx"
+  },
+  "bugs": {
+    "url": "https://github.com/openooxml/betteroffice/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -1,0 +1,1 @@
+import'../chunk-TTRUPDAB.mjs';var d={padding:"8px 10px",borderRadius:8,backgroundColor:"var(--doc-card)",cursor:"pointer",boxShadow:"var(--doc-card-shadow)"},a={padding:"10px 12px",borderRadius:8,backgroundColor:"var(--doc-surface)",cursor:"pointer",boxShadow:"var(--doc-card-shadow-strong)"};export{d as CARD_STYLE_COLLAPSED,a as CARD_STYLE_EXPANDED};

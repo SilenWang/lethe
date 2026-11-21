@@ -1,0 +1,1 @@
+var t=["square","tight","through"],e=["behind","inFront"],o=[...t,...e];function s(n){return !!n&&o.includes(n)}function a(n){return n==="behind"||n==="inFront"}function d(n){return !!n&&t.includes(n)}export{s as a,a as b,d as c};

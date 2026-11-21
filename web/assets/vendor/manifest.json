@@ -1,0 +1,1277 @@
+{
+  "format": 1,
+  "policy": {
+    "cdn": false,
+    "micropip": false,
+    "same_origin": true,
+    "note": "all files below are served from this repository; no runtime downloads"
+  },
+  "versions": {
+    "pyodide": "0.29.5",
+    "betteroffice": "0.5.1"
+  },
+  "sources": {
+    "pyodide": {
+      "version": "0.29.5",
+      "python": "3.13.2",
+      "base_url": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/",
+      "lock_sha256": "14d2c2dba101277999e17135e653d8f15389ad1437f53eae213bf0c3cdff723d",
+      "wheels": {
+        "lxml": {
+          "version": "6.0.2",
+          "file": "lxml-6.0.2-cp313-cp313-pyemscripten_2025_0_wasm32.whl",
+          "sha256": "726fd93726e98fb9472d6ded592bc1a564e7e1bf1895bd51fb86cd0b03aac43f"
+        },
+        "cryptography": {
+          "version": "46.0.3",
+          "file": "cryptography-46.0.3-cp313-abi3-pyemscripten_2025_0_wasm32.whl",
+          "sha256": "e3f2a232a68ac112d978e3103ab8db5a2a0f755358da8807cfaae04142f11893"
+        },
+        "cffi": {
+          "version": "1.17.1",
+          "file": "cffi-1.17.1-cp313-cp313-pyemscripten_2025_0_wasm32.whl",
+          "sha256": "2c93a856325b97d30e1f9dfced3d1e490f256309b89edb65c505b2b5d737eaf5"
+        },
+        "pycparser": {
+          "version": "2.22",
+          "file": "pycparser-2.22-py3-none-any.whl",
+          "sha256": "ff2b4f94c28776ee98150f67d1c3938f87f5dbaf1387826786f4d79ffb0eee96"
+        },
+        "six": {
+          "version": "1.17.0",
+          "file": "six-1.17.0-py2.py3-none-any.whl",
+          "sha256": "bc830cfdc71a224b6d0e4337183a87ea53f21b6623deca5771ee3bc866fd8da2"
+        }
+      }
+    },
+    "betteroffice": {
+      "docx": {
+        "version": "0.5.1",
+        "tarball": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz",
+        "tarball_sha256": "4dad7ff8fae0f055c350ca34f85b4be18a6b6df5952a6ce36424f7a157b4ada2"
+      },
+      "xlsx": {
+        "version": "0.5.1",
+        "tarball": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz",
+        "tarball_sha256": "51b68405ff07e60d10720ec8e16f397981f0c0ec105f0a0c12e528affae01490"
+      },
+      "pptx": {
+        "version": "0.5.1",
+        "tarball": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz",
+        "tarball_sha256": "7c4dd44e35072c7314c46f523566ce4b049a4f8a27bbfa588becc2df2eb953d3"
+      }
+    }
+  },
+  "files": [
+    {
+      "path": "betteroffice/docx/LICENSE",
+      "sha256": "db17c7e4531fd3e1a376cd87ad1ddf9a195118e47fde7f26b9feb657c8c114af",
+      "bytes": 11363,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/LICENSE"
+    },
+    {
+      "path": "betteroffice/docx/README.md",
+      "sha256": "101e9c901967408f60be847e82b4877c071566238b28425912a5cf606fc73893",
+      "bytes": 7965,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/README.md"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-25WGDXBF.mjs",
+      "sha256": "9b8018c756005e7b21afeaa0af4d3ca36bf4d983407f61daede6280aa63bb76e",
+      "bytes": 1308,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-25WGDXBF.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-2JXEG5CF.mjs",
+      "sha256": "df04d5c197ba468523de52ea88128ac4f6f189dc45d12b3347775963d9274a65",
+      "bytes": 5390,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-2JXEG5CF.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-32A4I3T4.mjs",
+      "sha256": "8128f298148757719c9521836bacb28ee76f6839d4f5a69a2c0cce0fcc733e26",
+      "bytes": 3052,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-32A4I3T4.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-4UD54UM5.mjs",
+      "sha256": "ddf123a7beedc9a625039683a6be3cf5c11979da34236cca3ff39954ce6bbd21",
+      "bytes": 252,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-4UD54UM5.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-5FFUQOQU.mjs",
+      "sha256": "8c41979100425f67b4a05ee54ef64dccfdbb218119a54412a7dac6f4dc27f4d3",
+      "bytes": 1410,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-5FFUQOQU.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-67MGRMP3.mjs",
+      "sha256": "c5f23eae3b584960a11ea037b1e70c0c799ac36dd6451fd6cd344406ae6787cd",
+      "bytes": 205,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-67MGRMP3.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-6AUR4AA2.mjs",
+      "sha256": "02c46d9af30f1fdc2f4a47340d62cc9b1b90a225f94cefbe06c4dea878e90510",
+      "bytes": 423,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-6AUR4AA2.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-6WT6HKAY.mjs",
+      "sha256": "fc0441d4a0022b99a97a181026430e0466fb8f03c78ce0cd2a228c00f56bc61a",
+      "bytes": 3853,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-6WT6HKAY.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-6ZKYZDSZ.mjs",
+      "sha256": "05e711c03685e6c664b8e0907784a2b1e465bbe429b84a1a6409a34ef9bc162d",
+      "bytes": 23089,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-6ZKYZDSZ.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-7WIUNGQW.mjs",
+      "sha256": "78de937c461c1cd117cf26d4a7fec3601af021cd5b53f7e73df59672b698c6ba",
+      "bytes": 5969,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-7WIUNGQW.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-7WWFGMMF.mjs",
+      "sha256": "392d93c3da9b30ee52ee1af657c41c3a6ecef6f3d92e69ab9a8d74aa90bdda9d",
+      "bytes": 2509,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-7WWFGMMF.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-AOWJ4WDE.mjs",
+      "sha256": "d9a97428a3dc04e9e0480a348b5fc744a7e184a1b27a44161f6da1879ffa27af",
+      "bytes": 3263,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-AOWJ4WDE.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-CDNWHQH2.mjs",
+      "sha256": "5097a6bba86c1c00f5d8cc6ddadd56cab31bed9282ee8a90c75cd7818d0d994b",
+      "bytes": 1359,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-CDNWHQH2.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-CTBUQRYQ.mjs",
+      "sha256": "028ac85687da270bee35d9a5f520123dfa0931028ff810c9f7e058ea5c2ef2fa",
+      "bytes": 701,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-CTBUQRYQ.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-DLXIZBB6.mjs",
+      "sha256": "149e25a90fccde30af2f1a27861276271437b4ab715083884035e73294c5d44d",
+      "bytes": 1001,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-DLXIZBB6.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-EOFVNRML.mjs",
+      "sha256": "3c42f4720e6911e2e51988318eecf7d3771c1b453b7fc05de52c54c2720e2fb9",
+      "bytes": 79368,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-EOFVNRML.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-ETDMQ5GE.mjs",
+      "sha256": "d490b11e29f2a73ffd924950a57975ce3804dc5f246b10f78595afb1f7113d77",
+      "bytes": 4841,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-ETDMQ5GE.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-EUUIJVM6.mjs",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-EUUIJVM6.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-HAZBP3QT.mjs",
+      "sha256": "c1188440e1ccb0b491ceeb607cb92d229e28fa55534b53ee8b7b39a1845ccbc6",
+      "bytes": 76340,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-HAZBP3QT.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-HGKSOBXK.mjs",
+      "sha256": "df9c8a5f3e8d7963f80e5fbe22c39a58570b09b3db2d5a6e3b9f71fa5b04fdb1",
+      "bytes": 2178,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-HGKSOBXK.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-HPZFJGGM.mjs",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-HPZFJGGM.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-IFXDDJ3E.mjs",
+      "sha256": "864fc42dd14005d05f37358c4ab5de28bac2a5ab180ae66f40d3850143ddef28",
+      "bytes": 2581,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-IFXDDJ3E.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-JSYH6HNV.mjs",
+      "sha256": "2a79431db9a5066e5446bbf8c5126a62acc2d16d6e99fe746593a164f3c54357",
+      "bytes": 2191,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-JSYH6HNV.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-KCROT4RD.mjs",
+      "sha256": "19063a7f3129c145ab2ce6a1eb0b8cdf32d452e85b79b6dbbc477128ee291fe4",
+      "bytes": 425,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-KCROT4RD.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-KICHSQFN.mjs",
+      "sha256": "dcb40225c47bc226d8a2d7e413b44c8ed2fb03024661fc2f04fdd04f85c2e681",
+      "bytes": 6422,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-KICHSQFN.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-LPOEM5WH.mjs",
+      "sha256": "72c0f8861258b21cd86faf460e26942621e57cce1cc05f61b4546c7315494818",
+      "bytes": 1811,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-LPOEM5WH.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-LT2GCWZ3.mjs",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-LT2GCWZ3.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-LTVVQMHB.mjs",
+      "sha256": "e7f1bfc0eada3354f5096ecdf7298a063c0d642faf17339d6586579416b4e5e0",
+      "bytes": 5456,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-LTVVQMHB.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-M44BABH2.mjs",
+      "sha256": "f1084a577ef9a0e91888287faec1e43dcc7d4b7975581dc387e73e11c88ffeb5",
+      "bytes": 39408,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-M44BABH2.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-MAYPJU23.mjs",
+      "sha256": "18534b166d8b0da0d5b4f81542ed8fe2747575b08644ed81778c6158fd2c7e29",
+      "bytes": 1572,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-MAYPJU23.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-MGTUODRA.mjs",
+      "sha256": "8f83b5bc2429f709277177bc49a3645dced6c5194c6ab5fe7bc141cb4ab2c16f",
+      "bytes": 12323,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-MGTUODRA.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-N5NWITJ6.mjs",
+      "sha256": "1f78f3e96fb70d257f376d53e7872242e9bb320b4845f2dfec5af556e74f334e",
+      "bytes": 80211,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-N5NWITJ6.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-N5RE2S3U.mjs",
+      "sha256": "f9292d6140f007a0ad060f6052f24b8ac94b2a3f631557d4c9602d5116b68855",
+      "bytes": 2867,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-N5RE2S3U.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-NLYHFVF5.mjs",
+      "sha256": "b555258fe2a32ad5d623e0e7acb4a380d4dcaa46c108c97ef73e35733d3e494c",
+      "bytes": 181,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-NLYHFVF5.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-OBQGPMPQ.mjs",
+      "sha256": "8b8b71ac5b5dfb482812c2c1dee7d54c254bf7ba3c072dec252d702678b958c6",
+      "bytes": 230,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-OBQGPMPQ.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-Q7OC7M5Q.mjs",
+      "sha256": "f46107867600a6c5dcc5b41028e208a66351fed606cf678c3b2a8c282b35040e",
+      "bytes": 343,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-Q7OC7M5Q.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-QGZ2AB3M.mjs",
+      "sha256": "7353440f5126efd5e616d4d0dad040035e57a39ac321f0c75a5d8504dc40ae1c",
+      "bytes": 8548,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-QGZ2AB3M.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-QWHU7YIW.mjs",
+      "sha256": "eb83ad3727a14b076c7c126079642c35d4a03b0b85e363110396ff96fc8424ae",
+      "bytes": 2204,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-QWHU7YIW.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-RUOOJVF3.mjs",
+      "sha256": "c586b9effb53c2f44f61cf32686125bc219a1242ae25da3f982974fc9a6f719c",
+      "bytes": 4445,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-RUOOJVF3.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-SNXFSHA7.mjs",
+      "sha256": "fb0a93e33c01ba8dc0ecc4835784d9f17dfc6ab9052cbe23ad741e582304e9f9",
+      "bytes": 35581,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-SNXFSHA7.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-SYTOG2LR.mjs",
+      "sha256": "bd56c50cc17a3e907f52827fab1853aa578300b6f307fe1b0f1914a3391c7bb9",
+      "bytes": 4308,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-SYTOG2LR.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-TE3AU2JK.mjs",
+      "sha256": "f58ec7c11fb01ffeb20f67f69f7a206da9fab892d55b625ea367638b41599f5b",
+      "bytes": 5264,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-TE3AU2JK.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-TTRUPDAB.mjs",
+      "sha256": "8081fe85617f1383f536c2c34e78c3d91e781e26092369269b11bf05bd6b7045",
+      "bytes": 733,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-TTRUPDAB.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-UDVEZ722.mjs",
+      "sha256": "b44b781fc438f9ef00b68c5ff84567463dd2123581862b4c96a1efd25c54b1d1",
+      "bytes": 889,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-UDVEZ722.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-VGXX62XF.mjs",
+      "sha256": "00aa063bcbcee9b06645304ef2b13760b7a2f7c63b64b1646a7d38c82df102dd",
+      "bytes": 9456,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-VGXX62XF.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-VHOOSS4D.mjs",
+      "sha256": "0e0b055f007f1e05f38a44a016d767927ef7a4afe0f711318c40807b607bb6d5",
+      "bytes": 9207,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-VHOOSS4D.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-VJFO26DF.mjs",
+      "sha256": "68d8f38eb518a36b94e692c1114b1a5207094e52b2819dd416213849b63997ce",
+      "bytes": 6172,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-VJFO26DF.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-VTPSA7ZC.mjs",
+      "sha256": "da36059ec83a161b57f78ded2b27223a3e1a5d0244608328e9aff003448d1851",
+      "bytes": 632,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-VTPSA7ZC.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-VYZE6UZY.mjs",
+      "sha256": "02c5cf1606f5301306004c9a33696f5183cd8df8a8785bf95517f92180868799",
+      "bytes": 15092,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-VYZE6UZY.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-WCH3MOFU.mjs",
+      "sha256": "ceebf32fee4f0df0c93e083c42b8b63fff9ce3f4f964eae7e67a754298570003",
+      "bytes": 63040,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-WCH3MOFU.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-XUXC3ZKS.mjs",
+      "sha256": "5dcd4f1ecc56611ffd1488cab4cd0cf87ed4e3bcaf73ac1ba7cded6dcce5706a",
+      "bytes": 724,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-XUXC3ZKS.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-Y4JOXYWH.mjs",
+      "sha256": "023a22289860ebd27b14c10960930d60320977a1ba882d0da5f62227cbb9fa5a",
+      "bytes": 17648,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-Y4JOXYWH.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-YEDZERHF.mjs",
+      "sha256": "eed473235454eb4ff7872b79f9295bd28b2897522d4e5d19e19726035f5985c9",
+      "bytes": 737,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-YEDZERHF.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-YITJ4QAO.mjs",
+      "sha256": "4cc13f9c193a9a603d37332d94749564c4542092e8930dd256004deb5c1c0ca8",
+      "bytes": 7423,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-YITJ4QAO.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-YTGFUEEE.mjs",
+      "sha256": "fa432376065ae0d52039e7ef271fac5ad830b7256faa955eebd5dcaf3db975fc",
+      "bytes": 1149,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-YTGFUEEE.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/chunk-YUOKI2HB.mjs",
+      "sha256": "978105b22af74ef2995b4f78c02ad08a7c88010ed5514c459437f6c22561004e",
+      "bytes": 61,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/chunk-YUOKI2HB.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/collaboration/index.d.mts",
+      "sha256": "de1774019905c37495e3c6fdf96bf94db0b03f57ca3379a13e6d857c5576fdec",
+      "bytes": 9108,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/collaboration/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/collaboration/index.mjs",
+      "sha256": "340c0c3b2b2d83b4e00d51a077c1dcf2be3138a3eda1da7c4ae06c97df2571fd",
+      "bytes": 707,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/collaboration/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/content-DVT06V_6.d.mts",
+      "sha256": "db882c446a7a74d73cbb896aa5790608af5f3c99d99e487a99ca5aed90312d21",
+      "bytes": 79756,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/content-DVT06V_6.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/core.d.mts",
+      "sha256": "42725881f8c66a3a0ba91b3761b72bc93abbd4591711a66b87898c3a2ae7db8c",
+      "bytes": 22132,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/core.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/core.mjs",
+      "sha256": "d5f3903c937add4dfd57ecae870dcf21104d4cf588d4aa0f4ceea3544c4ed679",
+      "bytes": 9515,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/core.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/displayListQueries-6XjS7B5e.d.mts",
+      "sha256": "d8df7f5cb123ee33c7cc3e15cffbcd4c84ed6b2880257cd99caafb0646611de9",
+      "bytes": 62700,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/displayListQueries-6XjS7B5e.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/docx/index.d.mts",
+      "sha256": "18b3622a18b56c68859533d451b49a7c57588ca4200e0d033d54f83f32a22140",
+      "bytes": 6939,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/docx/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/docx/index.mjs",
+      "sha256": "33e0571a357193d1fd23f634abfcd7e590333797f34358af97ccefd657fc342e",
+      "bytes": 3521,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/docx/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/docx/wrapTypes.d.mts",
+      "sha256": "983c5c715837b7217392ae2f9e15bfa7a7b5aa3c544c1f833905455341dc8107",
+      "bytes": 1037,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/docx/wrapTypes.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/docx/wrapTypes.mjs",
+      "sha256": "3c760e88a2bcb9abb5207a83e20f3fdca4c259d3a6c1b97b2b8d272bd70d758b",
+      "bytes": 126,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/docx/wrapTypes.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/docxInput-DTbCa48g.d.mts",
+      "sha256": "227f34ea21a8a1dc1a63d0bf4aa3457c7d4939fa6a70a975f8b17db49ebbc950",
+      "bytes": 810,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/docxInput-DTbCa48g.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/docxWorker.mjs",
+      "sha256": "43682491d325765a751ff7d7f2435290c9d08c1108584bd0069e5e0592efe7e1",
+      "bytes": 31,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/docxWorker.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/editor/index.d.mts",
+      "sha256": "26bbaddef3f0f27e51f4cef431978945008491193dc5e10f28a2a577402385e1",
+      "bytes": 3637,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/editor/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/editor/index.mjs",
+      "sha256": "4227d52978db72055b3172803389601adfc973eff2de815a5e7e3658d16ca724",
+      "bytes": 283,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/editor/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/fontLoader-CBkmh4ps.d.mts",
+      "sha256": "3ce229cee8e3a0447e8e367b7db79b5a40b8f598e51d183a3c85e059521dbc10",
+      "bytes": 20156,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/fontLoader-CBkmh4ps.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/formatting-p5MneNuy.d.mts",
+      "sha256": "c0ee7260fa81a62665c0d77c44d2cf51063d4d3f459639ce2b4acd307128f4c9",
+      "bytes": 29500,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/formatting-p5MneNuy.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/generated/edit/docx_edit_bg.wasm",
+      "sha256": "ff775228796835f0007a20742c67b5926e1e3f1f12d23e69fc295f7ff9511431",
+      "bytes": 24421663,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/generated/edit/docx_edit_bg.wasm"
+    },
+    {
+      "path": "betteroffice/docx/dist/generated/layout/docx_layout_bg.wasm",
+      "sha256": "070296adf0c3940fa75c1cb7dde8a5d3350c742fe8a1cd8f3e9e2cefead2080a",
+      "bytes": 4369000,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/generated/layout/docx_layout_bg.wasm"
+    },
+    {
+      "path": "betteroffice/docx/dist/generated/opc/ooxml_opc_bg.wasm",
+      "sha256": "7a9f857e21f4e79682b1ab494f409545656acf2e77e7b7d42e357cd0d501dba9",
+      "bytes": 383733,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/generated/opc/ooxml_opc_bg.wasm"
+    },
+    {
+      "path": "betteroffice/docx/dist/generated/parse/docx_parse_bg.wasm",
+      "sha256": "e6188f8e0e4d03ce4b67ef5bcbcf23e6203419fe4a145a60e1e60f26a96b558b",
+      "bytes": 6418464,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/generated/parse/docx_parse_bg.wasm"
+    },
+    {
+      "path": "betteroffice/docx/dist/index-DGvJBf34.d.mts",
+      "sha256": "1afff6fced1f891f8c96ef90e03a883d030e886ec6fe3b76dad7c0b11dff5233",
+      "bytes": 226230,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/index-DGvJBf34.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/layout/index.d.mts",
+      "sha256": "74e91e68ad2a5078bb0128783c07610d7a873a6f57bfa0033a5c30930889215b",
+      "bytes": 4173,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/layout/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/layout/index.mjs",
+      "sha256": "c481fb94958f1ce74c50c395bea8bd4cb327682256f1b3c9afe5162b4d90be3c",
+      "bytes": 10324,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/layout/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/layout/pagination/index.d.mts",
+      "sha256": "58b7223656e90dbb40cddd0bd6643b717fdd7955967130782a6c674668c15971",
+      "bytes": 2376,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/layout/pagination/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/layout/pagination/index.mjs",
+      "sha256": "2bb9f8059ba80c15955a07e8cde367a8a0deb88b8594867f117f717ae3b68c01",
+      "bytes": 1563,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/layout/pagination/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/layout/render/index.d.mts",
+      "sha256": "91361cb633ec8fd0f32e516f87c0ac3bc0dc634c4b45bb0b3219f7458ea94893",
+      "bytes": 41097,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/layout/render/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/layout/render/index.mjs",
+      "sha256": "acfb664b7006942d76124c3539ed57bb98f55e70fbc5742da75b001759cf41e9",
+      "bytes": 47973,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/layout/render/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/loadWasmAsset-Cr95TImt.d.mts",
+      "sha256": "eced18fa484faeef0c61b7b1866e1ad25832a817affd507d6cba663269033705",
+      "bytes": 1150,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/loadWasmAsset-Cr95TImt.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/pagedExport-Bi89gMk0.d.mts",
+      "sha256": "db56b7a49e0b56a9e72941ff49b10e997ff31244f429dc55d7b4fd4f7374d848",
+      "bytes": 38812,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/pagedExport-Bi89gMk0.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/plugin-api/RenderedDomContext.d.mts",
+      "sha256": "1d827e4a20fbaa69e7f0ed58149de543e5e1be8a751dfc570f9b83710fb6225b",
+      "bytes": 4930,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/plugin-api/RenderedDomContext.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/plugin-api/RenderedDomContext.mjs",
+      "sha256": "c4b5fe9ca46da2fafb16ca51d155997c3644dde8fec85a86f65b17b0e72e8709",
+      "bytes": 5155,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/plugin-api/RenderedDomContext.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/plugin-api/index.d.mts",
+      "sha256": "71c4d67b558578d6600c58dd488a9e3cd6702fd345fcfcd4dda12198743ec27f",
+      "bytes": 7458,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/plugin-api/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/plugin-api/index.mjs",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/plugin-api/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/plugin-api/resolveItemPositions.d.mts",
+      "sha256": "81f05399a5c727b96c4c87c1ce232d77cc726ba4d5e01dfa9a6955968e8be142",
+      "bytes": 1632,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/plugin-api/resolveItemPositions.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/plugin-api/resolveItemPositions.mjs",
+      "sha256": "05b013f7ce38273d4071462f5f29e362cdcfb03a843d601409ed9c575d23ac2e",
+      "bytes": 749,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/plugin-api/resolveItemPositions.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/rezip-CfwAYdV4.d.mts",
+      "sha256": "de2ce7c4a8b7bb574d10166d97e379ca293e192b47fa11179b89a89834aaa26f",
+      "bytes": 1353,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/rezip-CfwAYdV4.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/rustMeasureSource-BXgZnHPw.d.mts",
+      "sha256": "8f960e19a4a1239ceb68296277f686ac2f89b13e58446272256dd2aab1fec460",
+      "bytes": 6308,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/rustMeasureSource-BXgZnHPw.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/selectiveSave-r-NMK6aI.d.mts",
+      "sha256": "5c26fe5fcf9766b8d7c58a5769031bc481afdfcff490f47bdce3cca9959cb81b",
+      "bytes": 1194,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/selectiveSave-r-NMK6aI.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/styles-DZZz2oRy.d.mts",
+      "sha256": "798873055ae9ff8709c9d30886f8fb62330a04aed548117936c0ebfeee11b2f0",
+      "bytes": 6742,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/styles-DZZz2oRy.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/styles/index.d.mts",
+      "sha256": "55480655b3b2854c9b2ce363348238ba1ba0d621f4b93ade5323d4d319e3c3e6",
+      "bytes": 4813,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/styles/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/styles/index.mjs",
+      "sha256": "8cdd92634c7c0151e9cfa6b3e844ed55c02e5420cadc2640639fbd83e9b1117d",
+      "bytes": 109,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/styles/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/types-bvPg3KsF.d.mts",
+      "sha256": "bce7fa93c216021674b00ec5e2bcfea5e6e45a36e8d874ef360f97b22f3f7648",
+      "bytes": 62017,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/types-bvPg3KsF.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/types/content.d.mts",
+      "sha256": "9724b90d4d315fbab9dd9a3c1d1115da86e9c430bc4fe80d1ba151af98459b55",
+      "bytes": 2143,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/types/content.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/types/content.mjs",
+      "sha256": "fb1513ce81a76adf0639335b492116d6185b19dec3f22473eb41ffa7cb9c6cbd",
+      "bytes": 128,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/types/content.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/types/document.d.mts",
+      "sha256": "15b1f74e0e0cc941a20fb69f3eee8483bba788000d48da263f36bef2f9b0e05e",
+      "bytes": 9317,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/types/document.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/types/document.mjs",
+      "sha256": "fb1513ce81a76adf0639335b492116d6185b19dec3f22473eb41ffa7cb9c6cbd",
+      "bytes": 128,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/types/document.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/autoScroll.d.mts",
+      "sha256": "ff01b467143856017b5a570dc9598c73f644fe92de48b24ec28fc9fbd3ea6d93",
+      "bytes": 1123,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/autoScroll.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/autoScroll.mjs",
+      "sha256": "33a0f5091a500118e6feca416c93ef6f23c34918075d19d8b4e2554806f36f36",
+      "bytes": 312,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/autoScroll.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/cardStyles.d.mts",
+      "sha256": "31abd31e2844401048ada67459e4ba42a007bc327fb580a0d49ff2bfa8dd1934",
+      "bytes": 827,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/cardStyles.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/cardStyles.mjs",
+      "sha256": "edaba19a6abde38eddbf8cdd7d2216cb3ac4af0baac0eb477802574fa593b2f9",
+      "bytes": 352,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/cardStyles.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/comments.d.mts",
+      "sha256": "63245b2d83a1c792aa0da8ea8642bf5e3cf89230fc55a6aa5e005d0d829f8e0a",
+      "bytes": 5976,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/comments.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/comments.mjs",
+      "sha256": "3f2ad6c7bd3e8ab8f3ecc6eb9d956386751497b26c021818ed60e51256f6574f",
+      "bytes": 1945,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/comments.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/findReplace.d.mts",
+      "sha256": "c27e3ece899ccbc424c6549048a00e7f2b365c8e6804a2ad67c184d5be71ad54",
+      "bytes": 3629,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/findReplace.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/findReplace.mjs",
+      "sha256": "547d253a56abcc05506e6dfc04bdc72dd84d4420b14e7de39587b77fa301fc95",
+      "bytes": 349,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/findReplace.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/findVerticalScrollParent.d.mts",
+      "sha256": "8275e3639970f44cbebd36f5d7fca72cc85d52ec59db40885e54704e1b0214b7",
+      "bytes": 1019,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/findVerticalScrollParent.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/findVerticalScrollParent.mjs",
+      "sha256": "d28adf23445db2cbce69797956b207d0cbf5aa1c4f377ba3f36f29fcf32d1422",
+      "bytes": 371,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/findVerticalScrollParent.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/fontOptions.d.mts",
+      "sha256": "42bc4dd76291a4d605258ea6675877499625ed1bae0b2b39dc7bc1ce190759dd",
+      "bytes": 848,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/fontOptions.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/fontOptions.mjs",
+      "sha256": "2b0113db61b9aa7e2a9933456af22219156af277e8d2175fe6a07e25882b7df6",
+      "bytes": 449,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/fontOptions.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/index.d.mts",
+      "sha256": "ae84d257e576eb260ad6c81aca7d617d472e6d1d718115536faeaeb061adf4e3",
+      "bytes": 22291,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/index.mjs",
+      "sha256": "771b3c110ed084d31e902504e62f5219d6599d1c56ff5333f8334e22a724d0d8",
+      "bytes": 9185,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/listState.d.mts",
+      "sha256": "20dc7e29baed479afbf94a7c9139bb61ef101ac2151e739e4163bbfaff8b833b",
+      "bytes": 1230,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/listState.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/listState.mjs",
+      "sha256": "3b9df35617d81e4ca0091c5e45fdf1cf8a15b3adba99520de7fe4cf0dc04e868",
+      "bytes": 778,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/listState.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/reportIssue.d.mts",
+      "sha256": "4411670464be0c5a00c8d02b2fad74acfdb77abed5cb17cdd2d443b709ff2140",
+      "bytes": 773,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/reportIssue.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/reportIssue.mjs",
+      "sha256": "6d49b7d4d0081d8209b854441cf6e4acc6e375679ea89231298bc4e0b4422913",
+      "bytes": 917,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/reportIssue.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/sidebarConstants.d.mts",
+      "sha256": "10583fdc16d6257554ddf7e62f9d11f26f971808b7760be2f7910fcecaa2fd85",
+      "bytes": 389,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/sidebarConstants.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/sidebarConstants.mjs",
+      "sha256": "ecaac5a1d9dbd61b852de54e88e8807706e4365856e2e6ac0418262a24b1c683",
+      "bytes": 152,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/sidebarConstants.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/stylePreview.d.mts",
+      "sha256": "76cf7396ec94b5ac1ae9020774c22d277fc96ae891057a808932c5e112721b45",
+      "bytes": 2643,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/stylePreview.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/stylePreview.mjs",
+      "sha256": "911fbca516f044bb92f3c1a3618281ba960b9b8e28fff58fef1326718ea162af",
+      "bytes": 218,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/stylePreview.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/units.d.mts",
+      "sha256": "0d2fe5467f705deaf9c159dff996291d35e05012f663d9390cc3e97c7cb02521",
+      "bytes": 2705,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/units.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/utils/units.mjs",
+      "sha256": "7ca8ce30714f5e04888c41b4537e0f539277886c5ad7241c4ee4aadcea638217",
+      "bytes": 396,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/utils/units.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/wasm-edit.d.mts",
+      "sha256": "4845656f1583933e090839cf624b9a37c47d1268e8259f5acaf69aa26266c8a1",
+      "bytes": 73468,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/wasm-edit.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/wasm-edit.mjs",
+      "sha256": "1ab8cbb16cbcd89f529c56fae4296dc600dd4a4daf45d45abac8d135e5325195",
+      "bytes": 396,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/wasm-edit.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/wasm-layout.d.mts",
+      "sha256": "44e4070bbc18cc99f960a3322c05387d200622efe2783891e0323e1ea0aa339d",
+      "bytes": 8103,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/wasm-layout.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/wasm-layout.mjs",
+      "sha256": "5dcd4f1ecc56611ffd1488cab4cd0cf87ed4e3bcaf73ac1ba7cded6dcce5706a",
+      "bytes": 724,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/wasm-layout.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/wasm-opc.d.mts",
+      "sha256": "8a5efe702fac117b6d7c286874c102008daef73b05c2ba66f7dfa752b1e1409f",
+      "bytes": 781,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/wasm-opc.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/wasm-opc.mjs",
+      "sha256": "14fe3224ed1378aa2e0d25a1aac8f40bbaf215410212904b3474a794119b1edc",
+      "bytes": 152,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/wasm-opc.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/wasm-parse.d.mts",
+      "sha256": "42ad1fc985bc32d4615e4e7610424e84af8ea042b695b0e9452cc7bcbfeb53ac",
+      "bytes": 1479,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/wasm-parse.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/wasm-parse.mjs",
+      "sha256": "12298a3def1e7870df40810692fa2a3c7eee2b282341a76ee1a9a5ebd1a56c20",
+      "bytes": 394,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/wasm-parse.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/worker.d.mts",
+      "sha256": "233600df65c70d15cceb8bc0f606f84edac3e56da9346f69337c56ca9c9cbf67",
+      "bytes": 4732,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/worker.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/worker.mjs",
+      "sha256": "0de9af56fd198fa2c874dafd00d9c1d0049d5281a13affc6ef7d34d962ec6285",
+      "bytes": 38883,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/worker.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/yrs/docxWorker.d.mts",
+      "sha256": "44234b6b59548c4baffd3a296192560a6823f6edae0f2586b37a822f0d32d757",
+      "bytes": 737,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/yrs/docxWorker.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/yrs/docxWorker.mjs",
+      "sha256": "6f59a5a727a6d8b9f6a6e767ef125657fefb3605a47ac171de95ef37cb132f1b",
+      "bytes": 266473,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/yrs/docxWorker.mjs"
+    },
+    {
+      "path": "betteroffice/docx/dist/yrs/index.d.mts",
+      "sha256": "7aeb4dd2ddbd05d8585989bb0e46fcd279e62c460bf8de2836c6e0c0bddfd2e4",
+      "bytes": 11088,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/yrs/index.d.mts"
+    },
+    {
+      "path": "betteroffice/docx/dist/yrs/index.mjs",
+      "sha256": "c4511be91cbb160493a64eb9ed9f9d51c41434ac1fe269a97f0573feedc3fcc3",
+      "bytes": 4606,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/dist/yrs/index.mjs"
+    },
+    {
+      "path": "betteroffice/docx/package.json",
+      "sha256": "cc0cbc627cb64f872f6c2fd7f61ae30aa298f59144513fc183bce3831938da05",
+      "bytes": 7256,
+      "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/package.json"
+    },
+    {
+      "path": "betteroffice/pptx/LICENSE",
+      "sha256": "db17c7e4531fd3e1a376cd87ad1ddf9a195118e47fde7f26b9feb657c8c114af",
+      "bytes": 11363,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/LICENSE"
+    },
+    {
+      "path": "betteroffice/pptx/README.md",
+      "sha256": "9869b954b711eb28e2ed6b8c6cbe049140c2ee52f5438d375dfb42e35a805c24",
+      "bytes": 6999,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/README.md"
+    },
+    {
+      "path": "betteroffice/pptx/dist/chunk-2CPM3HRW.js",
+      "sha256": "0bb04d96c0ebdf9cbd5d96a212cef21348c597020c09620ea52e0c039f43eee6",
+      "bytes": 10570,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-2CPM3HRW.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/chunk-3TTZUGDD.js",
+      "sha256": "0616dbceb78d20ce962ee1e41d404bbf7e5553a41158bd70533ec877926733a4",
+      "bytes": 2185,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-3TTZUGDD.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/chunk-B6OFSXHM.js",
+      "sha256": "013e8bd9d8c64ef6ab08248188a138eca458d9e0c11932e312dc5a4e0df3957a",
+      "bytes": 20174,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-B6OFSXHM.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/chunk-DDNX2Z7E.js",
+      "sha256": "bc579100b9fc5daa7e05ad348c29ef83026f80bc1caef0400088f400a4902b37",
+      "bytes": 53697,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-DDNX2Z7E.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/chunk-JZOLK2OC.js",
+      "sha256": "7673438fed921d91c3f5abe97eb066d19b8cc9c43bf12c58bc883032dbaaa202",
+      "bytes": 29507,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-JZOLK2OC.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/chunk-NWXUJY6L.js",
+      "sha256": "0f0a5ec7f3b9f6dc5896e8361cd70e0ca96d1a029413ef5bd3baccc317661620",
+      "bytes": 16515,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-NWXUJY6L.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/chunk-O2XFH626.js",
+      "sha256": "3ade205f0bac96a38ed4ca61f523c5b9a827c69746d45d5a10d3b1ed0d2c89d2",
+      "bytes": 185,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-O2XFH626.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/chunk-YMIVEAXD.js",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-YMIVEAXD.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/collaboration.d.ts",
+      "sha256": "87f7cf00556c0011b1cbd4d0fc70486c9a2a4459a6b691ac8711c85998147d94",
+      "bytes": 1322,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/collaboration.d.ts"
+    },
+    {
+      "path": "betteroffice/pptx/dist/collaboration.js",
+      "sha256": "b26b97c53f1a7a3d3c8a73996c42b64fb3327a00d51dd3e444c015c3306272a9",
+      "bytes": 290,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/collaboration.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/editorSession-Cl_EWgAi.d.ts",
+      "sha256": "27c63c76bd42ddc484a8a4918f3f8bd99a99944a8ee24d7d2d38fef4eaf44d07",
+      "bytes": 62646,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/editorSession-Cl_EWgAi.d.ts"
+    },
+    {
+      "path": "betteroffice/pptx/dist/generated/pptx_wasm_bg.wasm",
+      "sha256": "3a4be9329de1bca77437137ce6417c7910e35c1c7c0e78571bb81f9fe16e5563",
+      "bytes": 6302176,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/generated/pptx_wasm_bg.wasm"
+    },
+    {
+      "path": "betteroffice/pptx/dist/index.d.ts",
+      "sha256": "69aacd8f614d23edc519ada7de5c15c8ba186a9c6770423f3cb1e41e5d24b41c",
+      "bytes": 5471,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/index.d.ts"
+    },
+    {
+      "path": "betteroffice/pptx/dist/index.js",
+      "sha256": "26601b384cb381bf01e5b288ef3d92e71751056fe652c56e12464d7d9173f1a9",
+      "bytes": 15106,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/index.js"
+    },
+    {
+      "path": "betteroffice/pptx/dist/main-C6-cc0fR.d.ts",
+      "sha256": "e40f62dccfc9175a78542a499afcad94259585d586f746f6f8289eb212e37d09",
+      "bytes": 3931,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/main-C6-cc0fR.d.ts"
+    },
+    {
+      "path": "betteroffice/pptx/dist/pptxSessionWorker.d.ts",
+      "sha256": "6caa0b04bdc10582a3729dae9244f21c5bec0b9ffe7e2a84999c2f868f5dd9be",
+      "bytes": 13,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/pptxSessionWorker.d.ts"
+    },
+    {
+      "path": "betteroffice/pptx/dist/pptxSessionWorker.mjs",
+      "sha256": "547ee4710bf9a1c29fdda42d3b7075cba9f1bbe17cb8986578b080463d2ae24b",
+      "bytes": 68855,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/pptxSessionWorker.mjs"
+    },
+    {
+      "path": "betteroffice/pptx/dist/presence-C1o8TDwu.d.ts",
+      "sha256": "fcf5c165fce7b115f45c3eb0ba832a339ddeb5018a99ddbda0cd761198f49c5c",
+      "bytes": 3560,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/presence-C1o8TDwu.d.ts"
+    },
+    {
+      "path": "betteroffice/pptx/dist/types-ui_ARP0o.d.ts",
+      "sha256": "e8ad392cc81f6a4011b45431ec988a0ce866f19da2be79a7dc8488bcbb07608f",
+      "bytes": 4002,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/types-ui_ARP0o.d.ts"
+    },
+    {
+      "path": "betteroffice/pptx/dist/worker.d.ts",
+      "sha256": "cad2db9542d7b202d60490f616dc497f7ced2067ad76754178c5c0448453dbe6",
+      "bytes": 26997,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/worker.d.ts"
+    },
+    {
+      "path": "betteroffice/pptx/dist/worker.js",
+      "sha256": "012327a2c783257ce128dd31fde48dd808ae2503799f54dda469b2a240afcf40",
+      "bytes": 46412,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/worker.js"
+    },
+    {
+      "path": "betteroffice/pptx/package.json",
+      "sha256": "9ea37b6e865dc7680519dcfcae966a79afcf4e32c90fb78c270cced36b4f85aa",
+      "bytes": 1720,
+      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/package.json"
+    },
+    {
+      "path": "betteroffice/xlsx/LICENSE",
+      "sha256": "db17c7e4531fd3e1a376cd87ad1ddf9a195118e47fde7f26b9feb657c8c114af",
+      "bytes": 11363,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/LICENSE"
+    },
+    {
+      "path": "betteroffice/xlsx/README.md",
+      "sha256": "f8452bb86c0b9602da8e604c5458f7b159e691264b93ef44fd03d91ede43882a",
+      "bytes": 6730,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/README.md"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/asyncReplica-DuZEFXjI.d.ts",
+      "sha256": "305468b6a9b2cf00dec3c8f96b19aded6451db8ef70eb6e6ef9aef44eb03637b",
+      "bytes": 8563,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/asyncReplica-DuZEFXjI.d.ts"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/chunk-DIDVDN7H.js",
+      "sha256": "6b119c849a7bc2bb1c0d542c3fe3bf37af9380341e388065d783614feb565b4b",
+      "bytes": 32305,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-DIDVDN7H.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/chunk-HJJEOLPD.js",
+      "sha256": "d21f9c39965219898f2c0ea34bb51c1009c8e3c17efe296fea7f22ce3ebaa8da",
+      "bytes": 64441,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-HJJEOLPD.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/chunk-JGTBRHCP.js",
+      "sha256": "a3bf114dada21bcc53f3b8f0e2182013f945a8a50cc55d3154c523c3f5108aae",
+      "bytes": 11074,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-JGTBRHCP.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/chunk-K7TMSGNA.js",
+      "sha256": "65d89f57ce3384932e20b9b0a2173a7aefcaa703f6cf5ee6d6f139bf4b0d60cd",
+      "bytes": 65979,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-K7TMSGNA.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/chunk-O2XFH626.js",
+      "sha256": "3ade205f0bac96a38ed4ca61f523c5b9a827c69746d45d5a10d3b1ed0d2c89d2",
+      "bytes": 185,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-O2XFH626.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/chunk-SXM2HKJL.js",
+      "sha256": "0fbd65cf0344015559ea0707971b4c9bf1971800b2dab9f36eb05195979f2493",
+      "bytes": 9932,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-SXM2HKJL.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/collaboration.d.ts",
+      "sha256": "b1c54c889f52c7d454902e3684b30ac3d55b3c05ca5712f63d5b11cc655294fe",
+      "bytes": 6279,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/collaboration.d.ts"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/collaboration.js",
+      "sha256": "bedfafb6adabb784620b36dec38f301c13a2b52e959108497be511a19b5e2c5b",
+      "bytes": 655,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/collaboration.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/editPeer-DiFeIMPk.d.ts",
+      "sha256": "17571213991b0c90bd516479ca6463f9cb8b571b228c2bd920fd4b8ac109e7fc",
+      "bytes": 75811,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/editPeer-DiFeIMPk.d.ts"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/generated/xlsx_wasm_bg.wasm",
+      "sha256": "21bed8aaac3fe3832455b686084f69548ffed3859feffadc271d138962be9933",
+      "bytes": 7581717,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/generated/xlsx_wasm_bg.wasm"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/headless.d.ts",
+      "sha256": "1e437d690c4f8a17d05b2eac1cae7650a1aa5399825f39fb72b35e356a186841",
+      "bytes": 12565,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/headless.d.ts"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/headless.js",
+      "sha256": "d28f33b3b2d11c609fcef34cbb634521e3fa5cea037cab94f6a1fd34a02a4ab8",
+      "bytes": 481,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/headless.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/index.d.ts",
+      "sha256": "1651c8211633fedd5f6b554b90efad273176179aee8646a5529269667c643701",
+      "bytes": 5790,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/index.d.ts"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/index.js",
+      "sha256": "e8584112166834b46220ff65a0ff33c10b45c98051a12285f42ba01e6cc66b72",
+      "bytes": 12719,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/index.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/types-DdoEoFSX.d.ts",
+      "sha256": "47cb0c7cf737c406691ebfc67f3b86baa11f0c29b42a5fcef0befa0d566b95d4",
+      "bytes": 11065,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/types-DdoEoFSX.d.ts"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/worker.d.ts",
+      "sha256": "abe11622cc26d511b4d760928e51755ca1b2f4b3ebba03555d09057c8488cafe",
+      "bytes": 2699,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/worker.d.ts"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/worker.js",
+      "sha256": "455ac9d473734455b560323744e7dec1ffbbe6dbf576c8aff08752adcddd135c",
+      "bytes": 557,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/worker.js"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/xlsxSessionWorker.d.ts",
+      "sha256": "6caa0b04bdc10582a3729dae9244f21c5bec0b9ffe7e2a84999c2f868f5dd9be",
+      "bytes": 13,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/xlsxSessionWorker.d.ts"
+    },
+    {
+      "path": "betteroffice/xlsx/dist/xlsxSessionWorker.mjs",
+      "sha256": "87d12788c565a0f55f3a492747b40ba40f5d305f3d6942a5f10b2fc94034eef2",
+      "bytes": 66436,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/xlsxSessionWorker.mjs"
+    },
+    {
+      "path": "betteroffice/xlsx/package.json",
+      "sha256": "a9bc9a76f860b68a0965c2e0b853888640009d10a445f5e7f62fe516299c7e1c",
+      "bytes": 1830,
+      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/package.json"
+    },
+    {
+      "path": "pyodide/cffi-1.17.1-cp313-cp313-pyemscripten_2025_0_wasm32.whl",
+      "sha256": "2c93a856325b97d30e1f9dfced3d1e490f256309b89edb65c505b2b5d737eaf5",
+      "bytes": 147738,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/cffi-1.17.1-cp313-cp313-pyemscripten_2025_0_wasm32.whl"
+    },
+    {
+      "path": "pyodide/cryptography-46.0.3-cp313-abi3-pyemscripten_2025_0_wasm32.whl",
+      "sha256": "e3f2a232a68ac112d978e3103ab8db5a2a0f755358da8807cfaae04142f11893",
+      "bytes": 2040716,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/cryptography-46.0.3-cp313-abi3-pyemscripten_2025_0_wasm32.whl"
+    },
+    {
+      "path": "pyodide/lxml-6.0.2-cp313-cp313-pyemscripten_2025_0_wasm32.whl",
+      "sha256": "726fd93726e98fb9472d6ded592bc1a564e7e1bf1895bd51fb86cd0b03aac43f",
+      "bytes": 1637504,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/lxml-6.0.2-cp313-cp313-pyemscripten_2025_0_wasm32.whl"
+    },
+    {
+      "path": "pyodide/pycparser-2.22-py3-none-any.whl",
+      "sha256": "ff2b4f94c28776ee98150f67d1c3938f87f5dbaf1387826786f4d79ffb0eee96",
+      "bytes": 117552,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pycparser-2.22-py3-none-any.whl"
+    },
+    {
+      "path": "pyodide/pyodide-lock.json",
+      "sha256": "14d2c2dba101277999e17135e653d8f15389ad1437f53eae213bf0c3cdff723d",
+      "bytes": 122027,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pyodide-lock.json"
+    },
+    {
+      "path": "pyodide/pyodide.asm.js",
+      "sha256": "356c42f69e1695397e9d8670bd3c2e678248cde76e18bdae1731e848537b47d7",
+      "bytes": 1074322,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pyodide.asm.js"
+    },
+    {
+      "path": "pyodide/pyodide.asm.wasm",
+      "sha256": "54309a5a2cfd757b1f0fdbc9093c92503f7b341500110329d932487183912718",
+      "bytes": 8647684,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pyodide.asm.wasm"
+    },
+    {
+      "path": "pyodide/pyodide.js",
+      "sha256": "7f832a350240263d9946a9c3c877f7bcdab6c37d6dc65f72cd3be5905dca62dd",
+      "bytes": 18597,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pyodide.js"
+    },
+    {
+      "path": "pyodide/pyodide.mjs",
+      "sha256": "510ca14305230018f50c40fb81be673afd68080e70ce7733fcce6600dd6a1714",
+      "bytes": 17616,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/pyodide.mjs"
+    },
+    {
+      "path": "pyodide/python_stdlib.zip",
+      "sha256": "831fd1e535084b972f87c6a35275de3d236efd5166f5e77ce89497710635e73c",
+      "bytes": 2424003,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/python_stdlib.zip"
+    },
+    {
+      "path": "pyodide/six-1.17.0-py2.py3-none-any.whl",
+      "sha256": "bc830cfdc71a224b6d0e4337183a87ea53f21b6623deca5771ee3bc866fd8da2",
+      "bytes": 11050,
+      "source": "https://cdn.jsdelivr.net/pyodide/v0.29.5/full/six-1.17.0-py2.py3-none-any.whl"
+    }
+  ],
+  "totals": {
+    "files": 201,
+    "bytes": 68335708
+  }
+}

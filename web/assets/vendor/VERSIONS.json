@@ -1,0 +1,12 @@
+{
+  "format": 1,
+  "pyodide": "0.29.5",
+  "python": "3.13.2",
+  "betteroffice": "0.5.1",
+  "manifest": "manifest.json",
+  "policy": {
+    "cdn": false,
+    "micropip": false,
+    "same_origin": true
+  }
+}

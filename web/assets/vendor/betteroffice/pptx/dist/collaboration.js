@@ -1,0 +1,1 @@
+import'./chunk-YMIVEAXD.js';export{c as CollaborationError,f as CollaborationProvider,a as attachCollaborationPipe,b as collaborationPipeFor}from'./chunk-JZOLK2OC.js';export{a as PRESENCE_LABEL_DURATION_MS,b as presenceColorForClientId}from'./chunk-2CPM3HRW.js';import'./chunk-O2XFH626.js';

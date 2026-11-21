@@ -1,0 +1,1 @@
+export{d as HEADING_COLOR,b as STYLE_DEFAULT_BOLD,c as STYLE_DEFAULT_COLOR,a as STYLE_PREVIEW_SIZES,e as getStylePreviewProps,f as resolveParagraphStyleOptions}from'../chunk-UDVEZ722.mjs';import'../chunk-TTRUPDAB.mjs';
