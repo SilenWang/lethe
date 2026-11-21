@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Lethe — Document De-identifier",
   "short_name": "Lethe",
-  "description": "Local, reversible PII de-identification. Documents are processed on this machine and never kept by the server.",
+  "description": "Local, reversible PII de-identification. Documents are processed in this browser and never uploaded.",
   "lang": "en",
   "dir": "ltr",
   "start_url": "/",

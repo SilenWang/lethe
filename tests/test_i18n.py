@@ -54,7 +54,8 @@ def test_locale_values_are_non_empty_strings():
 def test_english_locale_is_not_the_chinese_one():
     """A copy/paste regression guard: no key may hold identical prose in both
     languages unless it is language-neutral (product names, tokens, markup-only)."""
-    neutral = {"ref.utc", "ref.token", "col.count"}  # language-neutral symbols
+    # language-neutral symbols / pure format strings
+    neutral = {"ref.utc", "ref.token", "col.count", "p1.upload.selected", "p1.review.count"}
     identical = [k for k in EN if EN[k] == ZH[k] and k not in neutral]
     assert not identical, f"untranslated (identical) values: {identical}"
 
@@ -140,9 +141,30 @@ def test_every_locale_key_is_used():
     unused = sorted(
         k
         for k in EN
-        if k not in _tr_keys(_app_source()) | _dynamic_keys() | _gate_keys()
+        if k not in _tr_keys(_app_source()) | _dynamic_keys() | _gate_keys() | _p1_ui_keys()
     )
     assert not unused, f"locale keys never used by the app: {unused}"
+
+
+def _p1_ui_keys() -> set[str]:
+    """Keys the static P1 UI resolves from web/ui + web/index.html.
+
+    The P1 line is plain ES modules, so its keys are string literals and
+    template prefixes rather than Python ``tr(...)`` calls.
+    """
+    ui = os.path.join(ROOT, "web", "ui")
+    sources = [open(os.path.join(ROOT, "web", "index.html"), encoding="utf-8").read()]
+    for name in sorted(os.listdir(ui)):
+        if name.endswith(".js"):
+            sources.append(open(os.path.join(ui, name), encoding="utf-8").read())
+    source = "\n".join(sources)
+    keys = set(re.findall(r"'(p1\.[\w.]+)'", source))
+    keys |= set(re.findall(r'"(p1\.[\w.]+)"', source))
+    # Template prefixes: `p1.error.${code}`, `p1.progress.${phase}`, `p1.source.${src}`.
+    for prefix in ("p1.error.", "p1.progress.", "p1.source."):
+        if "`" + prefix in source:
+            keys |= {key for key in EN if key.startswith(prefix)}
+    return keys
 
 
 def _gate_keys() -> set[str]:
