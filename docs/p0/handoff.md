@@ -1,4 +1,4 @@
-# P0 handoff — GitHub state and the one remaining decision
+# P0 handoff — GitHub state
 
 ## Status
 
@@ -8,42 +8,16 @@ P0 is on GitHub and the required checks are green.
 - `next/p0-foundation` pushed; PR **#13** is open with base `next/rewrite`:
   <https://github.com/SilenWang/lethe/pull/13>.
 - `next/rewrite` protection is set from `docs/p0/branch-protection.json`:
-  no direct/force pushes, no deletions, 1 approval, conversation resolution,
-  up-to-date branch, five required checks.
+  no direct/force pushes, no deletions, no mandatory approval (single-maintainer
+  fork), conversation resolution, up-to-date branch, five required checks.
 - Repository merge method is squash-only (`allow_merge_commit=false`,
   `allow_rebase_merge=false`).
 - All five jobs passed on the PR: `lint + typecheck`, `unit (pytest)`,
   `browser (Playwright, offline assets)`, `fidelity corpus (90 files + asset
   lock)`, `guard (no bare save/toBytes)`.
-- `main` was not touched and no tag was pushed.
-
-## Remaining decision (Sylens)
-
-`pyproject.toml` still says `1.3.1`. The `v1.3.2` tag is intentionally not
-created yet; pick one:
-
-```bash
-# A. version bump first (recommended)
-git checkout main && git pull --ff-only
-git checkout -b hotfix/v1.3.2
-# set version = "1.3.2" in pyproject.toml
-git commit -am "chore: release v1.3.2"
-git push -u origin hotfix/v1.3.2
-gh pr create --base main --head hotfix/v1.3.2 \
-  --title "Release v1.3.2" --body "Version bump for the v1 baseline tag."
-# after merge:
-git checkout main && git pull --ff-only
-git tag -a v1.3.2 -m "Lethe v1.3.2 (v1 baseline before next/rewrite)"
-git push origin v1.3.2
-```
-
-```bash
-# B. tag the current main without a version bump
-git tag -a v1.3.2 cf93bd2 -m "Lethe v1.3.2"
-git push origin v1.3.2
-```
-
-`main@cf93bd2` already contains `dev@64b1953`, so no dev→main merge is needed.
+- `main` was not touched and **no `v1.3.2` tag will be created**: Sylens
+  decided `dev` is frozen (it will not advance), only `next/rewrite` continues,
+  and the v1 baseline bookmark is `cf93bd2`.
 
 ## How the branch was built (reproducible)
 

@@ -21,17 +21,22 @@ an asset change runs the full suite.
 
 ## Branch rules
 
-- `main` only accepts `hotfix/*` PRs. `next/rewrite` never merges into `main`
-  before the P3 cutover conditions are met.
+- `dev` is frozen at `64b1953` and does not advance. The v1 baseline bookmark is
+  `cf93bd2` on `main` (`dev@64b1953` is already contained in it); **no `v1.3.2`
+  tag is created**. `main` is untouched by v2 work and `next/rewrite` never
+  merges into it before the P3 cutover conditions are met.
 - `next/rewrite` is cut from `dev@64b1953`, not from `main`. All v2 PRs use
   `next/rewrite` as base; topic branches are `next/<topic>` and are deleted
   after merge.
-- Protection: no direct pushes, no force pushes, no deletions, 1 approving
-  review, all five checks green, require up-to-date branch, conversation
-  resolution required.
+- Protection: no direct pushes, no force pushes, no deletions, no mandatory
+  approval, all five checks green, require up-to-date branch, conversation
+  resolution required. The reviewer count is 0 because this is a
+  single-maintainer fork: GitHub does not let an author approve their own PR,
+  so a reviewer requirement would deadlock every PR. The gate is the five
+  required checks plus the no-direct-push rule.
 - GitHub has no per-branch merge-method setting. "Squash only" is a repository
-  setting (`allow_merge_commit=false`, `allow_rebase_merge=false`); apply it
-  repo-wide and keep the hotfix PRs single-commit.
+  setting (`allow_merge_commit=false`, `allow_rebase_merge=false`); keep every
+  PR a single squashed commit.
 
 ## The naked-save guard
 

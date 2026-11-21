@@ -99,6 +99,8 @@ compiles every wasm bundle.
 - The vendored assets add 65.2MB to the repo because P0 requires same-origin
   hosting plus an in-repo sha256 manifest. If repo size becomes a problem, P1
   can move the blobs to a release artifact and keep the same manifest.
+- `dev` is frozen at `64b1953`; the v1 baseline bookmark is `cf93bd2`. No
+  `v1.3.2` tag is created and `main` is untouched.
 
 ### Verification
 
