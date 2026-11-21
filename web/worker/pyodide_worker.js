@@ -7,14 +7,28 @@ import { OPS, PROTOCOL_VERSION } from "../lib/protocol.js";
 
 const PYODIDE_DIR = new URL("../assets/vendor/pyodide/", self.location.href);
 const PY_SRC_DIR = new URL("../py/lethe/", self.location.href);
+const TOOLS_SRC_DIR = new URL("../py/tools/", self.location.href);
 const DOCX_ENTRY = new URL(
   "../assets/vendor/betteroffice/docx/dist/docx/index.mjs",
   self.location.href,
 );
-const PY_SOURCES = ["__init__.py", "gates.py", "web_entry.py"];
+const OPC_ENTRY = new URL(
+  "../assets/vendor/betteroffice/docx/dist/wasm-opc.mjs",
+  self.location.href,
+);
+const PY_SOURCES = [
+  "__init__.py",
+  "core.py",
+  "docx_engine.py",
+  "gates.py",
+  "postprocess.py",
+  "web_entry.py",
+];
+const TOOL_SOURCES = ["__init__.py", "postprocess_contract.py"];
 
 let pyodide = null;
 let docxModule = null;
+let opcReady = null;
 let initPromise = null;
 
 const post = (message, transfer = []) => self.postMessage(message, transfer);
@@ -26,6 +40,7 @@ async function initRuntime() {
     post({ type: "init-progress", phase: "pyodide" });
     const { loadPyodide } = await import(new URL("pyodide.mjs", PYODIDE_DIR).href);
     pyodide = await loadPyodide({ indexURL: PYODIDE_DIR.href });
+    await pyodide.loadPackage(["lxml"]);
 
     post({ type: "init-progress", phase: "python-src" });
     pyodide.FS.mkdirTree("/lethe");
@@ -35,6 +50,14 @@ async function initRuntime() {
         throw new Error(`cannot load ${name} (HTTP ${response.status})`);
       }
       pyodide.FS.writeFile(`/lethe/${name}`, new Uint8Array(await response.arrayBuffer()));
+    }
+    pyodide.FS.mkdirTree("/tools");
+    for (const name of TOOL_SOURCES) {
+      const response = await fetch(new URL(name, TOOLS_SRC_DIR));
+      if (!response.ok) {
+        throw new Error(`cannot load tools/${name} (HTTP ${response.status})`);
+      }
+      pyodide.FS.writeFile(`/tools/${name}`, new Uint8Array(await response.arrayBuffer()));
     }
     pyodide.runPython(`
 import sys
@@ -60,6 +83,13 @@ import lethe.web_entry  # fail at init, not on the first upload
 
 async function loadDocx() {
   if (!docxModule) docxModule = await import(DOCX_ENTRY.href);
+  if (!opcReady) {
+    opcReady = (async () => {
+      const { preloadOpcWasm } = await import(OPC_ENTRY.href);
+      await preloadOpcWasm();
+    })();
+  }
+  await opcReady;
   return docxModule;
 }
 
@@ -111,6 +141,63 @@ except OSError:
   };
 }
 
+async function runWrite(id, op, bytes, options) {
+  const pyodideRuntime = await initRuntime();
+  pyodideRuntime.FS.writeFile("/tmp/source.docx", bytes);
+  post({ type: "progress", id, phase: "detect" });
+  const plan = callPython({
+    op,
+    path: "/tmp/source.docx",
+    entities: options.entities || [],
+    token_map: options.token_map || {},
+  });
+  if (!plan.ok) return plan;
+
+  post({ type: "progress", id, phase: "write" });
+  const { updateMultipleFiles } = await loadDocx();
+  const library = await updateMultipleFiles(
+    bytes.buffer,
+    new Map(Object.entries(plan.updates)),
+  );
+  pyodideRuntime.FS.writeFile("/tmp/library.docx", new Uint8Array(library));
+
+  post({ type: "progress", id, phase: "postprocess" });
+  const done = callPython({
+    op: "finish",
+    source: "/tmp/source.docx",
+    library: "/tmp/library.docx",
+    tokens: plan.tokens,
+  });
+  if (!done.ok) return done;
+  const output = pyodideRuntime.FS.readFile("/tmp/final.docx");
+  return {
+    ok: true,
+    bytes: output,
+    tokens: plan.tokens,
+    items: plan.items,
+    counts: plan.counts,
+    hits: plan.hits,
+    size: output.byteLength,
+  };
+}
+
+function cleanupTemp() {
+  try {
+    pyodide.runPython(`
+import os
+for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx", "/tmp/input.docx"):
+    try:
+        os.remove(_path)
+    except OSError:
+        pass
+import gc
+gc.collect()
+`);
+  } catch {
+    // runtime already gone; the worker will be replaced
+  }
+}
+
 async function handleRun(message) {
   const { id, op } = message;
   const bytes = new Uint8Array(message.bytes);
@@ -130,14 +217,20 @@ async function handleRun(message) {
       post({ type: "result", id, result });
       return;
     }
-    post({
-      type: "error",
-      id,
-      code: "INTERNAL",
-      message: `op ${op} arrives with next/p1-docx-core`,
-    });
+    if (op === "redact" || op === "restore") {
+      const result = await runWrite(id, op, bytes, message.options || {});
+      if (!result.ok) {
+        post({ type: "error", id, ...result });
+        return;
+      }
+      post({ type: "result", id, result }, [result.bytes.buffer]);
+      return;
+    }
+    post({ type: "error", id, code: "INTERNAL", message: `unknown op ${op}` });
   } catch (error) {
     post({ type: "error", id, code: classifyError(error), message: String(error?.message || error) });
+  } finally {
+    cleanupTemp();
   }
 }
 
