@@ -184,14 +184,16 @@ def build_docx(case: int) -> bytes:
         "application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
     )
 
-    filler = (
-        f"{marker}: Alice Chen approved this line for John Smith. "
-        "The counterparty is Example Bio GmbH, contract CU-2026-001. "
-    ) * (1 + case % 3)
-    _insert_before_sect(
-        body,
-        _docx_paragraph(f'<w:r><w:t xml:space="preserve">{escape(filler)}</w:t></w:r>'),
-    )
+    for paragraph in range(1, 2 + case % 5):
+        filler = (
+            f"{marker} paragraph {paragraph}: Alice Chen approved this line for "
+            f"John Smith at Example Bio GmbH, contract CU-2026-{case:03d}. "
+            + ("supporting detail " * (case * 13 % 120))
+        )
+        _insert_before_sect(
+            body,
+            _docx_paragraph(f'<w:r><w:t xml:space="preserve">{escape(filler)}</w:t></w:r>'),
+        )
     _insert_before_sect(
         body,
         etree.fromstring(
@@ -280,6 +282,20 @@ def build_pptx(case: int) -> bytes:
         "</p:txBody></p:sp>"
     )
     sp_tree.append(note)
+
+    body_text = (
+        f"{marker} body: Alice Chen and John Smith reviewed the counterparty "
+        f"deck for Example Bio GmbH. " + ("detail " * (case * 29 % 260))
+    )
+    body_sp = etree.fromstring(
+        f'<p:sp xmlns:p="{P}" xmlns:a="{A}">'
+        f'<p:nvSpPr><p:cNvPr id="{9600 + case}" name="Case body {case}"/><p:cNvSpPr txBox="1"/><p:nvPr/>'
+        '</p:nvSpPr><p:spPr><a:xfrm><a:off x="457200" y="5486400"/><a:ext cx="10058400" cy="914400"/>'
+        '</a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" dirty="0"/>'
+        f"<a:t>{body_text}</a:t></a:r></a:p></p:txBody></p:sp>"
+    )
+    sp_tree.append(body_sp)
     parts[slide_name] = _xml(slide)
     return normalize_zip(write_parts(parts))
 
@@ -326,9 +342,12 @@ def build_xlsx(case: int) -> bytes:
     ws["B2"].comment = Comment("Please verify this counterparty", "Alice Chen")
     ws.oddHeader.center.text = f"&CConfidential {marker}"
     ws.oddFooter.left.text = f"&LGenerated fidelity case {case:03d}"
-    for row in range(1, 6 + case % 7):
+    for row in range(1, 6 + case % 19):
         ws.cell(row=20 + row, column=1, value=f"{marker} row {row}")
         ws.cell(row=20 + row, column=2, value=row * 11 + case)
+    ws[f"D{30 + case % 20}"] = f"{marker} second merged range"
+    span_end = 30 + case % 20
+    ws.merge_cells(f"D{span_end}:F{span_end}")
 
     hidden = wb.create_sheet("HiddenStuff")
     hidden["A1"] = f"{marker} hidden sheet payload"
