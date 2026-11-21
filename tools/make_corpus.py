@@ -391,7 +391,7 @@ def main() -> int:
         print(f"{fmt}: {N} files")
     rows.sort(key=lambda row: row["path"])
     with (CORPUS / "manifest.csv").open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     from tools.verify_corpus import COVERAGE, coverage_table
