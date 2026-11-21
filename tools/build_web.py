@@ -83,6 +83,15 @@ def build(out: Path) -> None:
         source = WEB / entry
         if source.is_dir():
             _copy_tree(source, out / entry)
+    # The P1 UI shell arrives in next/p1-ui; the build stays usable before it.
+    if (WEB / "sw.js").is_file():
+        shutil.copy2(WEB / "sw.js", out / "sw.js")
+    if (WEB / "ui").is_dir():
+        _copy_tree(WEB / "ui", out / "ui")
+    for entry in ("client-store.js", "manifest.webmanifest"):
+        shutil.copy2(REPO / "lethe" / "web_static" / entry, out / entry)
+    _copy_tree(REPO / "lethe" / "web_static" / "icons", out / "static" / "icons")
+    _copy_tree(REPO / "lethe" / "locales", out / "locales")
     py_out = out / "py" / "lethe"
     py_out.mkdir(parents=True, exist_ok=True)
     shutil.copy2(WEB / "py" / "lethe" / "__init__.py", py_out / "__init__.py")
