@@ -1,0 +1,31 @@
+[workspace]
+name = "lethe"
+channels = ["conda-forge"]
+platforms = ["linux-64", "win-64", "osx-64", "osx-arm64"]
+
+[dependencies]
+python = "3.12.*"
+nodejs = "22.*"
+
+[pypi-dependencies]
+lethe = { path = ".", editable = true }
+pytest = ">=8.2"
+ruff = ">=0.6"
+mypy = ">=1.11"
+playwright = ">=1.47"
+pillow = ">=10"
+
+[tasks]
+# ---- P0 gates: every command below is what the five CI jobs run -------------
+lint = "ruff check lethe/gates.py tools/guard_no_bare_save.py tools/postprocess_contract.py tools/verify_corpus.py tools/make_corpus.py tools/vendor_assets.py tools/asset_version_guard.py tools/guard_fixtures tests/test_gates.py tests/test_guard_no_bare_save.py tests/test_postprocess_contract.py tests/browser/test_p0_offline_assets.py"
+typecheck = "mypy --follow-imports=silent --ignore-missing-imports lethe/gates.py tools/postprocess_contract.py tools/verify_corpus.py tools/guard_no_bare_save.py tools/asset_version_guard.py"
+unit = "pytest tests -q --ignore=tests/browser"
+browser = "pytest tests/browser/test_p0_offline_assets.py -q"
+guard = "pytest tests/test_guard_no_bare_save.py -q && python tools/guard_no_bare_save.py --paths lethe web"
+fidelity-corpus = "python tools/verify_corpus.py --strict && python tools/vendor_assets.py --verify-only && python tools/asset_version_guard.py"
+gates = "pytest tests/test_gates.py -q"
+contract = "pytest tests/test_postprocess_contract.py -q"
+corpus = "python tools/make_corpus.py"
+assets-fetch = "python tools/vendor_assets.py --fetch"
+assets-verify = "python tools/vendor_assets.py --verify-only"
+p0 = { depends-on = ["lint", "typecheck", "unit", "gates", "guard", "contract", "fidelity-corpus"] }

@@ -40,6 +40,13 @@ boot.*
 /_wheeltest/
 /_gifframes/
 
+# ---- pixi (recreated by `pixi install`; pixi.lock is committed) ----
+.pixi/
+.pytest_cache/
+
+# P0 asset fetch scratch (the vendored result lives in web/assets/vendor)
+.vendor-tmp/
+
 # Claude Code local (machine-specific) settings — keep memory + project CLAUDE.md,
 # but not per-user permission grants.
 .claude/settings.local.json
