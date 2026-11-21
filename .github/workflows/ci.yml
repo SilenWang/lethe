@@ -24,7 +24,6 @@ concurrency:
 
 env:
   PIXI_VERSION: "0.76.1"
-  LETHE_DATA_DIR: ${{ runner.temp }}/lethe-ci
 
 jobs:
   lint-typecheck:
@@ -53,6 +52,8 @@ jobs:
           cache: true
           run-install: true
       - name: pytest
+        env:
+          LETHE_DATA_DIR: ${{ runner.temp }}/lethe-ci
         run: pixi run unit
 
   browser:

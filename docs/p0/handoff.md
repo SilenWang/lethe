@@ -99,8 +99,15 @@ From the patch (equivalent, base `next/rewrite`):
 ```bash
 git checkout next/rewrite
 git checkout -b next/p0-foundation
-git am 0001-P0-foundations.patch
+git apply /path/to/p0-foundation-code.patch
+pixi install
+pixi run assets-fetch        # re-downloads the pinned 65.2MB and verifies sha256
+git add -A
+git commit -m "P0: foundations, guard, gates, corpus, vendored assets"
 ```
+
+The code-only patch deliberately excludes `web/assets/vendor/**`; the fetch
+script reproduces those 201 files and the manifest verifies every hash.
 
 Then push and open the PR **against `next/rewrite`, never `main`**:
 
@@ -122,3 +129,5 @@ gh pr create --base next/rewrite --head next/p0-foundation \
 | guard | `pixi run guard` | 9 passed; product paths clean |
 
 The exact output is pasted in the VYB-2674 delivery comment.
+
+Local browser runs need Chromium once: `pixi run python -m playwright install chromium`.
