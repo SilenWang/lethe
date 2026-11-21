@@ -173,6 +173,7 @@
   "app.title": "Lethe — 文档脱敏工具",
   "badge.known": "已知实体",
   "badge.pattern": "模式匹配",
+  "badge.preset_rule": "上下文规则",
   "badge.suggested": "建议",
   "badge.manual": "手动",
   "ref.job_id": "任务 ID：",

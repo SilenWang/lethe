@@ -108,6 +108,7 @@ def _ttl_text(tr) -> str:
 # plus the Quasar colour for the review table.
 SOURCE_BADGE = {"dictionary": ("badge.known", "deep-purple-6"),
                 "pattern": ("badge.pattern", "blue-grey-6"),
+                "preset_rule": ("badge.preset_rule", "teal-6"),
                 "suggestion": ("badge.suggested", "amber-8"),
                 "manual": ("badge.manual", "pink-7")}
 

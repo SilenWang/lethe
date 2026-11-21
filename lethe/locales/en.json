@@ -173,6 +173,7 @@
   "app.title": "Lethe — Document De-identifier",
   "badge.known": "Known entity",
   "badge.pattern": "Pattern",
+  "badge.preset_rule": "Context rule",
   "badge.suggested": "Suggested",
   "badge.manual": "Manual",
   "ref.job_id": "Job ID : ",
