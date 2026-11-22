@@ -82,3 +82,17 @@ def test_restore_accepts_a_tampered_token_stream() -> None:
     token_map = {"[PERSON_001]": "John Smith"}
     replace = build_restorer(token_map)
     assert replace("Dear [PERSON_001],")[0] == "Dear John Smith,"
+
+
+def test_restore_survives_postprocess() -> None:
+    """The worker's finish step must keep a restore, not revert to the source."""
+    source = CORPUS.read_bytes()
+    redacted = redact(source, ENTITIES)
+    redacted_pkg = _library_repack(source, redacted.updates)
+    token_map = {str(item["token"]): str(item["canonical"]) for item in redacted.items}
+    restored = restore(redacted_pkg, token_map)
+    assert restored.hits > 0
+    final = postprocess(
+        redacted_pkg, _library_repack(redacted_pkg, restored.updates), restored.tokens
+    )
+    assert extract_all_text_parts(final) == extract_all_text_parts(source)
