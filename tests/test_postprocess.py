@@ -115,6 +115,32 @@ def test_missing_library_part_is_restored_from_source() -> None:
         assert archive.read("word/styles.xml") == b"<w:styles/>" * 40
 
 
+def test_restore_direction_keeps_parts_whose_source_had_tokens() -> None:
+    """Restore moves a part from token text back to real text."""
+    source = _zip(
+        {
+            "[Content_Types].xml": b"<Types/>",
+            "word/document.xml": DOC.format("Contact [PERSON_001]").encode(),
+            "word/styles.xml": b"<w:styles/>",
+        }
+    )
+    output = _zip(
+        {
+            "[Content_Types].xml": b"<Types/>",
+            "word/document.xml": DOC.format("Contact Alice Tan").encode(),
+            "word/styles.xml": b"<w:styles/>",
+        }
+    )
+    final = postprocess(source, output, ["[PERSON_001]"])
+    with zipfile.ZipFile(io.BytesIO(final)) as archive:
+        assert b"Alice Tan" in archive.read("word/document.xml")
+        assert b"[PERSON_001]" not in archive.read("word/document.xml")
+    edited = {"word/document.xml"}
+    assert_source_priority(io.BytesIO(source), io.BytesIO(final), edited)
+    assert_unedited_part_sha256(io.BytesIO(source), io.BytesIO(final), edited)
+    assert_unedited_compressed_stream(io.BytesIO(source), io.BytesIO(final), edited)
+
+
 def test_rebuild_is_deterministic() -> None:
     source = _source()
     output = _library_output(source)

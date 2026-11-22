@@ -224,8 +224,14 @@ def postprocess(
             if name not in out.namelist():
                 continue
             new_bytes = out.read(name)
-            if new_bytes != src.read(name) and (
-                name in explicit or _contains_token(new_bytes, token_list)
+            old_bytes = src.read(name)
+            # Redaction: the token appears in the new bytes. Restore: the token
+            # appears in the source bytes and disappears from the new ones.
+            # Both directions are legitimate changes this function must keep.
+            if new_bytes != old_bytes and (
+                name in explicit
+                or _contains_token(new_bytes, token_list)
+                or _contains_token(old_bytes, token_list)
             ):
                 keep.add(name)
         rebuilt = _rebuild(src, out, keep)

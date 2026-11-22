@@ -7,6 +7,7 @@ the value read after a phase is that run's high-water mark), plus
 
 from __future__ import annotations
 
+import base64
 import io
 import os
 import subprocess
@@ -16,6 +17,8 @@ from pathlib import Path
 
 import pytest
 from _server import StaticServer
+
+from lethe.docx_engine import extract_all_text_parts, scan_leaks
 
 REPO = Path(__file__).resolve().parents[2]
 MIB = 1024 * 1024
@@ -63,6 +66,13 @@ ENTITIES = [{"canonical": "John Smith", "type": "PERSON", "aliases": []}]
 RUN_ROUNDTRIP = """async ({entities}) => {
   const bridge = window.__letheBridge;
   const bytes = window.__sampleBytes;
+  const b64 = (u8) => {
+    let text = "";
+    for (let i = 0; i < u8.length; i += 0x8000) {
+      text += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    }
+    return btoa(text);
+  };
   try {
     const red = await bridge.run({
       op: "redact", bytes, fileName: "offline.docx", options: {entities},
@@ -70,12 +80,17 @@ RUN_ROUNDTRIP = """async ({entities}) => {
     const tokenMap = Object.fromEntries(
       red.items.filter((item) => item.token).map((item) => [item.token, item.canonical]),
     );
+    // Encode before the restore call: that call transfers (detaches) red.bytes.
+    const redB64 = b64(red.bytes);
     const restored = await bridge.run({
       op: "restore", bytes: red.bytes, fileName: "offline.docx",
       options: {token_map: tokenMap},
     });
-    return {ok: true, hits: red.hits, restoredSize: restored.size,
-            heapBytes: red.heapBytes};
+    return {
+      ok: true, hits: red.hits, restoreHits: restored.hits,
+      restoredSize: restored.size, heapBytes: red.heapBytes,
+      redB64, resB64: b64(restored.bytes),
+    };
   } catch (error) {
     return {ok: false, code: error.code, message: error.message};
   }
@@ -213,13 +228,19 @@ def test_offline_install_and_docx_roundtrip(server: StaticServer, built: Path) -
         outcome = page.evaluate(RUN_ROUNDTRIP, {"entities": ENTITIES})
         assert outcome["ok"], outcome
         assert outcome["hits"] > 0
+        assert outcome["restoreHits"] > 0
         assert outcome["restoredSize"] > 0
+        redacted_bytes = base64.b64decode(outcome["redB64"])
+        restored_bytes = base64.b64decode(outcome["resB64"])
+        assert extract_all_text_parts(restored_bytes) == extract_all_text_parts(sample)
+        assert scan_leaks(redacted_bytes, ["John Smith", "john.smith@example.com"]) == []
         context.set_offline(False)
         browser.close()
     assert external == [], f"offline run reached the network: {external}"
     print(
         f"offline cold start: ok, docx redact hits={outcome['hits']}, "
-        f"restored={outcome['restoredSize']}B, heap={outcome['heapBytes'] / MIB:.1f}MiB"
+        f"restore hits={outcome['restoreHits']}, restored={outcome['restoredSize']}B, "
+        f"heap={outcome['heapBytes'] / MIB:.1f}MiB"
     )
 
 
