@@ -10,7 +10,9 @@ import {
   RECYCLE_BYTES,
   gateLevel,
   humanSize,
-  isDocx,
+  isPptx,
+  isSupported,
+  mimeFor,
   errorKey,
   replaceSuffix,
 } from "./format.js";
@@ -164,7 +166,7 @@ function reportError(error) {
 // ------------------------------------------------------------ upload panel
 
 function pickFile(file) {
-  if (!isDocx(file)) {
+  if (!isSupported(file)) {
     toast(t("p1.upload.wrong_type"), "error");
     return;
   }
@@ -182,6 +184,8 @@ function pickFile(file) {
   $("upload-file").hidden = false;
   $("upload-file").textContent = t("p1.upload.selected", { name: file.name, size: humanSize(file.size) });
   const note = $("upload-note");
+  const degradations = $("upload-degradations");
+  if (degradations) degradations.hidden = !isPptx(file);
   if (gate.level === "warn") {
     note.hidden = false;
     note.textContent = t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 }) +
@@ -201,6 +205,7 @@ function clearFile() {
   state.generated = null;
   $("upload-file").hidden = true;
   $("upload-note").hidden = true;
+  if ($("upload-degradations")) $("upload-degradations").hidden = true;
   $("upload-inspect").hidden = true;
   $("inspect-btn").disabled = true;
   $("detect-btn").disabled = true;
@@ -243,9 +248,10 @@ async function inspectFile() {
   try {
     const result = await runOp({ op: "inspect", file: state.file });
     $("upload-inspect").hidden = false;
+    const partsKey = isPptx(state.file) ? "p1.upload.parts_pptx" : "p1.upload.parts";
     $("upload-inspect").textContent =
       `${t("p1.upload.checked")} ` +
-      t("p1.upload.parts", { parts: result.parts, paragraphs: result.paragraphs });
+      t(partsKey, { parts: result.parts, paragraphs: result.paragraphs });
   } catch (error) {
     reportError(error);
   }
@@ -434,7 +440,7 @@ function renderGenerate() {
 
 function download(bytes, name) {
   const blob = new Blob([bytes], {
-    type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    type: mimeFor(name),
   });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -475,7 +481,7 @@ async function loadJobs() {
 }
 
 function pickRestoreFile(file) {
-  if (!isDocx(file)) return toast(t("p1.upload.wrong_type"), "error");
+  if (!isSupported(file)) return toast(t("p1.upload.wrong_type"), "error");
   const gate = gateLevel(file.size);
   if (gate.level === "reject") {
     return toast(t("gate.file_reject", { size_mb: gate.size, max_mb: 50 }), "error", 0);
@@ -505,7 +511,7 @@ async function restore() {
     state.restored = {
       bytes: result.bytes,
       hits: result.hits || 0,
-      name: replaceSuffix(state.restoreFile.name, "-restored.docx"),
+      name: replaceSuffix(state.restoreFile.name, "-restored"),
     };
     $("restore-summary").textContent = t("p1.restore.ready", { count: state.restored.hits });
     $("restore-result").hidden = false;
@@ -570,7 +576,7 @@ async function boot() {
   });
   $("download-btn").addEventListener("click", () => {
     if (!state.generated) return;
-    download(state.generated.bytes, replaceSuffix(state.file?.name, "-redacted.docx"));
+    download(state.generated.bytes, replaceSuffix(state.file?.name, "-redacted"));
   });
   $("goto-restore-btn").addEventListener("click", () => showPanel("restore"));
   $("restart-btn").addEventListener("click", () => {

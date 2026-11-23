@@ -16,12 +16,17 @@ const OPC_ENTRY = new URL(
   "../assets/vendor/betteroffice/docx/dist/wasm-opc.mjs",
   self.location.href,
 );
+const PPTX_ENTRY = new URL(
+  "../assets/vendor/betteroffice/pptx/dist/index.js",
+  self.location.href,
+);
 const PY_SOURCES = [
   "__init__.py",
   "core.py",
   "docx_engine.py",
   "gates.py",
   "postprocess.py",
+  "pptx_engine.py",
   "web_entry.py",
 ];
 const TOOL_SOURCES = ["__init__.py", "postprocess_contract.py"];
@@ -29,6 +34,7 @@ const TOOL_SOURCES = ["__init__.py", "postprocess_contract.py"];
 let pyodide = null;
 let docxModule = null;
 let opcReady = null;
+let pptxModule = null;
 let initPromise = null;
 
 const post = (message, transfer = []) => self.postMessage(message, transfer);
@@ -97,6 +103,11 @@ async function loadDocx() {
   return docxModule;
 }
 
+async function loadPptx() {
+  if (!pptxModule) pptxModule = await import(PPTX_ENTRY.href);
+  return pptxModule;
+}
+
 function countParagraphs(node) {
   if (Array.isArray(node)) return node.reduce((total, child) => total + countParagraphs(child), 0);
   if (!node || typeof node !== "object") return 0;
@@ -121,6 +132,23 @@ async function runInspect(id, bytes, fileName) {
   pyodide.FS.writeFile("/tmp/input.docx", bytes);
   const gated = callPython({ op: "inspect", path: "/tmp/input.docx", file_name: fileName });
   if (!gated.ok) return gated;
+  if (/\.pptx$/i.test(fileName)) {
+    pyodide.runPython(`
+import os
+try:
+    os.remove("/tmp/input.docx")
+except OSError:
+    pass
+`);
+    return {
+      ok: true,
+      parts: gated.parts,
+      paragraphs: 0,
+      status: gated.status,
+      warnings: gated.warnings,
+      heapBytes: heapBytes(),
+    };
+  }
 
   post(progress({ type: "progress", id, phase: "parse" }));
   const { parseDocx } = await loadDocx();
@@ -146,13 +174,17 @@ except OSError:
   };
 }
 
-async function runWrite(id, op, bytes, options) {
+async function runWrite(id, op, bytes, options, fileName) {
+  if (/\.pptx$/i.test(fileName)) {
+    return runPptxWrite(id, op, bytes, options, fileName);
+  }
   const pyodideRuntime = await initRuntime();
   pyodideRuntime.FS.writeFile("/tmp/source.docx", bytes);
   post(progress({ type: "progress", id, phase: "detect" }));
   const plan = callPython({
     op,
     path: "/tmp/source.docx",
+    file_name: fileName,
     entities: options.entities || [],
     token_map: options.token_map || {},
   });
@@ -187,11 +219,90 @@ async function runWrite(id, op, bytes, options) {
   };
 }
 
+async function runPptxWrite(id, op, bytes, options, fileName) {
+  const pyodideRuntime = await initRuntime();
+  pyodideRuntime.FS.writeFile("/tmp/source.pptx", bytes);
+  post(progress({ type: "progress", id, phase: "detect" }));
+  const plan = callPython({
+    op,
+    path: "/tmp/source.pptx",
+    file_name: fileName,
+    entities: options.entities || [],
+    token_map: options.token_map || {},
+  });
+  if (!plan.ok) return plan;
+
+  let library = bytes;
+  const replacements = Array.isArray(plan.replacements) ? plan.replacements : [];
+  if (replacements.length) {
+    post(progress({ type: "progress", id, phase: "write" }));
+    const { initWasm, openPresentation } = await loadPptx();
+    await initWasm();
+    const deck = openPresentation(new Uint8Array(bytes));
+    try {
+      for (const replacement of replacements) {
+        // The library refuses more than 128 steps per batch.  Re-run findText
+        // after each batch: replaced matches become tokens and drop out.
+        for (;;) {
+          const found = deck.findText({ text: String(replacement.find), limit: 10000 });
+          if (!found.ok || found.matches.length === 0) break;
+          const steps = found.matches.slice(0, 128).map((match) => ({
+            op: "replaceText",
+            target: { kind: "range", ...match.range },
+            text: String(replacement.token),
+          }));
+          const applied = deck.applyEdits({ expectVersion: deck.version(), steps });
+          if (!applied.ok) {
+            return {
+              ok: false,
+              code: "INTERNAL",
+              message: "pptx applyEdits refused",
+              detail: applied,
+            };
+          }
+          if (found.matches.length <= 128) break;
+        }
+      }
+      // bare-save-ok: library intermediate; postprocess() is the only final exit
+      library = deck.save();
+    } finally {
+      deck.dispose();
+    }
+  }
+  pyodideRuntime.FS.writeFile("/tmp/library.pptx", new Uint8Array(library));
+
+  post(progress({ type: "progress", id, phase: "postprocess" }));
+  const done = callPython({
+    op: "finish_pptx",
+    source: "/tmp/source.pptx",
+    library: "/tmp/library.pptx",
+    tokens: plan.tokens || [],
+    updates: plan.updates || {},
+    replacements,
+    surfaces: plan.surfaces || [],
+  });
+  if (!done.ok) return done;
+  const output = pyodideRuntime.FS.readFile("/tmp/final.pptx");
+  return {
+    ok: true,
+    bytes: output,
+    tokens: plan.tokens || [],
+    items: plan.items || [],
+    counts: plan.counts || {},
+    hits: plan.hits || 0,
+    warnings: plan.warnings || [],
+    size: output.byteLength,
+    heapBytes: heapBytes(),
+  };
+}
+
 function cleanupTemp() {
   try {
     pyodide.runPython(`
 import os
-for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx", "/tmp/input.docx"):
+for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx",
+              "/tmp/source.pptx", "/tmp/library.pptx", "/tmp/final.pptx",
+              "/tmp/input.docx"):
     try:
         os.remove(_path)
     except OSError:
@@ -224,7 +335,13 @@ async function handleRun(message) {
       return;
     }
     if (op === "redact" || op === "restore") {
-      const result = await runWrite(id, op, bytes, message.options || {});
+      const result = await runWrite(
+        id,
+        op,
+        bytes,
+        message.options || {},
+        String(message.fileName || "upload.docx"),
+      );
       if (!result.ok) {
         post({ type: "error", id, ...result });
         return;

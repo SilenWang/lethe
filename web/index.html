@@ -55,9 +55,18 @@
           <p data-i18n="p1.upload.drop"></p>
           <p class="hint" data-i18n="p1.upload.formats"></p>
         </div>
-        <input id="upload-input" type="file" accept=".docx" hidden />
+        <input id="upload-input" type="file" accept=".docx,.pptx" hidden />
         <p id="upload-file" class="file-line" hidden></p>
         <p id="upload-note" class="note" hidden></p>
+        <details id="upload-degradations" class="note" hidden>
+          <summary data-i18n="p1.pptx.degradations.title"></summary>
+          <ul>
+            <li data-i18n="p1.pptx.degradations.chart"></li>
+            <li data-i18n="p1.pptx.degradations.smartart"></li>
+            <li data-i18n="p1.pptx.degradations.ole"></li>
+            <li data-i18n="p1.pptx.degradations.media"></li>
+          </ul>
+        </details>
         <p id="upload-inspect" class="meta" hidden></p>
         <div class="actions">
           <button id="inspect-btn" type="button" class="btn" disabled data-i18n="p1.upload.inspect"></button>
@@ -129,7 +138,7 @@
         <div id="restore-drop" class="dropzone" tabindex="0" role="button">
           <p data-i18n="p1.restore.file"></p>
         </div>
-        <input id="restore-input" type="file" accept=".docx" hidden />
+        <input id="restore-input" type="file" accept=".docx,.pptx" hidden />
         <p id="restore-file" class="file-line" hidden></p>
         <div class="actions">
           <button id="restore-btn" type="button" class="btn btn-primary" data-i18n="p1.restore.run"></button>

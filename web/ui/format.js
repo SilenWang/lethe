@@ -23,6 +23,20 @@ export function isDocx(file) {
   return !!file && /\.docx$/i.test(file.name || "");
 }
 
+export function isPptx(file) {
+  return !!file && /\.pptx$/i.test(file.name || "");
+}
+
+export function isSupported(file) {
+  return isDocx(file) || isPptx(file);
+}
+
+export function mimeFor(name) {
+  return /\.pptx$/i.test(String(name || ""))
+    ? "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+}
+
 export function humanSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < MIB) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -30,7 +44,10 @@ export function humanSize(bytes) {
 }
 
 export function replaceSuffix(name, suffix) {
-  return String(name || "document.docx").replace(/\.docx$/i, "") + suffix;
+  const value = String(name || "document.docx");
+  const match = value.match(/\.(docx|pptx)$/i);
+  if (!match) return value + suffix;
+  return value.slice(0, -match[0].length) + suffix + match[0].toLowerCase();
 }
 
 /** What the UI shows for a worker error code. Never a raw stack trace. */

@@ -25,7 +25,14 @@ REPO = Path(__file__).resolve().parents[1]
 WEB = REPO / "web"
 VENDOR = WEB / "assets" / "vendor"
 TEXT_SUFFIXES = {".html", ".js", ".mjs", ".css", ".json"}
-PY_MODULES = ("core.py", "docx_engine.py", "gates.py", "postprocess.py", "web_entry.py")
+PY_MODULES = (
+    "core.py",
+    "docx_engine.py",
+    "gates.py",
+    "postprocess.py",
+    "pptx_engine.py",
+    "web_entry.py",
+)
 TOOL_MODULES = ("__init__.py", "postprocess_contract.py")
 
 

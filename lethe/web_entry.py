@@ -13,7 +13,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from lethe import core, docx_engine, gates, postprocess
+from lethe import core, docx_engine, gates, postprocess, pptx_engine
 
 PROTOCOL = 1
 IMPLEMENTED_OPS = ("echo", "inspect", "redact", "restore", "finish")
@@ -86,8 +86,23 @@ def _entities(raw_entities: list[dict[str, object]]) -> list[core.Entity]:
     return entities
 
 
-def _redact(path: str, raw_entities: list[dict[str, object]]) -> str:
-    result = docx_engine.redact(Path(path).read_bytes(), _entities(raw_entities))
+def _redact(
+    path: str, raw_entities: list[dict[str, object]], file_name: str
+) -> str:
+    raw = Path(path).read_bytes()
+    if file_name.lower().endswith(".pptx"):
+        pptx_result = pptx_engine.redact(raw, _entities(raw_entities))
+        return _ok(
+            updates=pptx_result.updates,
+            replacements=pptx_result.replacements,
+            tokens=pptx_result.tokens,
+            items=pptx_result.items,
+            counts=pptx_result.counts,
+            hits=pptx_result.hits,
+            warnings=pptx_result.warnings,
+            surfaces=pptx_result.surfaces,
+        )
+    result = docx_engine.redact(raw, _entities(raw_entities))
     return _ok(
         updates=result.updates,
         tokens=result.tokens,
@@ -97,8 +112,19 @@ def _redact(path: str, raw_entities: list[dict[str, object]]) -> str:
     )
 
 
-def _restore(path: str, token_map: dict[str, str]) -> str:
-    result = docx_engine.restore(Path(path).read_bytes(), token_map)
+def _restore(path: str, token_map: dict[str, str], file_name: str) -> str:
+    raw = Path(path).read_bytes()
+    if file_name.lower().endswith(".pptx"):
+        pptx_result = pptx_engine.restore(raw, token_map)
+        return _ok(
+            updates=pptx_result.updates,
+            replacements=pptx_result.replacements,
+            tokens=pptx_result.tokens,
+            counts=pptx_result.counts,
+            hits=pptx_result.hits,
+            warnings=pptx_result.warnings,
+        )
+    result = docx_engine.restore(raw, token_map)
     return _ok(updates=result.updates, tokens=result.tokens, counts=result.counts,
                hits=result.hits)
 
@@ -112,6 +138,26 @@ def _finish(source: str, library: str, tokens: list[str]) -> str:
     return _ok(path="/tmp/final.docx", size=len(final))
 
 
+def _finish_pptx(
+    source: str,
+    library: str,
+    tokens: list[str],
+    updates: dict[str, str],
+    replacements: list[dict[str, str]],
+    surfaces: list[str],
+) -> str:
+    final = pptx_engine.finish(
+        Path(source).read_bytes(),
+        Path(library).read_bytes(),
+        tokens,
+        updates,
+        replacements,
+        surfaces,
+    )
+    Path("/tmp/final.pptx").write_bytes(final)
+    return _ok(path="/tmp/final.pptx", size=len(final))
+
+
 def dispatch(request_json: str) -> str:
     """Single entry point; always returns JSON, including for unknown ops."""
     try:
@@ -123,14 +169,31 @@ def dispatch(request_json: str) -> str:
         if op == "inspect":
             return _inspect(str(request["path"]), str(request.get("file_name", "upload.docx")))
         if op == "redact":
-            return _redact(str(request["path"]), list(request.get("entities") or []))
+            return _redact(
+                str(request["path"]),
+                list(request.get("entities") or []),
+                str(request.get("file_name", "upload.docx")),
+            )
         if op == "restore":
-            return _restore(str(request["path"]), dict(request.get("token_map") or {}))
+            return _restore(
+                str(request["path"]),
+                dict(request.get("token_map") or {}),
+                str(request.get("file_name", "upload.docx")),
+            )
         if op == "finish":
             return _finish(
                 str(request["source"]),
                 str(request["library"]),
                 [str(token) for token in request.get("tokens") or []],
+            )
+        if op == "finish_pptx":
+            return _finish_pptx(
+                str(request["source"]),
+                str(request["library"]),
+                [str(token) for token in request.get("tokens") or []],
+                dict(request.get("updates") or {}),
+                list(request.get("replacements") or []),
+                [str(surface) for surface in request.get("surfaces") or []],
             )
         return _err("INTERNAL", f"unknown op {op!r}")
     except Exception as exc:  # noqa: BLE001 - a malformed request must not kill the worker
