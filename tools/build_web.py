@@ -2,7 +2,7 @@
 
 The v2 app is plain ES modules served from the same origin as the vendored
 Pyodide/BetterOffice assets.  There is no bundler and no npm step: this script
-copies the allow-listed source tree and hard-links the 65MB vendor directory so
+copies the allow-listed source tree and hard-links the 58MB vendor directory so
 the build stays cheap and reproducible.
 
 Two invariants are checked on every build:
@@ -25,7 +25,14 @@ REPO = Path(__file__).resolve().parents[1]
 WEB = REPO / "web"
 VENDOR = WEB / "assets" / "vendor"
 TEXT_SUFFIXES = {".html", ".js", ".mjs", ".css", ".json"}
-PY_MODULES = ("core.py", "docx_engine.py", "gates.py", "postprocess.py", "web_entry.py")
+PY_MODULES = (
+    "core.py",
+    "docx_engine.py",
+    "gates.py",
+    "postprocess.py",
+    "xlsx_engine.py",
+    "web_entry.py",
+)
 TOOL_MODULES = ("__init__.py", "postprocess_contract.py")
 
 

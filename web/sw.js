@@ -46,7 +46,8 @@ var SHELL_PATHS = [
 ];
 
 // Same-origin asset prefixes cached on demand (never precached wholesale, so
-// xlsx/pptx bundles are not downloaded until a run actually needs them).
+// pptx bundles are not downloaded until a run actually needs them; xlsx is
+// handled by the Python part-direct engine and needs no BetterOffice bundle).
 var RUNTIME_PREFIXES = [
   '/assets/vendor/pyodide/',
   '/assets/vendor/betteroffice/',

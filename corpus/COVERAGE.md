@@ -24,7 +24,14 @@ Generator version: `1.0.0` · files: 90 (docx 30, xlsx 30, pptx 30)
 | xlsx | merged_cell | 30/30 |
 | xlsx | media | 30/30 |
 | xlsx | chart | 30/30 |
+| xlsx | persons | 30/30 |
+| xlsx | threaded_comments | 30/30 |
+| xlsx | custom_xml | 30/30 |
+| xlsx | doc_props | 30/30 |
 | xlsx | unique_marker | 30/30 |
+| xlsx | shared_strings | 2/30 |
+| xlsx | inline_strings | 29/30 |
+| xlsx | mixed_strings | 1/30 |
 | pptx | comment_with_author | 30/30 |
 | pptx | header_footer | 30/30 |
 | pptx | textbox | 30/30 |

@@ -22,6 +22,7 @@ const PY_SOURCES = [
   "docx_engine.py",
   "gates.py",
   "postprocess.py",
+  "xlsx_engine.py",
   "web_entry.py",
 ];
 const TOOL_SOURCES = ["__init__.py", "postprocess_contract.py"];
@@ -121,6 +122,23 @@ async function runInspect(id, bytes, fileName) {
   pyodide.FS.writeFile("/tmp/input.docx", bytes);
   const gated = callPython({ op: "inspect", path: "/tmp/input.docx", file_name: fileName });
   if (!gated.ok) return gated;
+  if (fileName.toLowerCase().endsWith(".xlsx")) {
+    pyodide.runPython(`
+import os
+try:
+    os.remove("/tmp/input.docx")
+except OSError:
+    pass
+`);
+    return {
+      ok: true,
+      parts: gated.parts,
+      paragraphs: 0,
+      status: gated.status,
+      warnings: gated.warnings,
+      heapBytes: heapBytes(),
+    };
+  }
 
   post(progress({ type: "progress", id, phase: "parse" }));
   const { parseDocx } = await loadDocx();
@@ -146,17 +164,33 @@ except OSError:
   };
 }
 
-async function runWrite(id, op, bytes, options) {
+async function runWrite(id, op, bytes, options, fileName) {
   const pyodideRuntime = await initRuntime();
   pyodideRuntime.FS.writeFile("/tmp/source.docx", bytes);
   post(progress({ type: "progress", id, phase: "detect" }));
   const plan = callPython({
     op,
     path: "/tmp/source.docx",
+    file_name: fileName,
     entities: options.entities || [],
     token_map: options.token_map || {},
   });
   if (!plan.ok) return plan;
+  if (plan.final_path) {
+    post(progress({ type: "progress", id, phase: "postprocess" }));
+    const output = pyodideRuntime.FS.readFile(plan.final_path);
+    return {
+      ok: true,
+      bytes: output,
+      tokens: plan.tokens || [],
+      items: plan.items || [],
+      counts: plan.counts || {},
+      hits: plan.hits || 0,
+      warnings: plan.warnings || [],
+      size: output.byteLength,
+      heapBytes: heapBytes(),
+    };
+  }
 
   post(progress({ type: "progress", id, phase: "write" }));
   const { updateMultipleFiles } = await loadDocx();
@@ -191,7 +225,7 @@ function cleanupTemp() {
   try {
     pyodide.runPython(`
 import os
-for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx", "/tmp/input.docx"):
+for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx", "/tmp/final.xlsx", "/tmp/input.docx"):
     try:
         os.remove(_path)
     except OSError:
@@ -224,7 +258,13 @@ async function handleRun(message) {
       return;
     }
     if (op === "redact" || op === "restore") {
-      const result = await runWrite(id, op, bytes, message.options || {});
+      const result = await runWrite(
+        id,
+        op,
+        bytes,
+        message.options || {},
+        String(message.fileName || "upload.docx"),
+      );
       if (!result.ok) {
         post({ type: "error", id, ...result });
         return;
