@@ -30,6 +30,7 @@ let pyodide = null;
 let docxModule = null;
 let opcReady = null;
 let pptxModule = null;
+let pptxWasmReady = false;
 let initPromise = null;
 
 const post = (message, transfer = []) => self.postMessage(message, transfer);
@@ -76,12 +77,14 @@ import lethe.web_entry  # fail at init, not on the first upload
     }
     if (BETTEROFFICE_PACKAGES.includes("pptx")) {
       post({ type: "init-progress", phase: "betteroffice-pptx" });
-      const pptx = await loadPptx();
-      await pptx.initWasm();
+      // Assets are pre-cached, but the 640MB pptx wasm is initialised on the
+      // first pptx run: eager wasm pushed absolute RSS over the 2.5GB gate.
+      await loadPptx();
     }
     post({
       type: "ready",
       protocol: PROTOCOL_VERSION,
+      pptxWasm: pptxWasmReady,
       pyodide: pyodide.version,
       ops: OPS,
     });
@@ -240,8 +243,12 @@ async function runPptxWrite(id, op, bytes, options, fileName) {
   const replacements = Array.isArray(plan.replacements) ? plan.replacements : [];
   if (replacements.length) {
     post(progress({ type: "progress", id, phase: "write" }));
-    const { initWasm, openPresentation } = await loadPptx();
-    await initWasm();
+    const pptx = await loadPptx();
+    if (!pptxWasmReady) {
+      await pptx.initWasm();
+      pptxWasmReady = true;
+    }
+    const { openPresentation } = pptx;
     const deck = openPresentation(new Uint8Array(bytes));
     try {
       for (const replacement of replacements) {
@@ -295,6 +302,7 @@ async function runPptxWrite(id, op, bytes, options, fileName) {
     counts: plan.counts || {},
     hits: plan.hits || 0,
     warnings: plan.warnings || [],
+    pptxWasm: pptxWasmReady,
     size: output.byteLength,
     heapBytes: heapBytes(),
   };

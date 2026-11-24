@@ -93,6 +93,7 @@ ROUNDTRIP = """async ({sample}) => {
     inspected,
     redHits: red.result.hits,
     redWarnings: red.result.warnings,
+    pptxWasm: red.result.pptxWasm,
     redBytes: redB64,
     restoredType: restored.type,
     restoredBytes: restored.type === "result" ? b64(restored.result.bytes) : null,
@@ -131,12 +132,14 @@ def page(built: Path):
 
 
 def test_pptx_worker_roundtrip(page, built: Path) -> None:
-    page.evaluate(START)
+    ready = page.evaluate(START)
+    assert ready["pptxWasm"] is False
     result = page.evaluate(ROUNDTRIP, {"sample": "enhanced.pptx"})
     assert "error" not in result, result
     assert result["inspected"]["type"] == "result"
     assert result["inspected"]["result"]["parts"] == 52
     assert result["redHits"] > 0
+    assert result["pptxWasm"] is True
     assert result["restoreError"] is None, result["restoreError"]
     redacted = base64.b64decode(result["redBytes"])
     restored = base64.b64decode(result["restoredBytes"])
