@@ -46,20 +46,22 @@ requests.  `tests/browser/test_p1_dod.py` runs exactly that sequence.
 
 ### 50MB absolute RSS after deferring pptx wasm
 
-Both BetterOffice modules/wasms are now loaded on first use; assets, Python,
-lxml and cryptography remain eager.  The regression guard checks
-`ready.docxWasm === false`, `ready.pptxWasm === false`, and the worker source
-policy.  Redact-only measurements:
+Both BetterOffice modules/wasms and cryptography are now loaded on first use;
+assets, Python and lxml remain eager.  The regression guard checks
+`ready.cryptoReady === false`, `ready.docxWasm === false`,
+`ready.pptxWasm === false`, and the worker source policy.  A vault op loads the
+cached cryptography wheel and reports `cryptoReady:true`.  Redact-only
+measurements:
 
 | Fixture | Baseline | Peak | Delta | Pyodide heap | Abort |
 |---|---:|---:|---:|---:|---|
-| 49.1 MB / 506 hits | 1,139 MB | **2,648 MB** | 1,509 MB | 79 MB | no |
-| 49.3 MB / 10,101 hits | 1,140 MB | **2,812 MB** | 1,672 MB | 94 MB | no |
+| 49.1 MB / 506 hits | 1,089 MB | **2,590 MB** | 1,501 MB | 73 MB | no |
+| 49.3 MB / 10,101 hits | 1,090 MB | **2,734 MB** | 1,644 MB | 87 MB | no |
 
-This still misses the unchanged **absolute ≤2.5 GB** gate by 148–312 MB.
-Deferring both BetterOffice modules did not lower the ~1.14 GB baseline; the
-remaining increase is lxml+cryptography (the old lxml-only baseline was
-~547 MB).  The next decision is in `docs/p3/offline-dod.md`.
+This still misses the unchanged **absolute ≤2.5 GB** gate by 90–234 MB.
+Cryptography deferral lowered the baseline from ~1.14 GB to ~1.09 GB; the
+remaining baseline is eager lxml/Python/browser.  The next decision is in
+`docs/p3/offline-dod.md`.
 
 ## Merged P2/P3
 

@@ -37,14 +37,14 @@ every 100 ms.
 
 | Fixture | Hits | Redact | Baseline RSS | Peak RSS | Delta | Pyodide heap |
 |---|---:|---:|---:|---:|---:|---:|
-| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 1,139 MB | **2,648 MB** | 1,509 MB | 79 MB |
-| 49.3 MB, 10,101 hits (stress) | 10,101 | 24.3 s | 1,140 MB | **2,812 MB** | 1,672 MB | 94 MB |
+| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 1,089 MB | **2,590 MB** | 1,501 MB | 73 MB |
+| 49.3 MB, 10,101 hits (stress) | 10,101 | 24.0 s | 1,090 MB | **2,734 MB** | 1,644 MB | 87 MB |
 
-**Gate conflict remains:** both BetterOffice modules/wasms are deferred, but
-eager lxml+cryptography keeps the baseline ~1.14 GB; absolute peak is
-2.65–2.81 GB, still 148–312 MB over the unchanged pptx ≤2.5 GB gate.  The next
-lever is deferring cryptography (assets pre-cached; first vault operation
-loads it) or a user-approved gate change.  I have not changed the gate.
+**Gate conflict remains:** cryptography and both BetterOffice modules/wasms
+are deferred, but eager lxml/Python keeps the baseline ~1.09 GB; absolute peak
+is 2.59–2.73 GB, still 90–234 MB over the unchanged pptx ≤2.5 GB gate.  The
+next lever is deferring lxml/Python (assets pre-cached) or a user-approved gate
+change.  I have not changed the gate.
 
 Only slides/notes/core change; media, rels and `[Content_Types].xml` are byte-identical. Leak scan 0;
 `extract_all_text_parts(restored) == source`.
