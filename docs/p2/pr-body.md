@@ -54,7 +54,7 @@ Only slides/notes/core change; media, rels and `[Content_Types].xml` are byte-id
 ```
 pixi run lint             All checks passed
 pixi run typecheck        no issues in 11 source files
-pixi run unit             200 passed, 3 skipped
+pixi run unit             201 passed, 3 skipped
 pixi run guard            9 passed; guard: clean (lethe, web)
 pixi run fidelity-corpus  OK — 90 files; assets 201 files 65.2 MB sha256 OK
 pixi run browser          21 passed + 4 passed
