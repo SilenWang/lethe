@@ -19,6 +19,13 @@ fallback trigger.  BetterOffice xlsx is no longer vendored or precached.
 
 ### What changed
 
+- **Eager runtime preload** — `web/lib/runtime-config.js` is shared by the
+  worker and SW: docx + xlsx formats, BetterOffice docx only, Pyodide
+  lxml+cryptography, all Python modules.  On the first online start the SW
+  pre-caches Pyodide, the wheels, docx and `/py/`; the worker never downloads a
+  format on first use.  Progress/retry UI; offline cold start is the new e2e
+  (`clear cache → online start → offline reload → docx + xlsx`).  xlsx
+  BetterOffice assets are still deleted.
 - **`lethe/xlsx_engine.py`** — part-direct redact/restore.  Shared strings are
   split by cell reference: in-place only when every reference is a hit,
   otherwise a new deduplicated `<si>` is appended and only hit cells are

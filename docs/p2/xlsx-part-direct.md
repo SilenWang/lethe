@@ -113,3 +113,11 @@ The xlsx memory gate is ≤2 GB; 568 MB leaves >3× headroom.  The whole package
 hash changes between source and restore only because the two edited parts are
 recompressed (zip timestamps/compression); every other entry keeps its original
 compressed stream, and the text parts are char-for-char equal.
+
+## Eager preload
+
+The first online start pre-caches Pyodide, lxml/cryptography, the Python
+modules and the BetterOffice docx bundle; xlsx itself stays part-direct.  There
+is no first-format network branch.  The SW/worker contract and the offline e2e
+are documented in `docs/p2/eager-preload.md`; the merged three-format P3 gate
+is in `docs/p3/offline-dod.md`.

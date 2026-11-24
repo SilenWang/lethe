@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -79,6 +80,41 @@ def check_versions() -> list[str]:
     return problems
 
 
+def _js_list(source: str, name: str) -> list[str]:
+    match = re.search(
+        rf"export const {name} = Object\.freeze\(\[(.*?)\]\)", source, re.DOTALL
+    )
+    if not match:
+        return []
+    return re.findall(r'"([^"]+)"', match.group(1))
+
+
+def check_runtime_config() -> list[str]:
+    """The worker and SW share one eager-preload contract."""
+    path = WEB / "lib" / "runtime-config.js"
+    source = path.read_text(encoding="utf-8")
+    formats = _js_list(source, "SUPPORTED_FORMATS")
+    packages = _js_list(source, "BETTEROFFICE_PACKAGES")
+    pys = _js_list(source, "PY_SOURCES")
+    pyodide = _js_list(source, "PYODIDE_PACKAGES")
+    problems: list[str] = []
+    if not formats:
+        problems.append("runtime-config: SUPPORTED_FORMATS is empty")
+    if "xlsx" in packages:
+        problems.append("runtime-config: BetterOffice xlsx must not be preloaded (part-direct)")
+    for package in packages:
+        if not (VENDOR / "betteroffice" / package).is_dir():
+            problems.append(f"runtime-config: BetterOffice package {package} is not vendored")
+    if "xlsx" in formats and "xlsx_engine.py" not in pys:
+        problems.append("runtime-config: xlsx format requires xlsx_engine.py")
+    if "pptx" in formats and "pptx_engine.py" not in pys:
+        problems.append("runtime-config: pptx format requires pptx_engine.py")
+    for package in ("lxml", "cryptography"):
+        if package not in pyodide:
+            problems.append(f"runtime-config: Pyodide package {package} is not eagerly loaded")
+    return problems
+
+
 def build(out: Path) -> None:
     if out.exists():
         shutil.rmtree(out)
@@ -120,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args(argv)
 
-    problems = check_sources() + check_versions()
+    problems = check_sources() + check_versions() + check_runtime_config()
     if problems:
         for problem in problems:
             print(f"web-build: {problem}", file=sys.stderr)

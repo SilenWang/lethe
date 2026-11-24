@@ -66,6 +66,9 @@ def page(built: Path):
         page.set_default_timeout(240_000)
         page.goto(f"{server.base_url}/")
         page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+        page.wait_for_function(
+            "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+        )
         yield page
         browser.close()
 
@@ -113,6 +116,9 @@ def test_docx_roundtrip_review_generate_restore_and_cache_privacy(
     )
     page.reload()
     page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
 
     page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
     page.click("#detect-btn")
@@ -181,6 +187,9 @@ def test_xlsx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
     )
     page.reload()
     page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
 
     page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
     page.wait_for_selector("#upload-degradations:not([hidden])")

@@ -4,6 +4,12 @@
 // Everything is same-origin. There is no CDN import and no micropip: the
 // Pyodide runtime, wheels and BetterOffice bundles are the P0 vendored assets.
 import { OPS, PROTOCOL_VERSION } from "../lib/protocol.js";
+import {
+  BETTEROFFICE_PACKAGES,
+  PYODIDE_PACKAGES,
+  PY_SOURCES,
+  TOOL_SOURCES,
+} from "../lib/runtime-config.js";
 
 const PYODIDE_DIR = new URL("../assets/vendor/pyodide/", self.location.href);
 const PY_SRC_DIR = new URL("../py/lethe/", self.location.href);
@@ -16,17 +22,6 @@ const OPC_ENTRY = new URL(
   "../assets/vendor/betteroffice/docx/dist/wasm-opc.mjs",
   self.location.href,
 );
-const PY_SOURCES = [
-  "__init__.py",
-  "core.py",
-  "docx_engine.py",
-  "gates.py",
-  "postprocess.py",
-  "xlsx_engine.py",
-  "web_entry.py",
-];
-const TOOL_SOURCES = ["__init__.py", "postprocess_contract.py"];
-
 let pyodide = null;
 let docxModule = null;
 let opcReady = null;
@@ -45,7 +40,7 @@ async function initRuntime() {
     post({ type: "init-progress", phase: "pyodide" });
     const { loadPyodide } = await import(new URL("pyodide.mjs", PYODIDE_DIR).href);
     pyodide = await loadPyodide({ indexURL: PYODIDE_DIR.href });
-    await pyodide.loadPackage(["lxml"]);
+    await pyodide.loadPackage(PYODIDE_PACKAGES);
 
     post({ type: "init-progress", phase: "python-src" });
     pyodide.FS.mkdirTree("/lethe");
@@ -70,6 +65,10 @@ if "/" not in sys.path:
     sys.path.insert(0, "/")
 import lethe.web_entry  # fail at init, not on the first upload
 `);
+    if (BETTEROFFICE_PACKAGES.includes("docx")) {
+      post({ type: "init-progress", phase: "betteroffice-docx" });
+      await loadDocx();
+    }
     post({
       type: "ready",
       protocol: PROTOCOL_VERSION,

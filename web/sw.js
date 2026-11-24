@@ -1,12 +1,19 @@
+import {
+  BETTEROFFICE_PACKAGES,
+  PY_SOURCES,
+  TOOL_SOURCES,
+} from "./lib/runtime-config.js";
+
 /*
  * Lethe — service worker for the static P1 app (web/). The frozen v1 NiceGUI
  * app keeps its own worker at lethe/web_static/sw.js; P3 removes that one.
  *
  * PRIVACY BOUNDARY — what may enter CacheStorage:
  *   1. the app shell: exact same-origin paths listed in SHELL_PATHS;
- *   2. the vendored runtimes (Pyodide, BetterOffice, /py/ modules) requested
- *      by the document worker. They are cached lazily, per format: a docx run
- *      caches the Pyodide + BetterOffice docx assets, and nothing else.
+ *   2. the vendored runtimes (Pyodide, lxml/cryptography, the BetterOffice
+ *      packages the worker actually initialises, and /py/ modules). The app
+ *      asks the SW to pre-cache the complete set on the first online start;
+ *      there is no "download this format on first use" branch.
  * Anything else — uploaded documents, extracted text, de-identified or
  * restored files, token maps, IndexedDB data, /api/*, non-GET, ranged reads
  * — is passed straight to the network and never cached. Documents are read
@@ -18,7 +25,7 @@
  */
 'use strict';
 
-var CACHE_VERSION = '3';
+var CACHE_VERSION = '4';
 var APP_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 var SHELL_CACHE = 'lethe-p1-shell-v' + APP_VERSION + '-r' + CACHE_VERSION;
 var RUNTIME_CACHE = 'lethe-p1-runtime-v' + APP_VERSION + '-r' + CACHE_VERSION;
@@ -40,19 +47,70 @@ var SHELL_PATHS = [
   '/static/icons/icon-512-maskable.png',
   '/lib/pyodide_bridge.js',
   '/lib/protocol.js',
+  '/lib/runtime-config.js',
   '/worker/pyodide_worker.js',
   '/locales/en.json',
   '/locales/zh.json'
 ];
 
-// Same-origin asset prefixes cached on demand (never precached wholesale, so
-// pptx bundles are not downloaded until a run actually needs them; xlsx is
-// handled by the Python part-direct engine and needs no BetterOffice bundle).
+// Same-origin asset prefixes the worker may read.  Everything the worker
+// actually needs is pre-cached by PRECACHE below; the fetch handler still
+// cache-fills as a safety net.
 var RUNTIME_PREFIXES = [
   '/assets/vendor/pyodide/',
   '/assets/vendor/betteroffice/',
   '/py/'
 ];
+
+var precachePromise = null;
+
+async function runtimePaths() {
+  var manifest = await (await fetch('/assets/vendor/manifest.json', { cache: 'no-cache' })).json();
+  var paths = manifest.files
+    .map(function (item) { return '/assets/vendor/' + item.path; })
+    .filter(function (path) {
+      if (path.indexOf('/assets/vendor/pyodide/') === 0) return true;
+      return BETTEROFFICE_PACKAGES.some(function (pkg) {
+        return path.indexOf('/assets/vendor/betteroffice/' + pkg + '/') === 0;
+      });
+    });
+  paths.push('/assets/vendor/manifest.json', '/assets/vendor/VERSIONS.json');
+  PY_SOURCES.forEach(function (name) { paths.push('/py/lethe/' + name); });
+  TOOL_SOURCES.forEach(function (name) { paths.push('/py/tools/' + name); });
+  return Array.from(new Set(paths));
+}
+
+function precacheRuntime() {
+  if (precachePromise) return precachePromise;
+  precachePromise = (async function () {
+    var clients = await self.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+    var notify = function (message) {
+      clients.forEach(function (client) { client.postMessage(message); });
+    };
+    try {
+      var paths = await runtimePaths();
+      var cache = await caches.open(RUNTIME_CACHE);
+      var done = 0;
+      for (var path of paths) {
+        var cached = await cache.match(path);
+        if (!cached) {
+          var response = await fetch(path, { cache: 'reload' });
+          if (!response || !response.ok) {
+            throw new Error(path + ': HTTP ' + (response ? response.status : 'no response'));
+          }
+          await cache.put(path, response.clone());
+        }
+        done += 1;
+        notify({ type: 'precache-progress', done: done, total: paths.length, path: path });
+      }
+      notify({ type: 'precache-done', done: done, total: paths.length });
+    } catch (error) {
+      notify({ type: 'precache-error', message: String(error && error.message || error) });
+      throw error;
+    }
+  })().finally(function () { precachePromise = null; });
+  return precachePromise;
+}
 
 function isShell(pathname) {
   return SHELL_PATHS.indexOf(pathname) !== -1;
@@ -118,6 +176,7 @@ self.addEventListener('activate', function (event) {
 
 self.addEventListener('message', function (event) {
   if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
+  if (event.data && event.data.type === 'PRECACHE') event.waitUntil(precacheRuntime());
 });
 
 self.addEventListener('fetch', function (event) {

@@ -219,6 +219,14 @@ export function createBridge(options = {}) {
     failPending(bridgeError(ERROR_CODES.CANCELLED, "bridge disposed"));
   }
 
+  function restart(reason = "manual-retry") {
+    if (state === "disposed") {
+      return Promise.reject(bridgeError(ERROR_CODES.INTERNAL, "bridge disposed"));
+    }
+    recycle(reason);
+    return readyPromise;
+  }
+
   async function heapBytes() {
     await whenReady();
     return new Promise((resolve, reject) => {
@@ -246,6 +254,7 @@ export function createBridge(options = {}) {
     run,
     cancel,
     dispose,
+    restart,
     heapBytes,
     stats: () => ({ ...stats }),
     state: () => state,

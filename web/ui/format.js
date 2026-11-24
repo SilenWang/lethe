@@ -1,3 +1,5 @@
+import { SUPPORTED_FORMATS } from "../lib/runtime-config.js";
+
 // Gate thresholds mirrored from lethe/gates.py for instant UI feedback. The
 // worker's four gates stay authoritative: the UI never decides a file is safe.
 
@@ -28,7 +30,8 @@ export function isXlsx(file) {
 }
 
 export function isSupported(file) {
-  return isDocx(file) || isXlsx(file);
+  const name = String(file?.name || "");
+  return SUPPORTED_FORMATS.some((format) => new RegExp(`\\.${format}$`, "i").test(name));
 }
 
 export function mimeFor(name) {
