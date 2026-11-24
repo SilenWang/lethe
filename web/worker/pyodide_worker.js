@@ -25,6 +25,7 @@ const OPC_ENTRY = new URL(
 let pyodide = null;
 let docxModule = null;
 let opcReady = null;
+let docxWasmReady = false;
 let initPromise = null;
 
 const post = (message, transfer = []) => self.postMessage(message, transfer);
@@ -65,13 +66,10 @@ if "/" not in sys.path:
     sys.path.insert(0, "/")
 import lethe.web_entry  # fail at init, not on the first upload
 `);
-    if (BETTEROFFICE_PACKAGES.includes("docx")) {
-      post({ type: "init-progress", phase: "betteroffice-docx" });
-      await loadDocx();
-    }
     post({
       type: "ready",
       protocol: PROTOCOL_VERSION,
+      docxWasm: docxWasmReady,
       pyodide: pyodide.version,
       ops: OPS,
     });
@@ -135,12 +133,14 @@ except OSError:
       paragraphs: 0,
       status: gated.status,
       warnings: gated.warnings,
+      docxWasm: docxWasmReady,
       heapBytes: heapBytes(),
     };
   }
 
   post(progress({ type: "progress", id, phase: "parse" }));
   const { parseDocx } = await loadDocx();
+  docxWasmReady = true;
   const document = await parseDocx(bytes);
   const paragraphs = countParagraphs(document.package.document.content);
 
@@ -159,6 +159,7 @@ except OSError:
     paragraphs,
     status: gated.status,
     warnings: gated.warnings,
+    docxWasm: true,
     heapBytes: heapBytes(),
   };
 }
@@ -187,12 +188,14 @@ async function runWrite(id, op, bytes, options, fileName) {
       hits: plan.hits || 0,
       warnings: plan.warnings || [],
       size: output.byteLength,
+      docxWasm: docxWasmReady,
       heapBytes: heapBytes(),
     };
   }
 
   post(progress({ type: "progress", id, phase: "write" }));
   const { updateMultipleFiles } = await loadDocx();
+  docxWasmReady = true;
   const library = await updateMultipleFiles(
     bytes.buffer,
     new Map(Object.entries(plan.updates)),
@@ -216,6 +219,7 @@ async function runWrite(id, op, bytes, options, fileName) {
     counts: plan.counts,
     hits: plan.hits,
     size: output.byteLength,
+    docxWasm: true,
     heapBytes: heapBytes(),
   };
 }

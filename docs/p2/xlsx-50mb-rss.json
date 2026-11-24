@@ -4,10 +4,11 @@
   "hits": 250001,
   "redactMs": 32789,
   "redactedBytes": 52026941,
-  "baselineRssMB": 1137.0,
-  "peakRssMB": 1864.6,
-  "deltaRssMB": 727.6,
+  "baselineRssMB": 1146.2,
+  "peakRssMB": 1847.0,
+  "deltaRssMB": 700.8,
   "pyodideHeapMB": 601.6,
   "abort": false,
-  "leaks": 0
+  "leaks": 0,
+  "docxWasm": false
 }

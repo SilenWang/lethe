@@ -24,23 +24,23 @@ queue).  Until then, each P2 branch's offline test covers only its own formats
 
 ## Eager-loading memory decision
 
-The pptx branch now keeps assets/docx eager and defers `pptx.initWasm()` until
-the first pptx run.  Redact-only absolute RSS:
+The pptx branch now defers both BetterOffice modules/wasms; assets, Python,
+lxml and cryptography remain eager.  Redact-only absolute RSS:
 
-* realistic 49.1 MB deck / 506 hits: baseline 1,138 MB, absolute peak
-  **2,671 MB**, delta 1,533 MB, no abort;
-* stress 49.3 MB / 10,101 hits: baseline 1,146 MB, absolute peak
-  **2,744 MB**, delta 1,598 MB.
+* realistic 49.1 MB deck / 506 hits: baseline 1,139 MB, absolute peak
+  **2,648 MB**, delta 1,509 MB, no abort;
+* stress 49.3 MB / 10,101 hits: baseline 1,140 MB, absolute peak
+  **2,812 MB**, delta 1,672 MB.
 
-Deferring pptx wasm saved only ~25–45 MB: the remaining ~0.59 GB baseline
-increase is eager **docx**.  Absolute RSS is still 0.17–0.24 GB over the
-unchanged 2.5 GB gate.  P3 must either defer the docx wasm/module
-initialisation as well (assets still pre-cached; offline still zero-network;
-~0.5 day + re-measure), or the user must approve a different absolute gate.
-Do not silently change the DoD.
+Deferring both BetterOffice modules did not lower the ~1.14 GB baseline; that
+increase is eager lxml+cryptography (old lxml-only baseline ~547 MB).
+Absolute RSS is still 0.15–0.31 GB over the unchanged 2.5 GB gate.  P3 must
+either defer cryptography as well (assets still pre-cached; first vault
+operation loads it; doc/pptx offline unaffected) or get a user-approved gate
+change.  Do not silently change the DoD.
 
-xlsx was re-measured with eager docx: 49.8 MB / 250,001 hits, baseline
-1,137 MB, absolute peak **1,865 MB**, delta 728 MB — under the 2 GB xlsx gate.
+xlsx was re-measured with docx deferred: 49.8 MB / 250,001 hits, baseline
+1,146 MB, absolute peak **1,847 MB**, delta 701 MB — under the 2 GB xlsx gate.
 The merged branch adds only the pptx module import (no wasm) for xlsx; rerun
 the merged matrix in P3.
 

@@ -90,6 +90,21 @@ ROUNDTRIP = """async ({sample}) => {
   };
 }"""
 
+DOCX_PROBE = """async () => {
+  const buf = await (await fetch('/samples/docx-001.docx')).arrayBuffer();
+  window.__w.postMessage({
+    type: "run", id: "d1", op: "redact", fileName: "docx-001.docx",
+    options: {entities: [{canonical: "John Smith", type: "PERSON", aliases: []}]},
+    bytes: buf,
+  }, [buf]);
+  const result = await window.__wait(
+    (m) => m.id === "d1" && (m.type === "result" || m.type === "error"),
+  );
+  return result.type === "result"
+    ? {ok: true, docxWasm: result.result.docxWasm, hits: result.result.hits}
+    : {ok: false, error: result};
+}"""
+
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
@@ -105,6 +120,7 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     shutil.copy2(
         REPO / "corpus" / "seeds" / "xlsx-02-enhanced.xlsx", samples / "sst.xlsx"
     )
+    shutil.copy2(REPO / "corpus" / "docx" / "docx-001.docx", samples / "docx-001.docx")
     return out
 
 
@@ -141,3 +157,12 @@ def test_xlsx_worker_roundtrip(page, sample: str) -> None:
         io.BytesIO(redacted)
     ) as after:
         assert before.namelist() == after.namelist()
+
+
+def test_docx_wasm_is_deferred_until_first_docx_run(page) -> None:
+    ready = page.evaluate(START)
+    assert ready["docxWasm"] is False
+    result = page.evaluate(DOCX_PROBE)
+    assert result["ok"], result
+    assert result["docxWasm"] is True
+    assert result["hits"] > 0
