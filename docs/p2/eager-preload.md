@@ -44,6 +44,18 @@ Acceptance for this branch: clear caches → online start once → completely
 offline reload → redact/restore docx and xlsx; both succeed with zero external
 requests.  `tests/browser/test_p1_dod.py` runs exactly that sequence.
 
+### 50MB absolute RSS (xlsx)
+
+`xlsx-50mb.xlsx` = 49.8 MB, 250,001 hits, docx eager and xlsx part-direct:
+
+| Baseline | Peak | Delta | Pyodide heap | Time | Abort |
+|---:|---:|---:|---:|---:|---|
+| 1,137 MB | **1,865 MB** | 728 MB | 602 MB | 32.8 s | no |
+
+This is under the xlsx absolute ≤2 GB gate (135 MB headroom).  The merged
+branch adds the pptx module import (no wasm) on top; the final merged absolute
+re-run is part of P3.
+
 ## Merged P2/P3
 
 After the xlsx and pptx branches merge, `runtime-config.js` becomes:

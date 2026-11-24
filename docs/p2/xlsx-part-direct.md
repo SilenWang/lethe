@@ -109,7 +109,8 @@ Chromium 157 headless, the real P1 worker (Pyodide + the part-direct engine).
 | Part diff | `xl/sharedStrings.xml` + `docProps/core.xml` only; sheet/media byte-identical |
 | Restored text | `extract_all_text_parts(restored) == source` |
 
-The xlsx memory gate is ≤2 GB; 568 MB leaves >3× headroom.  The whole package
+The xlsx memory gate is **absolute RSS ≤2 GB**: with docx eager the measured
+baseline is 1,137 MB, peak 1,865 MB, delta 728 MB (135 MB headroom).  The whole package
 hash changes between source and restore only because the two edited parts are
 recompressed (zip timestamps/compression); every other entry keeps its original
 compressed stream, and the text parts are char-for-char equal.

@@ -60,14 +60,17 @@ real P1 worker (Pyodide + part-direct engine).
 |---|---:|
 | Redact (250,001 hits) | 32.8 s |
 | Restore (250,001 hits) | 16.8 s |
-| Peak Pyodide `HEAPU8` | **567.8 MB** |
+| Peak Pyodide `HEAPU8` | 601.6 MB |
 | Peak JS heap | 9.5 MB |
+| Baseline RSS | 1,137 MB |
+| Peak absolute RSS | **1,864.6 MB** |
+| RSS delta | 727.6 MB |
 | Abort / OOM | none |
 | Leak scan | 0 |
 | Part diff | `xl/sharedStrings.xml` + `docProps/core.xml` only; sheet/media identical |
 | Restored text | `extract_all_text_parts(restored) == source` |
 
-The xlsx DoD is ≤2 GB; 568 MB leaves >3× headroom.
+The xlsx DoD is **absolute RSS ≤2 GB**; 1,865 MB leaves 135 MB headroom.
 
 ### Verification (local, all green)
 
