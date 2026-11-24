@@ -1,0 +1,25 @@
+{
+  "policy": "assets + docx eager; pptx.initWasm deferred to first pptx run",
+  "realistic": {
+    "inputBytes": 51437965,
+    "hits": 506,
+    "redactMs": 3652,
+    "baselineRssMB": 1138.4,
+    "peakRssMB": 2671.1,
+    "deltaRssMB": 1532.7,
+    "pyodideHeapMB": 78.5,
+    "abort": false
+  },
+  "stress": {
+    "inputBytes": 51645794,
+    "hits": 10101,
+    "redactMs": 24135,
+    "baselineRssMB": 1146.1,
+    "peakRssMB": 2743.9,
+    "deltaRssMB": 1597.8,
+    "pyodideHeapMB": 94.4,
+    "abort": false
+  },
+  "gate": "absolute RSS <= 2500 MB",
+  "result": "still over by 171-244 MB; remaining baseline increase is eager docx"
+}

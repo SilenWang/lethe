@@ -44,6 +44,21 @@ Acceptance for this branch: clear caches → online start once → completely
 offline reload → redact/restore docx and pptx; both succeed with zero external
 requests.  `tests/browser/test_p1_dod.py` runs exactly that sequence.
 
+### 50MB absolute RSS after deferring pptx wasm
+
+`pptx.initWasm()` is now called on the first pptx run, not during worker init.
+The regression guard checks `ready.pptxWasm === false` and the worker source
+policy.  Redact-only measurements:
+
+| Fixture | Baseline | Peak | Delta | Pyodide heap | Abort |
+|---|---:|---:|---:|---:|---|
+| 49.1 MB / 506 hits | 1,138 MB | **2,671 MB** | 1,533 MB | 79 MB | no |
+| 49.3 MB / 10,101 hits | 1,146 MB | **2,744 MB** | 1,598 MB | 94 MB | no |
+
+This still misses the unchanged **absolute ≤2.5 GB** gate by 171–244 MB.
+Deferring pptx wasm saved only ~25–45 MB; the remaining ~0.59 GB baseline
+increase is eager docx.  The next decision is in `docs/p3/offline-dod.md`.
+
 ## Merged P2/P3
 
 After the xlsx and pptx branches merge, `runtime-config.js` becomes:

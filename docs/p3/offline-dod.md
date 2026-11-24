@@ -24,22 +24,19 @@ queue).  Until then, each P2 branch's offline test covers only its own formats
 
 ## Eager-loading memory decision
 
-Measured on the pptx branch with both docx and pptx eagerly initialised:
+Measured on the pptx branch with pptx wasm deferred to the first pptx run:
 
-* realistic 49.1 MB deck / 506 hits: absolute peak RSS **2,717 MB**, delta
-  1,540 MB, no abort;
-* stress 49.3 MB / 10,101 hits: absolute peak **2,768 MB**, delta 1,583 MB.
+* realistic 49.1 MB deck / 506 hits: baseline 1,138 MB, peak **2,671 MB**,
+  delta 1,533 MB, no abort;
+* stress 49.3 MB / 10,101 hits: baseline 1,146 MB, peak **2,744 MB**, delta
+  1,598 MB.
 
-The run-time delta still fits the old ~2.5 GB envelope, but absolute RSS is
-~0.22–0.27 GB over it because the idle worker baseline is now ~1.18 GB (lazy
-was ~0.55 GB).  P3 must pick one and record it:
-
-1. keep full eager wasm initialisation and restate the gate as **RSS delta
-   ≤2.5 GB** (or raise the absolute gate with user approval);
-2. keep asset/module eager preload but defer `pptx.initWasm()` (and, if
-   needed, the docx edit wasm) until the first run of that format; offline is
-   still a cache hit with zero network.  This is likely back near the old
-   2.1 GB peak and costs ~0.5 day plus re-measure.
+Deferring pptx wasm saved only ~25–45 MB; the remaining ~0.59 GB baseline
+increase is eager docx.  Absolute RSS is still 171–244 MB over the unchanged
+2.5 GB gate.  P3 must defer docx wasm/module initialisation as well (assets
+pre-cached, offline still zero-network; ~0.5 day + re-measure) or obtain a
+user-approved gate change.  The xlsx path was re-measured at 1,865 MB absolute,
+under its 2 GB gate.
 
 ## Acceptance wording
 

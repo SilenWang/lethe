@@ -35,17 +35,16 @@ Base: `next/rewrite` · branch: `next/p2-pptx`
 Chromium 157 headless, real worker, peak RSS = Chromium process tree sampled
 every 100 ms.
 
-| Fixture | Hits | Redact | Restore | Baseline RSS | Peak RSS | Delta | Pyodide heap |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 5.8 s | 1,177 MB | **2,717 MB** | 1,540 MB | 79 MB |
-| 49.3 MB, 10,101 hits (stress) | 10,101 | 23.8 s | 22.7 s | 1,185 MB | **2,768 MB** | 1,583 MB | 94 MB |
+| Fixture | Hits | Redact | Baseline RSS | Peak RSS | Delta | Pyodide heap |
+|---|---:|---:|---:|---:|---:|---:|
+| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 1,138 MB | **2,671 MB** | 1,533 MB | 79 MB |
+| 49.3 MB, 10,101 hits (stress) | 10,101 | 24.1 s | 1,146 MB | **2,744 MB** | 1,598 MB | 94 MB |
 
-**Gate conflict (needs P3 decision):** eager docx+pptx raises the idle worker
-baseline to ~1.18 GB.  The run-time delta is ~1.54 GB, but absolute peak RSS is
-2.72–2.77 GB, above the issue's pptx ≤2.5 GB wording.  The old lazy numbers
-were 2.09 / 2.24 GB.  Options: treat the gate as RSS delta, or keep the assets
-and modules eager but defer `pptx.initWasm()` until the first pptx run (no
-network either way).  I have not changed the gate.
+**Gate conflict remains:** `pptx.initWasm()` is deferred to the first pptx run,
+but eager docx keeps the baseline ~1.14 GB; absolute peak is 2.67–2.74 GB,
+still 171–244 MB over the unchanged pptx ≤2.5 GB gate.  The next lever is
+deferring docx wasm too (assets pre-cached; offline works) or a user-approved
+gate change.  I have not changed the gate.
 
 Only slides/notes/core change; media, rels and `[Content_Types].xml` are byte-identical. Leak scan 0;
 `extract_all_text_parts(restored) == source`.
