@@ -48,14 +48,15 @@ part patches).  Peak RSS is the sum of the Chromium process tree, sampled every
 
 | Fixture | Hits | Redact | Baseline RSS | Peak RSS | Delta | Pyodide heap |
 |---|---:|---:|---:|---:|---:|---:|
-| 49.1 MB, 5 slides × 100 paragraphs + 49 MB media | 506 | 3.7 s | 1,138 MB | **2,671 MB** | 1,533 MB | 79 MB |
-| 49.3 MB, 100 slides × 100 paragraphs + 49 MB media (stress) | 10,101 | 24.1 s | 1,146 MB | **2,744 MB** | 1,598 MB | 94 MB |
+| 49.1 MB, 5 slides × 100 paragraphs + 49 MB media | 506 | 3.7 s | 1,139 MB | **2,648 MB** | 1,509 MB | 79 MB |
+| 49.3 MB, 100 slides × 100 paragraphs + 49 MB media (stress) | 10,101 | 24.3 s | 1,140 MB | **2,812 MB** | 1,672 MB | 94 MB |
 
-**Gate conflict remains:** `pptx.initWasm()` is deferred to the first pptx run,
-but eager docx keeps the baseline ~1.14 GB; absolute peak is 2.67–2.74 GB,
-still 171–244 MB over the unchanged pptx ≤2.5 GB gate.  The next lever is
-deferring docx wasm too (assets still pre-cached; offline works) or a
-user-approved gate change.  Do not silently raise the gate.
+**Gate conflict remains:** both BetterOffice modules/wasms are deferred, but
+the eager lxml+cryptography runtime keeps the baseline ~1.14 GB; absolute peak
+is 2.65–2.81 GB, still 148–312 MB over the unchanged pptx ≤2.5 GB gate.  The
+next lever is deferring cryptography (assets still pre-cached; first vault
+operation loads it) or a user-approved gate change.  Do not silently raise the
+gate.
 
 Only slides, notes and `docProps/core.xml` change; `[Content_Types].xml`, rels,
 masters, layouts (on the stress fixture) and the 49 MB media entry are

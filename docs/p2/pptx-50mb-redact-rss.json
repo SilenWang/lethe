@@ -1,12 +1,12 @@
 {
-  "policy": "assets + docx eager; pptx.initWasm deferred to first pptx run",
+  "policy": "assets + Python + lxml/cryptography eager; docx and pptx modules/wasms deferred to first use",
   "realistic": {
     "inputBytes": 51437965,
     "hits": 506,
     "redactMs": 3652,
-    "baselineRssMB": 1138.4,
-    "peakRssMB": 2671.1,
-    "deltaRssMB": 1532.7,
+    "baselineRssMB": 1139.0,
+    "peakRssMB": 2648.4,
+    "deltaRssMB": 1509.4,
     "pyodideHeapMB": 78.5,
     "abort": false
   },
@@ -14,12 +14,12 @@
     "inputBytes": 51645794,
     "hits": 10101,
     "redactMs": 24135,
-    "baselineRssMB": 1146.1,
-    "peakRssMB": 2743.9,
-    "deltaRssMB": 1597.8,
+    "baselineRssMB": 1140.0,
+    "peakRssMB": 2812.2,
+    "deltaRssMB": 1672.3,
     "pyodideHeapMB": 94.4,
     "abort": false
   },
   "gate": "absolute RSS <= 2500 MB",
-  "result": "still over by 171-244 MB; remaining baseline increase is eager docx"
+  "result": "still over by 148-312 MB; deferring both BetterOffice modules did not lower the 1.14GB baseline; the remaining cost is lxml+cryptography (old lxml-only baseline was ~547MB)"
 }

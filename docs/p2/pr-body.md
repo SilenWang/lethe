@@ -37,14 +37,14 @@ every 100 ms.
 
 | Fixture | Hits | Redact | Baseline RSS | Peak RSS | Delta | Pyodide heap |
 |---|---:|---:|---:|---:|---:|---:|
-| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 1,138 MB | **2,671 MB** | 1,533 MB | 79 MB |
-| 49.3 MB, 10,101 hits (stress) | 10,101 | 24.1 s | 1,146 MB | **2,744 MB** | 1,598 MB | 94 MB |
+| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 1,139 MB | **2,648 MB** | 1,509 MB | 79 MB |
+| 49.3 MB, 10,101 hits (stress) | 10,101 | 24.3 s | 1,140 MB | **2,812 MB** | 1,672 MB | 94 MB |
 
-**Gate conflict remains:** `pptx.initWasm()` is deferred to the first pptx run,
-but eager docx keeps the baseline ~1.14 GB; absolute peak is 2.67–2.74 GB,
-still 171–244 MB over the unchanged pptx ≤2.5 GB gate.  The next lever is
-deferring docx wasm too (assets pre-cached; offline works) or a user-approved
-gate change.  I have not changed the gate.
+**Gate conflict remains:** both BetterOffice modules/wasms are deferred, but
+eager lxml+cryptography keeps the baseline ~1.14 GB; absolute peak is
+2.65–2.81 GB, still 148–312 MB over the unchanged pptx ≤2.5 GB gate.  The next
+lever is deferring cryptography (assets pre-cached; first vault operation
+loads it) or a user-approved gate change.  I have not changed the gate.
 
 Only slides/notes/core change; media, rels and `[Content_Types].xml` are byte-identical. Leak scan 0;
 `extract_all_text_parts(restored) == source`.

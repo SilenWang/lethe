@@ -24,19 +24,19 @@ queue).  Until then, each P2 branch's offline test covers only its own formats
 
 ## Eager-loading memory decision
 
-Measured on the pptx branch with pptx wasm deferred to the first pptx run:
+Measured on the pptx branch with both BetterOffice modules/wasms deferred:
 
-* realistic 49.1 MB deck / 506 hits: baseline 1,138 MB, peak **2,671 MB**,
-  delta 1,533 MB, no abort;
-* stress 49.3 MB / 10,101 hits: baseline 1,146 MB, peak **2,744 MB**, delta
-  1,598 MB.
+* realistic 49.1 MB deck / 506 hits: baseline 1,139 MB, peak **2,648 MB**,
+  delta 1,509 MB, no abort;
+* stress 49.3 MB / 10,101 hits: baseline 1,140 MB, peak **2,812 MB**, delta
+  1,672 MB.
 
-Deferring pptx wasm saved only ~25–45 MB; the remaining ~0.59 GB baseline
-increase is eager docx.  Absolute RSS is still 171–244 MB over the unchanged
-2.5 GB gate.  P3 must defer docx wasm/module initialisation as well (assets
-pre-cached, offline still zero-network; ~0.5 day + re-measure) or obtain a
-user-approved gate change.  The xlsx path was re-measured at 1,865 MB absolute,
-under its 2 GB gate.
+Deferring both BetterOffice modules did not lower the ~1.14 GB baseline; the
+remaining ~0.59 GB increase is lxml+cryptography (old lxml-only baseline
+~547 MB).  Absolute RSS is still 148–312 MB over the unchanged 2.5 GB gate.
+P3 must defer cryptography as well (assets pre-cached; first vault operation
+loads it; doc/pptx offline unaffected) or obtain a user-approved gate change.
+The xlsx path was re-measured at 1,865 MB absolute, under its 2 GB gate.
 
 ## Acceptance wording
 

@@ -46,18 +46,20 @@ requests.  `tests/browser/test_p1_dod.py` runs exactly that sequence.
 
 ### 50MB absolute RSS after deferring pptx wasm
 
-`pptx.initWasm()` is now called on the first pptx run, not during worker init.
-The regression guard checks `ready.pptxWasm === false` and the worker source
+Both BetterOffice modules/wasms are now loaded on first use; assets, Python,
+lxml and cryptography remain eager.  The regression guard checks
+`ready.docxWasm === false`, `ready.pptxWasm === false`, and the worker source
 policy.  Redact-only measurements:
 
 | Fixture | Baseline | Peak | Delta | Pyodide heap | Abort |
 |---|---:|---:|---:|---:|---|
-| 49.1 MB / 506 hits | 1,138 MB | **2,671 MB** | 1,533 MB | 79 MB | no |
-| 49.3 MB / 10,101 hits | 1,146 MB | **2,744 MB** | 1,598 MB | 94 MB | no |
+| 49.1 MB / 506 hits | 1,139 MB | **2,648 MB** | 1,509 MB | 79 MB | no |
+| 49.3 MB / 10,101 hits | 1,140 MB | **2,812 MB** | 1,672 MB | 94 MB | no |
 
-This still misses the unchanged **absolute ≤2.5 GB** gate by 171–244 MB.
-Deferring pptx wasm saved only ~25–45 MB; the remaining ~0.59 GB baseline
-increase is eager docx.  The next decision is in `docs/p3/offline-dod.md`.
+This still misses the unchanged **absolute ≤2.5 GB** gate by 148–312 MB.
+Deferring both BetterOffice modules did not lower the ~1.14 GB baseline; the
+remaining increase is lxml+cryptography (the old lxml-only baseline was
+~547 MB).  The next decision is in `docs/p3/offline-dod.md`.
 
 ## Merged P2/P3
 

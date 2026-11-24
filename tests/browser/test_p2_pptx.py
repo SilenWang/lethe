@@ -101,6 +101,21 @@ ROUNDTRIP = """async ({sample}) => {
   };
 }"""
 
+DOCX_PROBE = """async () => {
+  const buf = await (await fetch('/samples/docx-001.docx')).arrayBuffer();
+  window.__w.postMessage({
+    type: "run", id: "d1", op: "redact", fileName: "docx-001.docx",
+    options: {entities: [{canonical: "John Smith", type: "PERSON", aliases: []}]},
+    bytes: buf,
+  }, [buf]);
+  const result = await window.__wait(
+    (m) => m.id === "d1" && (m.type === "result" || m.type === "error"),
+  );
+  return result.type === "result"
+    ? {ok: true, docxWasm: result.result.docxWasm, hits: result.result.hits}
+    : {ok: false, error: result};
+}"""
+
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
@@ -115,6 +130,7 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     shutil.copy2(
         REPO / "corpus" / "seeds" / "pptx-02-enhanced.pptx", samples / "enhanced.pptx"
     )
+    shutil.copy2(REPO / "corpus" / "docx" / "docx-001.docx", samples / "docx-001.docx")
     return out
 
 
@@ -133,7 +149,12 @@ def page(built: Path):
 
 def test_pptx_worker_roundtrip(page, built: Path) -> None:
     ready = page.evaluate(START)
+    assert ready["docxWasm"] is False
     assert ready["pptxWasm"] is False
+    docx = page.evaluate(DOCX_PROBE)
+    assert docx["ok"], docx
+    assert docx["docxWasm"] is True
+    assert docx["hits"] > 0
     result = page.evaluate(ROUNDTRIP, {"sample": "enhanced.pptx"})
     assert "error" not in result, result
     assert result["inspected"]["type"] == "result"
