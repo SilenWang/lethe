@@ -24,19 +24,16 @@ queue).  Until then, each P2 branch's offline test covers only its own formats
 
 ## Eager-loading memory decision
 
-Measured on the pptx branch with cryptography and both BetterOffice
-modules/wasms deferred:
+The pptx branch is now part-direct; both 50 MB fixtures pass:
 
-* realistic 49.1 MB deck / 506 hits: baseline 1,089 MB, peak **2,590 MB**,
-  delta 1,501 MB, no abort;
-* stress 49.3 MB / 10,101 hits: baseline 1,090 MB, peak **2,734 MB**, delta
-  1,644 MB.
+* realistic 49.1 MB deck / 506 hits: baseline 1,098 MB, peak **1,542 MB**,
+  delta 444 MB, no abort;
+* stress 49.3 MB / 10,101 hits: baseline 1,098 MB, peak **1,620 MB**, delta
+  521 MB.
 
-Deferring cryptography lowered the baseline to ~1.09 GB; the remaining
-baseline is eager lxml/Python/browser.  Absolute RSS is still 90–234 MB over
-the unchanged 2.5 GB gate.  P3 must defer lxml/Python as well (assets
-pre-cached) or obtain a user-approved gate change.
-The xlsx path was re-measured at 1,865 MB absolute, under its 2 GB gate.
+Both have 880–959 MB headroom.  The xlsx branch is at 1,792 MB absolute, under
+its 2 GB gate.  P3 only needs the merged three-format matrix/e2e and release
+docs; no new memory lever is required.
 
 ## Acceptance wording
 

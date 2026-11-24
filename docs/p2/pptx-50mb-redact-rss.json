@@ -1,25 +1,27 @@
 {
-  "policy": "assets + Python + lxml eager; cryptography and both BetterOffice modules/wasms deferred",
+  "policy": "pptx part-direct with lxml; BetterOffice pptx is not used",
   "realistic": {
     "inputBytes": 51437965,
     "hits": 506,
-    "redactMs": 3652,
-    "baselineRssMB": 1089.4,
-    "peakRssMB": 2590.4,
-    "deltaRssMB": 1501.0,
-    "pyodideHeapMB": 78.5,
+    "redactMs": 1100,
+    "baselineRssMB": 1097.5,
+    "processPeakRssMB": 1541.5,
+    "processDeltaMB": 444.0,
+    "pyodideHeapMB": 390.5,
+    "pptxPartDirect": true,
     "abort": false
   },
   "stress": {
     "inputBytes": 51645794,
     "hits": 10101,
-    "redactMs": 24135,
-    "baselineRssMB": 1090.1,
-    "peakRssMB": 2733.7,
-    "deltaRssMB": 1643.6,
-    "pyodideHeapMB": 94.4,
+    "redactMs": 5556,
+    "baselineRssMB": 1098.3,
+    "processPeakRssMB": 1619.6,
+    "processDeltaMB": 521.3,
+    "pyodideHeapMB": 393.0,
+    "pptxPartDirect": true,
     "abort": false
   },
   "gate": "absolute RSS <= 2500 MB",
-  "result": "still over by 90-234 MB; cryptography deferral lowered baseline to ~1.09GB; the remaining baseline is eager lxml/Python/browser"
+  "result": "pass; headroom 958.5 / 880.4 MB"
 }

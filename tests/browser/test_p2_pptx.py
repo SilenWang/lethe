@@ -93,7 +93,7 @@ ROUNDTRIP = """async ({sample}) => {
     inspected,
     redHits: red.result.hits,
     redWarnings: red.result.warnings,
-    pptxWasm: red.result.pptxWasm,
+    pptxPartDirect: red.result.pptxPartDirect,
     redBytes: redB64,
     restoredType: restored.type,
     restoredBytes: restored.type === "result" ? b64(restored.result.bytes) : null,
@@ -161,7 +161,7 @@ def test_pptx_worker_roundtrip(page, built: Path) -> None:
     ready = page.evaluate(START)
     assert ready["cryptoReady"] is False
     assert ready["docxWasm"] is False
-    assert ready["pptxWasm"] is False
+    assert ready["pptxPartDirect"] is True
     docx = page.evaluate(DOCX_PROBE)
     assert docx["ok"], docx
     assert docx["docxWasm"] is True
@@ -174,7 +174,7 @@ def test_pptx_worker_roundtrip(page, built: Path) -> None:
     assert result["inspected"]["type"] == "result"
     assert result["inspected"]["result"]["parts"] == 52
     assert result["redHits"] > 0
-    assert result["pptxWasm"] is True
+    assert result["pptxPartDirect"] is True
     assert result["restoreError"] is None, result["restoreError"]
     redacted = base64.b64decode(result["redBytes"])
     restored = base64.b64decode(result["restoredBytes"])

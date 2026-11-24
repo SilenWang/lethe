@@ -1,18 +1,11 @@
-"""PPTX redaction: BetterOffice for slide text, part patches for its gaps.
+"""PPTX text redaction without a presentation/object model.
 
-BetterOffice 0.5.1 rewrites slide text (including text boxes and tables) and
-leaves every other part byte-identical.  It has no API for:
-
-* speaker notes (``ppt/notesSlides/*``);
-* master / layout text (``ppt/slideMasters/*``, ``ppt/slideLayouts/*``);
-* existing comment bodies and authors (``ppt/comments/*``,
-  ``ppt/commentAuthors.xml``);
-* document properties (``docProps/*``).
-
-Those four are patched directly in Python.  The final package always starts
-from the source archive (``postprocess``): only slide parts the library
-actually changed are kept, every other part is copied as its original
-compressed stream, then the gap patches are applied.
+Every owned part is edited in place with lxml: slides (including tables and
+text boxes), speaker notes, masters/layouts, legacy comments and authors,
+custom XML and document properties.  The package is then rebuilt from the
+source archive; unchanged entries keep their original compressed stream
+(the P0 C1/C2/C3 contract).  BetterOffice is not used for pptx, so a 50 MB
+deck never builds the 640 MB presentation object graph.
 """
 
 from __future__ import annotations
@@ -28,7 +21,6 @@ from lethe import core
 from lethe.postprocess import (
     PostprocessError,
     _rebuild,
-    postprocess,
 )
 from tools.postprocess_contract import (
     assert_source_priority,
@@ -67,8 +59,8 @@ def parser() -> etree.XMLParser:
 
 @dataclass
 class PptxResult:
+    output: bytes | None = None
     updates: dict[str, str] = field(default_factory=dict)
-    replacements: list[dict[str, str]] = field(default_factory=list)
     tokens: list[str] = field(default_factory=list)
     items: list[dict[str, object]] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
@@ -305,41 +297,6 @@ def _warnings(raw: bytes) -> list[str]:
     return warnings
 
 
-def _slide_replacements(
-    raw: bytes, items: list[core.Item], replace
-) -> tuple[list[dict[str, str]], dict[str, int], set[str]]:
-    slide_text: list[str] = []
-    counts: dict[str, int] = {}
-    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-        for part in archive.namelist():
-            if not SLIDE.match(part):
-                continue
-            text = _part_text(part, archive.read(part))
-            if text:
-                slide_text.append(text)
-                _, hits = replace(text)
-                if hits:
-                    counts[part] = hits
-    haystack = "\n".join(slide_text)
-    # findText is exact/case-sensitive.  Collect the actual casing from the
-    # slide text so "JOHN SMITH" is not missed just because the dictionary
-    # stores "John Smith"; the same values become leak-scan surfaces.
-    pairs: dict[str, str] = {}
-    for item in items:
-        if not item.include or not item.token:
-            continue
-        for surface in item.surfaces:
-            if not surface:
-                continue
-            for match in core._whole_word_regex(surface).finditer(haystack):
-                pairs.setdefault(match.group(0), item.token)
-    replacements = [
-        {"find": surface, "token": token}
-        for surface, token in sorted(pairs.items(), key=lambda pair: len(pair[0]), reverse=True)
-    ]
-    return replacements, counts, set(pairs)
-
-
 def redact(raw: bytes, entities: list[core.Entity]) -> PptxResult:
     corpus = "\x00".join(
         text.replace("\n", "\x00") for text in extract_all_text_parts(raw).values()
@@ -374,16 +331,17 @@ def redact(raw: bytes, entities: list[core.Entity]) -> PptxResult:
     )
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         for part in _text_parts(archive.namelist()):
-            if SLIDE.match(part):
-                continue
             data = archive.read(part)
             new, hits = _apply_part(part, data, replace)
             if new is not None:
                 result.updates[part] = new.decode("utf-8")
                 result.counts[part] = result.counts.get(part, 0) + hits
-    result.replacements, slide_counts, actual = _slide_replacements(raw, items, replace)
-    result.surfaces = sorted(set(result.surfaces) | actual)
-    result.counts.update(slide_counts)
+    result.output = _repack(
+        raw, {name: value.encode("utf-8") for name, value in result.updates.items()}
+    )
+    leaks = scan_leaks(result.output, result.surfaces)
+    if leaks:
+        raise PptxLeakError("leaks remain: " + ", ".join(leaks[:5]))
     return result
 
 
@@ -397,12 +355,9 @@ def restore(raw: bytes, token_map: dict[str, str]) -> PptxResult:
             if new is not None:
                 result.updates[part] = new.decode("utf-8")
                 result.counts[part] = result.counts.get(part, 0) + hits
-    result.replacements = [
-        {"find": token, "token": real}
-        for token, real in token_map.items()
-        if token
-    ]
-    result.replacements.sort(key=lambda pair: len(pair["find"]), reverse=True)
+    result.output = _repack(
+        raw, {name: value.encode("utf-8") for name, value in result.updates.items()}
+    )
     return result
 
 
@@ -429,52 +384,3 @@ def _repack(source: bytes, replacements: dict[str, bytes]) -> bytes:
     return rebuilt
 
 
-def _fallback_slides(
-    source: bytes, final: bytes, replacements: list[dict[str, str]]
-) -> bytes:
-    """Patch any slide the library missed (case mismatch, unusual run split)."""
-    pairs = [(item["find"], item["token"]) for item in replacements if item.get("find")]
-    if not pairs:
-        return final
-    pairs.sort(key=lambda pair: len(pair[0]), reverse=True)
-
-    def replace(text: str) -> tuple[str, int]:
-        hits = 0
-        for find, token in pairs:
-            if find in text:
-                hits += text.count(find)
-                text = text.replace(find, token)
-        return text, hits
-
-    leaks = scan_leaks(final, [item["find"] for item in replacements])
-    leaked = {line.split(":")[0] for line in leaks if line.startswith("ppt/slides/")}
-    if not leaked:
-        return final
-    updates: dict[str, bytes] = {}
-    with zipfile.ZipFile(io.BytesIO(source)) as archive:
-        for part in leaked:
-            new, _hits = _apply_text_part(archive.read(part), replace)
-            if new is not None:
-                updates[part] = new
-    return _repack(final, updates)
-
-
-def finish(
-    source: bytes,
-    library: bytes,
-    tokens: list[str],
-    updates: dict[str, str],
-    replacements: list[dict[str, str]] | None = None,
-    surfaces: list[str] | None = None,
-) -> bytes:
-    """Source-first repack, then apply the four gap-part patches."""
-    final = postprocess(source, library, tokens)
-    patched = {name: value.encode("utf-8") for name, value in updates.items()}
-    final = _repack(final, patched)
-    if replacements:
-        final = _fallback_slides(source, final, replacements)
-    if surfaces:
-        leaks = scan_leaks(final, surfaces)
-        if leaks:
-            raise PptxLeakError("leaks remain: " + ", ".join(leaks[:5]))
-    return final

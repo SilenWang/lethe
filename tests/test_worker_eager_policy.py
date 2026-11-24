@@ -13,21 +13,25 @@ def _function_body(source: str, start_name: str, end_name: str) -> str:
     return source[start:end]
 
 
-def test_pptx_wasm_is_deferred_until_first_pptx_run() -> None:
+def test_pptx_is_part_direct_and_has_no_betteroffice_path() -> None:
     source = (REPO / "web" / "worker" / "pyodide_worker.js").read_text(encoding="utf-8")
     init = _function_body(source, "async function initRuntime", "async function loadDocx")
-    # Python and the wheels are eager; both BetterOffice modules/wasms are not.
+    # docx stays lazy; pptx has no BetterOffice path at all.
     assert "loadDocx()" not in init
-    assert "loadPptx()" not in init
     assert "cryptography" not in init
-    assert "pptx.initWasm" not in init
-    crypto = _function_body(source, "async function ensureCrypto", "async function loadPptx")
+    assert "loadPptx" not in source
+    assert "applyEdits" not in source
+    assert "openPresentation" not in source
+    assert "PPTX_ENTRY" not in source
+    crypto = _function_body(source, "async function ensureCrypto", "function countParagraphs")
     assert "loadPackage(DEFERRED_PYODIDE_PACKAGES)" in crypto
     assert "cryptoReady" in source
     assert 'message?.type === "vault"' in source
+    assert "pptxPartDirect: true" in source
     inspect = _function_body(source, "async function runInspect", "async function runWrite")
     assert "loadDocx()" in inspect
     write = _function_body(source, "async function runWrite", "async function runPptxWrite")
     assert "loadDocx()" in write
     run = _function_body(source, "async function runPptxWrite", "function cleanupTemp")
-    assert "pptx.initWasm" in run
+    assert "final_path" in run
+    assert "loadPptx" not in run

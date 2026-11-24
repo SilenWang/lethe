@@ -1,16 +1,12 @@
 {
-  "ok": true,
+  "fixture": "pptx-50mb-realistic.pptx",
   "inputBytes": 51437965,
-  "redMs": 3673,
-  "restoreMs": 5833,
-  "redHits": 506,
-  "redSize": 51438030,
-  "resHits": 506,
-  "resSize": 51437965,
-  "maxHeapMB": 78.5,
-  "maxJsMB": 51.2,
-  "warnings": [],
-  "baselineRssMB": 1176.5,
-  "maxRssMB": 2717.1,
-  "rssDeltaMB": 1540.5
+  "hits": 506,
+  "redactMs": 1100,
+  "baselineRssMB": 1097.5,
+  "processPeakRssMB": 1541.5,
+  "processDeltaMB": 444.0,
+  "pyodideHeapMB": 390.5,
+  "pptxPartDirect": true,
+  "abort": false
 }

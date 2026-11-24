@@ -5,7 +5,6 @@
 // Pyodide runtime, wheels and BetterOffice bundles are the P0 vendored assets.
 import { OPS, PROTOCOL_VERSION } from "../lib/protocol.js";
 import {
-  BETTEROFFICE_PACKAGES,
   DEFERRED_PYODIDE_PACKAGES,
   PYODIDE_PACKAGES,
   PY_SOURCES,
@@ -23,16 +22,10 @@ const OPC_ENTRY = new URL(
   "../assets/vendor/betteroffice/docx/dist/wasm-opc.mjs",
   self.location.href,
 );
-const PPTX_ENTRY = new URL(
-  "../assets/vendor/betteroffice/pptx/dist/index.js",
-  self.location.href,
-);
 let pyodide = null;
 let docxModule = null;
 let opcReady = null;
 let docxWasmReady = false;
-let pptxModule = null;
-let pptxWasmReady = false;
 let cryptoReady = false;
 let initPromise = null;
 
@@ -79,7 +72,7 @@ import lethe.web_entry  # fail at init, not on the first upload
       protocol: PROTOCOL_VERSION,
       cryptoReady: cryptoReady,
       docxWasm: docxWasmReady,
-      pptxWasm: pptxWasmReady,
+      pptxPartDirect: true,
       pyodide: pyodide.version,
       ops: OPS,
     });
@@ -109,11 +102,6 @@ async function ensureCrypto() {
   if (cryptoReady) return;
   await pyodide.loadPackage(DEFERRED_PYODIDE_PACKAGES);
   cryptoReady = true;
-}
-
-async function loadPptx() {
-  if (!pptxModule) pptxModule = await import(PPTX_ENTRY.href);
-  return pptxModule;
 }
 
 function countParagraphs(node) {
@@ -245,61 +233,8 @@ async function runPptxWrite(id, op, bytes, options, fileName) {
   });
   if (!plan.ok) return plan;
 
-  let library = bytes;
-  const replacements = Array.isArray(plan.replacements) ? plan.replacements : [];
-  if (replacements.length) {
-    post(progress({ type: "progress", id, phase: "write" }));
-    const pptx = await loadPptx();
-    if (!pptxWasmReady) {
-      await pptx.initWasm();
-      pptxWasmReady = true;
-    }
-    const { openPresentation } = pptx;
-    const deck = openPresentation(new Uint8Array(bytes));
-    try {
-      for (const replacement of replacements) {
-        // The library refuses more than 128 steps per batch.  Re-run findText
-        // after each batch: replaced matches become tokens and drop out.
-        for (;;) {
-          const found = deck.findText({ text: String(replacement.find), limit: 10000 });
-          if (!found.ok || found.matches.length === 0) break;
-          const steps = found.matches.slice(0, 128).map((match) => ({
-            op: "replaceText",
-            target: { kind: "range", ...match.range },
-            text: String(replacement.token),
-          }));
-          const applied = deck.applyEdits({ expectVersion: deck.version(), steps });
-          if (!applied.ok) {
-            return {
-              ok: false,
-              code: "INTERNAL",
-              message: "pptx applyEdits refused",
-              detail: applied,
-            };
-          }
-          if (found.matches.length <= 128) break;
-        }
-      }
-      // bare-save-ok: library intermediate; postprocess() is the only final exit
-      library = deck.save();
-    } finally {
-      deck.dispose();
-    }
-  }
-  pyodideRuntime.FS.writeFile("/tmp/library.pptx", new Uint8Array(library));
-
   post(progress({ type: "progress", id, phase: "postprocess" }));
-  const done = callPython({
-    op: "finish_pptx",
-    source: "/tmp/source.pptx",
-    library: "/tmp/library.pptx",
-    tokens: plan.tokens || [],
-    updates: plan.updates || {},
-    replacements,
-    surfaces: plan.surfaces || [],
-  });
-  if (!done.ok) return done;
-  const output = pyodideRuntime.FS.readFile("/tmp/final.pptx");
+  const output = pyodideRuntime.FS.readFile(plan.final_path);
   return {
     ok: true,
     bytes: output,
@@ -308,7 +243,7 @@ async function runPptxWrite(id, op, bytes, options, fileName) {
     counts: plan.counts || {},
     hits: plan.hits || 0,
     warnings: plan.warnings || [],
-    pptxWasm: pptxWasmReady,
+    pptxPartDirect: true,
     size: output.byteLength,
     heapBytes: heapBytes(),
   };

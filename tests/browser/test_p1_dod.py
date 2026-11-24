@@ -215,7 +215,7 @@ def test_offline_install_and_docx_pptx_roundtrip(server: StaticServer, built: Pa
                     if (
                         paths.includes("/assets/vendor/pyodide/pyodide.asm.wasm") &&
                         paths.includes("/assets/vendor/betteroffice/docx/dist/docx/index.mjs") &&
-                        paths.includes("/assets/vendor/betteroffice/pptx/dist/index.js")
+                        paths.includes("/py/lethe/pptx_engine.py")
                     ) return true;
                 }
                 return false;

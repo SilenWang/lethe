@@ -1,52 +1,41 @@
-## VYB-2676 P2 / pptx: slide replaceText + gap patches
+## VYB-2676 P2 / pptx: part-direct redaction + eager offline runtime
 
 Base: `next/rewrite` · branch: `next/p2-pptx`
 
 ### What changed
 
-- **Eager runtime preload** — `web/lib/runtime-config.js` is shared by the
-  worker and SW: docx + pptx, BetterOffice docx+pptx, Pyodide
-  lxml+cryptography, all Python modules.  The first online start pre-caches the
-  complete set and initialises both libraries; no format is downloaded on
-  first use.  Progress/retry UI; offline e2e is `clear cache → online start →
-  offline reload → docx + pptx`.  The merged three-format gate is in
-  `docs/p3/offline-dod.md`.
-- **`lethe/pptx_engine.py`** — BetterOffice `findText` + `replaceText` for slide
-  text (text boxes and tables included), looping in 128-step batches because
-  the library caps a batch at 128 steps.
-- **Four gap patches in Python** — speaker notes, master/layout text, existing
-  comment bodies and `commentAuthors.xml` names, and
-  `docProps/core.xml|app.xml|custom.xml`.  These are exactly the containers the
-  library's API cannot edit.
-- **Source-first finish** — `postprocess()` keeps only library-changed slide
-  parts and raw-copies every other entry; gap patches are then applied with the
-  same C1/C2/C3-checked repack.  A final leak scan covers slides, notes,
-  masters, layouts, comments, authors and properties and aborts on any leak.
-- **Split runs and case** — notes/master/layout paragraphs are replaced across
-  `a:t` runs; the slide replacement list is built from the actual casing found
-  in the deck (`JOHN SMITH` is its own entry and leak-scan surface).
-- **Worker/UI** — `.pptx` routes through the Python plan + pptx library; inspect
-  skips `parseDocx`; the UI accepts `.docx/.pptx`, keeps the suffix on
-  downloads and shows the pptx degradation list (chart caches, SmartArt, OLE,
-  media text).
+- **PPTX is part-direct** — `lethe/pptx_engine.py` edits every owned part with
+  lxml: slides (text boxes, tables, hidden slides), speaker notes,
+  masters/layouts, legacy comments + authors, customXml and
+  `docProps/core|app|custom`.  BetterOffice pptx is not imported or
+  initialised; the 50 MB path never builds the presentation object graph.
+- **Source-first repack** — unchanged entries keep their original compressed
+  stream, edited parts go through the P0 C1/C2/C3 assertions, and a final leak
+  scan covers every container above.
+- **Split runs** — paragraphs are replaced across `a:t` runs; a name split
+  across runs collapses that paragraph to one run.
+- **Eager offline runtime** — assets, Python and lxml are eager; cryptography
+  loads on the first vault op and docx on the first docx.  The SW pre-caches
+  Pyodide, the wheels, the Python sources and the BetterOffice docx bundle
+  (pptx has no BetterOffice asset).  Progress/retry UI; offline e2e is
+  `clear cache → online start → offline reload → docx + pptx`.
+- **Worker/UI** — `.pptx` routes through the Python final path; inspect skips
+  `parseDocx`; the UI accepts `.docx/.pptx`, keeps the suffix on downloads and
+  shows the pptx degradation list (chart caches, SmartArt, OLE, media text).
 
 ### 50 MB measurement
 
 Chromium 157 headless, real worker, peak RSS = Chromium process tree sampled
-every 100 ms.
+every 100 ms; no BetterOffice pptx.
 
 | Fixture | Hits | Redact | Baseline RSS | Peak RSS | Delta | Pyodide heap |
 |---|---:|---:|---:|---:|---:|---:|
-| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 1,089 MB | **2,590 MB** | 1,501 MB | 73 MB |
-| 49.3 MB, 10,101 hits (stress) | 10,101 | 24.0 s | 1,090 MB | **2,734 MB** | 1,644 MB | 87 MB |
+| 49.1 MB, 506 hits + 49 MB media | 506 | **1.1 s** | 1,098 MB | **1,542 MB** | 444 MB | 391 MB |
+| 49.3 MB, 10,101 hits (stress) | 10,101 | **5.6 s** | 1,098 MB | **1,620 MB** | 521 MB | 393 MB |
 
-**Gate conflict remains:** cryptography and both BetterOffice modules/wasms
-are deferred, but eager lxml/Python keeps the baseline ~1.09 GB; absolute peak
-is 2.59–2.73 GB, still 90–234 MB over the unchanged pptx ≤2.5 GB gate.  The
-next lever is deferring lxml/Python (assets pre-cached) or a user-approved gate
-change.  I have not changed the gate.
-
-Only slides/notes/core change; media, rels and `[Content_Types].xml` are byte-identical. Leak scan 0;
+Both pass the unchanged pptx **absolute ≤2.5 GB** gate with 880–959 MB
+headroom.  Only slides/notes/core/etc. change; media, rels and
+`[Content_Types].xml` are byte-identical.  Leak scan 0;
 `extract_all_text_parts(restored) == source`.
 
 ### Verification (local, all green)

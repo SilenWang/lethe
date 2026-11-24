@@ -1,4 +1,4 @@
-"""PPTX engine: slide library path + notes/master/layout/comment/props gaps."""
+"""PPTX engine: all text parts are edited directly (no presentation model)."""
 
 from __future__ import annotations
 
@@ -27,38 +27,6 @@ def _zip(parts: dict[str, bytes]) -> bytes:
     return buffer.getvalue()
 
 
-def _replacer(replacements: list[dict[str, str]]):
-    pairs = sorted(
-        ((item["find"], item["token"]) for item in replacements if item.get("find")),
-        key=lambda pair: len(pair[0]),
-        reverse=True,
-    )
-
-    def replace(text: str) -> tuple[str, int]:
-        hits = 0
-        for find, token in pairs:
-            if find in text:
-                hits += text.count(find)
-                text = text.replace(find, token)
-        return text, hits
-
-    return replace
-
-
-def _library(raw: bytes, replacements: list[dict[str, str]]) -> bytes:
-    """Stand-in for BetterOffice: rewrite only the slide parts."""
-    if not replacements:
-        return raw
-    replace = _replacer(replacements)
-    parts = _parts(raw)
-    for name in parts:
-        if name.startswith("ppt/slides/"):
-            new, hits = pptx_engine._apply_text_part(parts[name], replace)
-            if new is not None and hits:
-                parts[name] = new
-    return _zip(parts)
-
-
 def test_extract_covers_every_gap_part() -> None:
     parts = pptx_engine.extract_all_text_parts(SEED.read_bytes())
     for name in (
@@ -74,10 +42,13 @@ def test_extract_covers_every_gap_part() -> None:
     assert "John Smith" in "".join(parts.values())
 
 
-def test_gap_parts_are_patched_and_slides_are_left_to_the_library() -> None:
+def test_all_text_parts_are_patched() -> None:
     result = pptx_engine.redact(SEED.read_bytes(), [JOHN, ALICE])
     assert result.hits > 0
-    assert set(result.updates) == {
+    assert set(result.updates) >= {
+        "ppt/slides/slide2.xml",
+        "ppt/slides/slide3.xml",
+        "ppt/slides/slide4.xml",
         "docProps/core.xml",
         "ppt/commentAuthors.xml",
         "ppt/comments/comment1.xml",
@@ -85,7 +56,6 @@ def test_gap_parts_are_patched_and_slides_are_left_to_the_library() -> None:
         "ppt/slideLayouts/slideLayout1.xml",
         "ppt/slideMasters/slideMaster1.xml",
     }
-    assert all(not name.startswith("ppt/slides/") for name in result.updates)
     for name, xml in result.updates.items():
         assert "[PERSON_" in xml, name
     assert "John Smith" not in result.updates["ppt/notesSlides/notesSlide1.xml"]
@@ -93,18 +63,11 @@ def test_gap_parts_are_patched_and_slides_are_left_to_the_library() -> None:
     assert "Alice Chen" not in result.updates["ppt/commentAuthors.xml"]
 
 
-def test_finish_is_leak_free_and_only_touches_expected_parts() -> None:
+def test_output_is_leak_free_and_only_touches_expected_parts() -> None:
     source = SEED.read_bytes()
     result = pptx_engine.redact(source, [JOHN, ALICE])
-    library = _library(source, result.replacements)
-    final = pptx_engine.finish(
-        source,
-        library,
-        result.tokens,
-        result.updates,
-        result.replacements,
-        result.surfaces,
-    )
+    final = result.output
+    assert final is not None
     assert pptx_engine.scan_leaks(final, result.surfaces) == []
     before, after = _parts(source), _parts(final)
     assert list(before) == list(after)
@@ -127,28 +90,16 @@ def test_finish_is_leak_free_and_only_touches_expected_parts() -> None:
 def test_restore_roundtrip_is_char_for_char() -> None:
     source = SEED.read_bytes()
     result = pptx_engine.redact(source, [JOHN, ALICE])
-    redacted = pptx_engine.finish(
-        source,
-        _library(source, result.replacements),
-        result.tokens,
-        result.updates,
-        result.replacements,
-        result.surfaces,
-    )
+    redacted = result.output
+    assert redacted is not None
     token_map = {
         str(item["token"]): str(item["canonical"])
         for item in result.items
         if item.get("token")
     }
     restored = pptx_engine.restore(redacted, token_map)
-    final = pptx_engine.finish(
-        redacted,
-        _library(redacted, restored.replacements),
-        restored.tokens,
-        restored.updates,
-        restored.replacements,
-    )
-    assert pptx_engine.extract_all_text_parts(final) == pptx_engine.extract_all_text_parts(source)
+    assert restored.output is not None
+    assert pptx_engine.extract_all_text_parts(restored.output) == pptx_engine.extract_all_text_parts(source)
 
 
 def test_split_runs_in_a_notes_paragraph_are_replaced() -> None:
@@ -169,16 +120,11 @@ def test_case_variant_in_a_slide_is_a_replacement_and_leak_surface() -> None:
     parts["ppt/slides/slide2.xml"] = slide.encode()
     raw = _zip(parts)
     result = pptx_engine.redact(raw, [JOHN])
-    assert any(item["find"] == "JOHN SMITH" for item in result.replacements)
-    assert "JOHN SMITH" in result.surfaces
-    final = pptx_engine.finish(
-        raw,
-        _library(raw, result.replacements),
-        result.tokens,
-        result.updates,
-        result.replacements,
-        result.surfaces,
-    )
+    assert "JOHN SMITH" not in pptx_engine.extract_all_text_parts(result.output)[
+        "ppt/slides/slide2.xml"
+    ]
+    final = result.output
+    assert final is not None
     assert pptx_engine.scan_leaks(final, result.surfaces) == []
 
 
@@ -186,7 +132,7 @@ def test_raw_parts_without_gaps_are_still_valid() -> None:
     result = pptx_engine.redact((REPO / "corpus" / "pptx" / "pptx-001.pptx").read_bytes(), [ALICE])
     assert result.hits > 0
     assert "ppt/commentAuthors.xml" in result.updates
-    assert result.replacements
+    assert result.output is not None
 
 
 def test_corpus_pptx_roundtrip() -> None:
@@ -194,14 +140,8 @@ def test_corpus_pptx_roundtrip() -> None:
         source = (REPO / "corpus" / "pptx" / name).read_bytes()
         result = pptx_engine.redact(source, [JOHN, ALICE])
         assert result.hits > 0, name
-        redacted = pptx_engine.finish(
-            source,
-            _library(source, result.replacements),
-            result.tokens,
-            result.updates,
-            result.replacements,
-            result.surfaces,
-        )
+        redacted = result.output
+        assert redacted is not None
         assert pptx_engine.scan_leaks(redacted, result.surfaces) == [], name
         token_map = {
             str(item["token"]): str(item["canonical"])
@@ -209,11 +149,5 @@ def test_corpus_pptx_roundtrip() -> None:
             if item.get("token")
         }
         restored = pptx_engine.restore(redacted, token_map)
-        final = pptx_engine.finish(
-            redacted,
-            _library(redacted, restored.replacements),
-            restored.tokens,
-            restored.updates,
-            restored.replacements,
-        )
-        assert pptx_engine.extract_all_text_parts(final) == pptx_engine.extract_all_text_parts(source), name
+        assert restored.output is not None
+        assert pptx_engine.extract_all_text_parts(restored.output) == pptx_engine.extract_all_text_parts(source), name
