@@ -32,6 +32,13 @@
       </div>
     </header>
 
+    <div id="preload-panel" class="preload" hidden>
+      <progress id="preload-bar" max="100" value="0"></progress>
+      <span id="preload-text"></span>
+      <button id="preload-retry" type="button" class="btn btn-ghost" hidden data-i18n="p1.preload.retry"></button>
+      <button id="runtime-retry" type="button" class="btn btn-ghost" hidden data-i18n="p1.runtime.retry"></button>
+    </div>
+
     <nav class="steps" role="tablist" aria-label="Workflow">
       <button role="tab" type="button" data-panel="upload" aria-selected="true" class="step is-active">
         <span class="step-no">1</span><span data-i18n="p1.step.upload"></span>

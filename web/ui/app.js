@@ -99,12 +99,20 @@ function onStatus(event) {
   state.runtime = event.state;
   const badge = $("runtime-badge");
   badge.className = "badge";
+  const retry = $("runtime-retry");
+  if (retry) retry.hidden = event.state !== "failed";
   if (event.state === "ready") {
     badge.classList.add("badge-ok");
     badge.textContent = t("p1.runtime.ready");
   } else if (event.state === "initializing") {
     badge.classList.add("badge-wait");
-    badge.textContent = t("p1.runtime.initializing");
+    const initKeys = {
+      pyodide: "p1.init.pyodide",
+      "python-src": "p1.init.python_src",
+      "betteroffice-docx": "p1.init.docx",
+      "betteroffice-pptx": "p1.init.pptx",
+    };
+    badge.textContent = t(initKeys[event.phase] || "p1.runtime.initializing");
     if (event.reason && event.reason !== "init") {
       toast(t("p1.runtime.rebuilding"), "info", 0);
     }
@@ -113,6 +121,87 @@ function onStatus(event) {
     badge.textContent = t("p1.runtime.failed");
     if (event.reason) toast(t("p1.error.INIT_FAILED", { error: event.reason }), "error", 0);
   }
+}
+
+// ---------------------------------------------------------- eager preload
+
+function preloadText(key, vars = {}) {
+  return t(key, vars);
+}
+
+function showPreload(done, total, path = "") {
+  const panel = $("preload-panel");
+  const bar = $("preload-bar");
+  const text = $("preload-text");
+  const retry = $("preload-retry");
+  if (!panel || !bar || !text) return;
+  panel.hidden = false;
+  if (retry) retry.hidden = true;
+  bar.max = Math.max(total || 1, 1);
+  bar.value = done || 0;
+  text.textContent = path
+    ? preloadText("p1.preload.progress", { done: done || 0, total: total || 0 })
+    : preloadText("p1.preload.starting");
+}
+
+function failPreload(message) {
+  const panel = $("preload-panel");
+  const text = $("preload-text");
+  const retry = $("preload-retry");
+  if (panel) panel.hidden = false;
+  if (text) text.textContent = preloadText("p1.preload.failed", { error: message });
+  if (retry) retry.hidden = false;
+}
+
+async function preloadRuntime() {
+  if (!("serviceWorker" in navigator)) return;
+  const registration = await navigator.serviceWorker.register("./sw.js", {
+    type: "module",
+  });
+  await navigator.serviceWorker.ready;
+  if (!navigator.onLine) return; // offline cold start: the cache is the source
+  const active = registration.active || registration.waiting || registration.installing;
+  if (!active) throw new Error("service worker has no active worker");
+  showPreload(0, 0);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+      clearTimeout(timer);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) {
+        failPreload(error.message || String(error));
+        reject(error);
+      } else {
+        const panel = $("preload-panel");
+        const text = $("preload-text");
+        if (text) text.textContent = preloadText("p1.preload.done");
+        setTimeout(() => { if (panel) panel.hidden = true; }, 1500);
+        toast(t("p1.offline.ready"), "ok", 5000);
+        resolve();
+      }
+    };
+    const onMessage = (event) => {
+      const data = event.data || {};
+      if (data.type === "precache-progress") {
+        showPreload(data.done, data.total, data.path);
+      } else if (data.type === "precache-done") {
+        finish();
+      } else if (data.type === "precache-error") {
+        finish(new Error(data.message || "precache failed"));
+      }
+    };
+    const timer = setTimeout(
+      () => finish(new Error("runtime preload timed out")),
+      10 * 60 * 1000,
+    );
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    active.postMessage({ type: "PRECACHE" });
+  });
 }
 
 // ------------------------------------------------------------- worker runs
@@ -551,19 +640,20 @@ async function boot() {
   await refreshDict();
   refreshStorageLine().catch(() => {});
 
-  state.bridge = createBridge({
-    workerUrl: "./worker/pyodide_worker.js",
-    onStatus,
-  });
-  state.bridge.ready.catch((error) => {
-    toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
-  });
-
   bindDropzone($("upload-drop"), $("upload-input"), pickFile);
   bindDropzone($("restore-drop"), $("restore-input"), pickRestoreFile);
   $("inspect-btn").addEventListener("click", inspectFile);
   $("detect-btn").addEventListener("click", detect);
   $("clear-btn").addEventListener("click", clearFile);
+  $("preload-retry").addEventListener("click", () => {
+    preloadRuntime().catch((error) => failPreload(error?.message || String(error)));
+  });
+  $("runtime-retry").addEventListener("click", () => {
+    if (!state.bridge) return;
+    state.bridge.restart().catch((error) => {
+      toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
+    });
+  });
   $("rescan-btn").addEventListener("click", detect);
   $("generate-btn").addEventListener("click", generate);
   $("select-all-btn").addEventListener("click", () => {
@@ -636,13 +726,15 @@ async function boot() {
   });
   window.addEventListener("appinstalled", () => { $("install-btn").hidden = true; });
 
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker
-      .register("./sw.js")
-      .then(() => navigator.serviceWorker.ready)
-      .then(() => toast(t("p1.offline.ready"), "ok", 5000))
-      .catch(() => {});
-  }
+  await preloadRuntime().catch((error) => failPreload(error?.message || String(error)));
+  state.bridge = createBridge({
+    workerUrl: "./worker/pyodide_worker.js",
+    onStatus,
+  });
+  state.bridge.ready.catch((error) => {
+    toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
+  });
+
   window.addEventListener("online", hideToast);
 }
 

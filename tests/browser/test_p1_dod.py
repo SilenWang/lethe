@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import io
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -19,6 +20,8 @@ import pytest
 from _server import StaticServer
 
 from lethe.docx_engine import extract_all_text_parts, scan_leaks
+from lethe.pptx_engine import extract_all_text_parts as pptx_extract
+from lethe.pptx_engine import scan_leaks as pptx_leaks
 
 REPO = Path(__file__).resolve().parents[2]
 MIB = 1024 * 1024
@@ -63,7 +66,7 @@ RUN_REDACT = """async ({name, entities}) => {
 
 ENTITIES = [{"canonical": "John Smith", "type": "PERSON", "aliases": []}]
 
-RUN_ROUNDTRIP = """async ({entities}) => {
+RUN_ROUNDTRIP = """async ({entities, fileName}) => {
   const bridge = window.__letheBridge;
   const bytes = window.__sampleBytes;
   const b64 = (u8) => {
@@ -75,7 +78,7 @@ RUN_ROUNDTRIP = """async ({entities}) => {
   };
   try {
     const red = await bridge.run({
-      op: "redact", bytes, fileName: "offline.docx", options: {entities},
+      op: "redact", bytes, fileName: fileName || "offline.docx", options: {entities},
     });
     const tokenMap = Object.fromEntries(
       red.items.filter((item) => item.token).map((item) => [item.token, item.canonical]),
@@ -83,7 +86,7 @@ RUN_ROUNDTRIP = """async ({entities}) => {
     // Encode before the restore call: that call transfers (detaches) red.bytes.
     const redB64 = b64(red.bytes);
     const restored = await bridge.run({
-      op: "restore", bytes: red.bytes, fileName: "offline.docx",
+      op: "restore", bytes: red.bytes, fileName: fileName || "offline.docx",
       options: {token_map: tokenMap},
     });
     return {
@@ -140,6 +143,10 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     ):
         data = (REPO / "corpus" / "docx" / "docx-001.docx").read_bytes() if size is None else _padded_docx(size)
         (samples / name).write_bytes(data)
+    shutil.copy2(
+        REPO / "corpus" / "seeds" / "pptx-02-enhanced.pptx",
+        samples / "pptx-02-enhanced.pptx",
+    )
     return out
 
 
@@ -159,7 +166,7 @@ def server(built: Path):
         yield running
 
 
-def test_offline_install_and_docx_roundtrip(server: StaticServer, built: Path) -> None:
+def test_offline_install_and_docx_pptx_roundtrip(server: StaticServer, built: Path) -> None:
     assert sync_playwright is not None
     external: list[str] = []
     with sync_playwright() as playwright:
@@ -192,9 +199,9 @@ def test_offline_install_and_docx_roundtrip(server: StaticServer, built: Path) -
             assert status == 200, icon["src"]
         assert page.evaluate("window.isSecureContext") is True
 
-        # The install visit registers the SW; the next controlled visit is what
-        # fills the lazy runtime cache (Pyodide + /py modules). Do that, then
-        # cut the network and cold-start the installed app.
+        # Eager preload: the first online visit caches Pyodide, the wheels,
+        # docx and pptx (the worker initialises both). The next visit is only
+        # a cold-start check, then the network is cut.
         page.reload()
         page.wait_for_function(
             "window.__letheBridge && window.__letheBridge.state() === 'ready'"
@@ -205,17 +212,16 @@ def test_offline_install_and_docx_roundtrip(server: StaticServer, built: Path) -
                     const paths = (await (await caches.open(name)).keys()).map(
                         (request) => new URL(request.url).pathname,
                     );
-                    if (paths.includes("/assets/vendor/pyodide/pyodide.asm.wasm")) return true;
+                    if (
+                        paths.includes("/assets/vendor/pyodide/pyodide.asm.wasm") &&
+                        paths.includes("/assets/vendor/betteroffice/docx/dist/docx/index.mjs") &&
+                        paths.includes("/assets/vendor/betteroffice/pptx/dist/index.js")
+                    ) return true;
                 }
                 return false;
             }"""
         )
         assert runtime_cached is True, "runtime assets were not cached on the controlled visit"
-
-        # Warm the docx format set (BetterOffice parse/edit + OPC wasm) the same
-        # way a first real run does; the SW caches it per format by design.
-        warm = page.evaluate(RUN_REDACT, {"name": "docx-001.docx", "entities": ENTITIES})
-        assert warm["ok"], warm
 
         context.set_offline(True)
         page.reload()
@@ -225,7 +231,9 @@ def test_offline_install_and_docx_roundtrip(server: StaticServer, built: Path) -
         assert page.evaluate("navigator.serviceWorker.controller !== null") is True
         sample = (built / "samples" / "docx-001.docx").read_bytes()
         page.evaluate("(bytes) => { window.__sampleBytes = new Uint8Array(bytes); }", list(sample))
-        outcome = page.evaluate(RUN_ROUNDTRIP, {"entities": ENTITIES})
+        outcome = page.evaluate(
+            RUN_ROUNDTRIP, {"entities": ENTITIES, "fileName": "offline.docx"}
+        )
         assert outcome["ok"], outcome
         assert outcome["hits"] > 0
         assert outcome["restoreHits"] > 0
@@ -234,6 +242,29 @@ def test_offline_install_and_docx_roundtrip(server: StaticServer, built: Path) -
         restored_bytes = base64.b64decode(outcome["resB64"])
         assert extract_all_text_parts(restored_bytes) == extract_all_text_parts(sample)
         assert scan_leaks(redacted_bytes, ["John Smith", "john.smith@example.com"]) == []
+
+        pptx_sample = (built / "samples" / "pptx-02-enhanced.pptx").read_bytes()
+        page.evaluate(
+            "(bytes) => { window.__sampleBytes = new Uint8Array(bytes); }",
+            list(pptx_sample),
+        )
+        pptx_outcome = page.evaluate(
+            RUN_ROUNDTRIP,
+            {
+                "entities": [
+                    {"canonical": "John Smith", "type": "PERSON", "aliases": []},
+                    {"canonical": "Alice Chen", "type": "PERSON", "aliases": []},
+                ],
+                "fileName": "offline.pptx",
+            },
+        )
+        assert pptx_outcome["ok"], pptx_outcome
+        assert pptx_outcome["hits"] > 0
+        assert pptx_outcome["restoreHits"] > 0
+        pptx_redacted = base64.b64decode(pptx_outcome["redB64"])
+        pptx_restored = base64.b64decode(pptx_outcome["resB64"])
+        assert pptx_leaks(pptx_redacted, ["John Smith", "Alice Chen"]) == []
+        assert pptx_extract(pptx_restored) == pptx_extract(pptx_sample)
         context.set_offline(False)
         browser.close()
     assert external == [], f"offline run reached the network: {external}"
