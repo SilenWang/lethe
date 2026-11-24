@@ -116,6 +116,16 @@ DOCX_PROBE = """async () => {
     : {ok: false, error: result};
 }"""
 
+VAULT_PROBE = """async () => {
+  window.__w.postMessage({type: "vault", id: "v1"});
+  const result = await window.__wait(
+    (m) => m.id === "v1" && (m.type === "vault-ready" || m.type === "vault-error"),
+  );
+  return result.type === "vault-ready"
+    ? {ok: true, cryptoReady: result.cryptoReady}
+    : {ok: false, error: result};
+}"""
+
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
@@ -149,12 +159,16 @@ def page(built: Path):
 
 def test_pptx_worker_roundtrip(page, built: Path) -> None:
     ready = page.evaluate(START)
+    assert ready["cryptoReady"] is False
     assert ready["docxWasm"] is False
     assert ready["pptxWasm"] is False
     docx = page.evaluate(DOCX_PROBE)
     assert docx["ok"], docx
     assert docx["docxWasm"] is True
     assert docx["hits"] > 0
+    vault = page.evaluate(VAULT_PROBE)
+    assert vault["ok"], vault
+    assert vault["cryptoReady"] is True
     result = page.evaluate(ROUNDTRIP, {"sample": "enhanced.pptx"})
     assert "error" not in result, result
     assert result["inspected"]["type"] == "result"

@@ -265,6 +265,9 @@ def test_offline_install_and_docx_pptx_roundtrip(server: StaticServer, built: Pa
         pptx_restored = base64.b64decode(pptx_outcome["resB64"])
         assert pptx_leaks(pptx_redacted, ["John Smith", "Alice Chen"]) == []
         assert pptx_extract(pptx_restored) == pptx_extract(pptx_sample)
+
+        vault = page.evaluate("window.__letheBridge.vault()")
+        assert vault["cryptoReady"] is True
         context.set_offline(False)
         browser.close()
     assert external == [], f"offline run reached the network: {external}"

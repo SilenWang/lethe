@@ -13,4 +13,5 @@ export const PY_SOURCES = Object.freeze([
   "web_entry.py",
 ]);
 export const TOOL_SOURCES = Object.freeze(["__init__.py", "postprocess_contract.py"]);
-export const PYODIDE_PACKAGES = Object.freeze(["lxml", "cryptography"]);
+export const PYODIDE_PACKAGES = Object.freeze(["lxml"]);
+export const DEFERRED_PYODIDE_PACKAGES = Object.freeze(["cryptography"]);

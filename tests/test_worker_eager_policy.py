@@ -19,7 +19,12 @@ def test_pptx_wasm_is_deferred_until_first_pptx_run() -> None:
     # Python and the wheels are eager; both BetterOffice modules/wasms are not.
     assert "loadDocx()" not in init
     assert "loadPptx()" not in init
+    assert "cryptography" not in init
     assert "pptx.initWasm" not in init
+    crypto = _function_body(source, "async function ensureCrypto", "async function loadPptx")
+    assert "loadPackage(DEFERRED_PYODIDE_PACKAGES)" in crypto
+    assert "cryptoReady" in source
+    assert 'message?.type === "vault"' in source
     inspect = _function_body(source, "async function runInspect", "async function runWrite")
     assert "loadDocx()" in inspect
     write = _function_body(source, "async function runWrite", "async function runPptxWrite")

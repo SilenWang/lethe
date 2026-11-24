@@ -6,6 +6,7 @@
 import { OPS, PROTOCOL_VERSION } from "../lib/protocol.js";
 import {
   BETTEROFFICE_PACKAGES,
+  DEFERRED_PYODIDE_PACKAGES,
   PYODIDE_PACKAGES,
   PY_SOURCES,
   TOOL_SOURCES,
@@ -32,6 +33,7 @@ let opcReady = null;
 let docxWasmReady = false;
 let pptxModule = null;
 let pptxWasmReady = false;
+let cryptoReady = false;
 let initPromise = null;
 
 const post = (message, transfer = []) => self.postMessage(message, transfer);
@@ -75,6 +77,7 @@ import lethe.web_entry  # fail at init, not on the first upload
     post({
       type: "ready",
       protocol: PROTOCOL_VERSION,
+      cryptoReady: cryptoReady,
       docxWasm: docxWasmReady,
       pptxWasm: pptxWasmReady,
       pyodide: pyodide.version,
@@ -100,6 +103,12 @@ async function loadDocx() {
   }
   await opcReady;
   return docxModule;
+}
+
+async function ensureCrypto() {
+  if (cryptoReady) return;
+  await pyodide.loadPackage(DEFERRED_PYODIDE_PACKAGES);
+  cryptoReady = true;
 }
 
 async function loadPptx() {
@@ -383,6 +392,21 @@ self.onmessage = async (event) => {
   const message = event.data;
   if (message?.type === "stats") {
     post({ type: "stats", id: message.id, heapBytes: heapBytes() });
+    return;
+  }
+  if (message?.type === "vault") {
+    try {
+      await initRuntime();
+      await ensureCrypto();
+      post({ type: "vault-ready", id: message.id, cryptoReady: cryptoReady });
+    } catch (error) {
+      post({
+        type: "vault-error",
+        id: message.id,
+        code: classifyError(error),
+        message: String(error?.message || error),
+      });
+    }
     return;
   }
   if (message?.type !== "run") return;
