@@ -97,6 +97,7 @@ def check_runtime_config() -> list[str]:
     packages = _js_list(source, "BETTEROFFICE_PACKAGES")
     pys = _js_list(source, "PY_SOURCES")
     pyodide = _js_list(source, "PYODIDE_PACKAGES")
+    deferred = _js_list(source, "DEFERRED_PYODIDE_PACKAGES")
     problems: list[str] = []
     if not formats:
         problems.append("runtime-config: SUPPORTED_FORMATS is empty")
@@ -109,9 +110,10 @@ def check_runtime_config() -> list[str]:
         problems.append("runtime-config: xlsx format requires xlsx_engine.py")
     if "pptx" in formats and "pptx_engine.py" not in pys:
         problems.append("runtime-config: pptx format requires pptx_engine.py")
-    for package in ("lxml", "cryptography"):
-        if package not in pyodide:
-            problems.append(f"runtime-config: Pyodide package {package} is not eagerly loaded")
+    if "lxml" not in pyodide:
+        problems.append("runtime-config: Pyodide package lxml is not eagerly loaded")
+    if "cryptography" not in deferred:
+        problems.append("runtime-config: cryptography must be deferred to a vault op")
     return problems
 
 

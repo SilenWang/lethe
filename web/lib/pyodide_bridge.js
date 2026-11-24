@@ -47,6 +47,7 @@ export function createBridge(options = {}) {
   let resolveReady;
   let rejectReady;
   const statsWaiters = new Map();
+  const vaultWaiters = new Map();
   const stats = { runs: 0, recycles: 0, lastBytes: 0, lastDurationMs: 0 };
 
   // Every spawned worker gets a fresh init promise. A cancelled init therefore
@@ -93,6 +94,18 @@ export function createBridge(options = {}) {
         if (waiter) {
           statsWaiters.delete(message.id);
           waiter.resolve(message.heapBytes);
+        }
+      } else if (message.type === "vault-ready" || message.type === "vault-error") {
+        const waiter = vaultWaiters.get(message.id);
+        if (waiter) {
+          vaultWaiters.delete(message.id);
+          if (message.type === "vault-ready") {
+            waiter.resolve({ cryptoReady: message.cryptoReady === true });
+          } else {
+            waiter.reject(
+              bridgeError(message.code || "INTERNAL", message.message || "vault load failed"),
+            );
+          }
         }
       } else if (pending && message.id === pending.id) {
         pending.lastSeen = Date.now();
@@ -245,6 +258,27 @@ export function createBridge(options = {}) {
     });
   }
 
+  async function vault() {
+    await whenReady();
+    const id = `vault-${++counter}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (vaultWaiters.delete(id)) reject(new Error("vault load timed out"));
+      }, 120_000);
+      vaultWaiters.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      worker.postMessage({ type: "vault", id });
+    });
+  }
+
   spawn();
   const api = {
     protocol: PROTOCOL_VERSION,
@@ -255,6 +289,7 @@ export function createBridge(options = {}) {
     cancel,
     dispose,
     restart,
+    vault,
     heapBytes,
     stats: () => ({ ...stats }),
     state: () => state,

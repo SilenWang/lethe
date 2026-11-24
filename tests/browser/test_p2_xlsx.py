@@ -105,6 +105,16 @@ DOCX_PROBE = """async () => {
     : {ok: false, error: result};
 }"""
 
+VAULT_PROBE = """async () => {
+  window.__w.postMessage({type: "vault", id: "v1"});
+  const result = await window.__wait(
+    (m) => m.id === "v1" && (m.type === "vault-ready" || m.type === "vault-error"),
+  );
+  return result.type === "vault-ready"
+    ? {ok: true, cryptoReady: result.cryptoReady}
+    : {ok: false, error: result};
+}"""
+
 
 @pytest.fixture(scope="module")
 def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
@@ -161,7 +171,11 @@ def test_xlsx_worker_roundtrip(page, sample: str) -> None:
 
 def test_docx_wasm_is_deferred_until_first_docx_run(page) -> None:
     ready = page.evaluate(START)
+    assert ready["cryptoReady"] is False
     assert ready["docxWasm"] is False
+    vault = page.evaluate(VAULT_PROBE)
+    assert vault["ok"], vault
+    assert vault["cryptoReady"] is True
     result = page.evaluate(DOCX_PROBE)
     assert result["ok"], result
     assert result["docxWasm"] is True
