@@ -22,6 +22,22 @@ Total remaining P3 estimate: **2.5–3 person-days** (excluding review/merge
 queue).  Until then, each P2 branch's offline test covers only its own formats
 (docx+xlsx or docx+pptx); the three-format sequence is the P3 gate.
 
+## Eager-loading memory decision
+
+The pptx branch measured both BetterOffice packages eagerly initialised:
+
+* realistic 49.1 MB deck / 506 hits: absolute peak RSS **2,717 MB**, delta
+  1,540 MB, no abort;
+* stress 49.3 MB / 10,101 hits: absolute peak **2,768 MB**, delta 1,583 MB.
+
+The run-time delta fits the old ~2.5 GB envelope, but absolute RSS is
+~0.22–0.27 GB over it because the idle worker baseline is now ~1.18 GB (lazy
+was ~0.55 GB).  P3 must pick one and record it: restate the pptx gate as RSS
+delta, or keep assets/modules eager but defer `pptx.initWasm()` until the
+first pptx run (offline still zero-network; likely ~2.1 GB).  The xlsx path
+still needs its own absolute-RSS re-measure with eager docx loaded; its old
+567.8 MB was Pyodide `HEAPU8`, not total RSS.
+
 ## Acceptance wording
 
 > 清空缓存 → 在线启动一次并等待预加载完成 → 完全断网重载 → 直接依次处理
