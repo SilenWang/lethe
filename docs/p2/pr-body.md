@@ -4,6 +4,13 @@ Base: `next/rewrite` · branch: `next/p2-pptx`
 
 ### What changed
 
+- **Eager runtime preload** — `web/lib/runtime-config.js` is shared by the
+  worker and SW: docx + pptx, BetterOffice docx+pptx, Pyodide
+  lxml+cryptography, all Python modules.  The first online start pre-caches the
+  complete set and initialises both libraries; no format is downloaded on
+  first use.  Progress/retry UI; offline e2e is `clear cache → online start →
+  offline reload → docx + pptx`.  The merged three-format gate is in
+  `docs/p3/offline-dod.md`.
 - **`lethe/pptx_engine.py`** — BetterOffice `findText` + `replaceText` for slide
   text (text boxes and tables included), looping in 128-step batches because
   the library caps a batch at 128 steps.
@@ -28,13 +35,19 @@ Base: `next/rewrite` · branch: `next/p2-pptx`
 Chromium 157 headless, real worker, peak RSS = Chromium process tree sampled
 every 100 ms.
 
-| Fixture | Hits | Redact | Restore | Peak RSS | Delta | Pyodide heap |
-|---|---:|---:|---:|---:|---:|---:|
-| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 5.5 s | **2,093 MB** | 1,546 MB | 73 MB |
-| 49.3 MB, 10,101 hits (stress) | 10,101 | 23.9 s | 21.8 s | **2,241 MB** | 1,691 MB | 88 MB |
+| Fixture | Hits | Redact | Restore | Baseline RSS | Peak RSS | Delta | Pyodide heap |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 49.1 MB, 506 hits + 49 MB media | 506 | 3.7 s | 5.8 s | 1,177 MB | **2,717 MB** | 1,540 MB | 79 MB |
+| 49.3 MB, 10,101 hits (stress) | 10,101 | 23.8 s | 22.7 s | 1,185 MB | **2,768 MB** | 1,583 MB | 94 MB |
 
-pptx DoD is ≤2.5 GB; both pass, no abort.  Only slides/notes/core change; media,
-rels and `[Content_Types].xml` are byte-identical.  Leak scan 0;
+**Gate conflict (needs P3 decision):** eager docx+pptx raises the idle worker
+baseline to ~1.18 GB.  The run-time delta is ~1.54 GB, but absolute peak RSS is
+2.72–2.77 GB, above the issue's pptx ≤2.5 GB wording.  The old lazy numbers
+were 2.09 / 2.24 GB.  Options: treat the gate as RSS delta, or keep the assets
+and modules eager but defer `pptx.initWasm()` until the first pptx run (no
+network either way).  I have not changed the gate.
+
+Only slides/notes/core change; media, rels and `[Content_Types].xml` are byte-identical. Leak scan 0;
 `extract_all_text_parts(restored) == source`.
 
 ### Verification (local, all green)

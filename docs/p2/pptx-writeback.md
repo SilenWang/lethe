@@ -46,16 +46,23 @@ Chromium 157 headless, the real P1 worker (Pyodide + BetterOffice pptx +
 part patches).  Peak RSS is the sum of the Chromium process tree, sampled every
 100 ms; baseline is measured after the worker is ready.
 
-| Fixture | Hits | Redact | Restore | Peak RSS | Delta | Pyodide heap |
-|---|---:|---:|---:|---:|---:|---:|
-| 49.1 MB, 5 slides × 100 paragraphs + 49 MB media | 506 | 3.7 s | 5.5 s | **2,093 MB** | 1,546 MB | 73 MB |
-| 49.3 MB, 100 slides × 100 paragraphs + 49 MB media (stress) | 10,101 | 23.9 s | 21.8 s | **2,241 MB** | 1,691 MB | 88 MB |
+| Fixture | Hits | Redact | Restore | Baseline RSS | Peak RSS | Delta | Pyodide heap |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 49.1 MB, 5 slides × 100 paragraphs + 49 MB media | 506 | 3.7 s | 5.8 s | 1,177 MB | **2,717 MB** | 1,540 MB | 79 MB |
+| 49.3 MB, 100 slides × 100 paragraphs + 49 MB media (stress) | 10,101 | 23.8 s | 22.7 s | 1,185 MB | **2,768 MB** | 1,583 MB | 94 MB |
 
-Both are under the pptx ≤2.5 GB gate and neither aborts.  The stress case is
-close to the ceiling; the realistic case has ~400 MB headroom.  Only slides,
-notes and `docProps/core.xml` change; `[Content_Types].xml`, rels, masters,
-layouts (on the stress fixture) and the 49 MB media entry are byte-identical.
-`scan_leaks` is 0 and `extract_all_text_parts(restored) == source`.
+**Gate conflict:** eager `docx + pptx` initialisation raises the worker baseline
+to ~1.18 GB.  The run-time delta is still ~1.54 GB, but absolute peak RSS is
+2.72–2.77 GB, above the issue's pptx ≤2.5 GB wording.  The old lazy numbers
+were 2.09 / 2.24 GB absolute.  This needs a P3 decision: either interpret the
+gate as RSS delta (passes), or keep assets/modules eager but defer the large
+`pptx.initWasm()` until the first pptx run (offline still works; likely back to
+~2.1 GB).  Do not silently raise the gate.
+
+Only slides, notes and `docProps/core.xml` change; `[Content_Types].xml`, rels,
+masters, layouts (on the stress fixture) and the 49 MB media entry are
+byte-identical.  `scan_leaks` is 0 and
+`extract_all_text_parts(restored) == source`.
 
 ## Tests
 

@@ -1,16 +1,16 @@
 {
   "ok": true,
   "inputBytes": 51437965,
-  "redMs": 3728,
-  "restoreMs": 5522,
+  "redMs": 3673,
+  "restoreMs": 5833,
   "redHits": 506,
   "redSize": 51438030,
   "resHits": 506,
   "resSize": 51437965,
-  "maxHeapMB": 72.7,
-  "maxJsMB": 9.5,
+  "maxHeapMB": 78.5,
+  "maxJsMB": 51.2,
   "warnings": [],
-  "baselineRssMB": 547.3,
-  "maxRssMB": 2093.2,
-  "rssDeltaMB": 1545.8
+  "baselineRssMB": 1176.5,
+  "maxRssMB": 2717.1,
+  "rssDeltaMB": 1540.5
 }
