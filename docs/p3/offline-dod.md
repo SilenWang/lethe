@@ -24,23 +24,22 @@ queue).  Until then, each P2 branch's offline test covers only its own formats
 
 ## Eager-loading memory decision
 
-The pptx branch now defers both BetterOffice modules/wasms; assets, Python,
-lxml and cryptography remain eager.  Redact-only absolute RSS:
+The pptx branch now defers cryptography and both BetterOffice modules/wasms;
+assets, Python and lxml remain eager.  Redact-only absolute RSS:
 
-* realistic 49.1 MB deck / 506 hits: baseline 1,139 MB, absolute peak
-  **2,648 MB**, delta 1,509 MB, no abort;
-* stress 49.3 MB / 10,101 hits: baseline 1,140 MB, absolute peak
-  **2,812 MB**, delta 1,672 MB.
+* realistic 49.1 MB deck / 506 hits: baseline 1,089 MB, absolute peak
+  **2,590 MB**, delta 1,501 MB, no abort;
+* stress 49.3 MB / 10,101 hits: baseline 1,090 MB, absolute peak
+  **2,734 MB**, delta 1,644 MB.
 
-Deferring both BetterOffice modules did not lower the ~1.14 GB baseline; that
-increase is eager lxml+cryptography (old lxml-only baseline ~547 MB).
-Absolute RSS is still 0.15–0.31 GB over the unchanged 2.5 GB gate.  P3 must
-either defer cryptography as well (assets still pre-cached; first vault
-operation loads it; doc/pptx offline unaffected) or get a user-approved gate
-change.  Do not silently change the DoD.
+Deferring cryptography lowered the baseline to ~1.09 GB; the remaining baseline
+is eager lxml/Python/browser.  Absolute RSS is still 90–234 MB over the
+unchanged 2.5 GB gate.  P3 must defer lxml/Python as well (assets pre-cached)
+or get a user-approved gate change.  Do not silently change the DoD.
 
-xlsx was re-measured with docx deferred: 49.8 MB / 250,001 hits, baseline
-1,146 MB, absolute peak **1,847 MB**, delta 701 MB — under the 2 GB xlsx gate.
+xlsx was re-measured with cryptography/docx deferred: 49.8 MB / 250,001 hits,
+baseline 1,093 MB, absolute peak **1,792 MB**, delta 699 MB — under the 2 GB
+xlsx gate.
 The merged branch adds only the pptx module import (no wasm) for xlsx; rerun
 the merged matrix in P3.
 

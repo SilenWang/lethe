@@ -46,15 +46,15 @@ requests.  `tests/browser/test_p1_dod.py` runs exactly that sequence.
 
 ### 50MB absolute RSS (xlsx)
 
-`xlsx-50mb.xlsx` = 49.8 MB, 250,001 hits, docx deferred and xlsx part-direct:
+`xlsx-50mb.xlsx` = 49.8 MB, 250,001 hits, cryptography/docx deferred and xlsx part-direct:
 
 | Baseline | Peak | Delta | Pyodide heap | Time | Abort |
 |---:|---:|---:|---:|---:|---|
-| 1,146 MB | **1,847 MB** | 701 MB | 602 MB | 32.8 s | no |
+| 1,093 MB | **1,792 MB** | 699 MB | 565 MB | 32.8 s | no |
 
-This is under the xlsx absolute ≤2 GB gate (153 MB headroom).  Deferring docx
-did not lower the ~1.15 GB baseline; that baseline is the eager
-lxml+cryptography runtime.  The merged
+This is under the xlsx absolute ≤2 GB gate (208 MB headroom).  Deferring
+cryptography/docx lowered the baseline to ~1.09 GB; the remaining eager
+runtime is lxml/Python/browser.  The merged
 branch adds the pptx module import (no wasm) on top; the final merged absolute
 re-run is part of P3.
 
