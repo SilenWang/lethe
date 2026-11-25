@@ -67,20 +67,12 @@
         <p id="upload-note" class="note" hidden></p>
         <details id="upload-degradations" class="note" hidden>
           <summary data-i18n="p1.degradations.title"></summary>
-          <ul>
-            <li data-i18n="p1.xlsx.degradations.pivot"></li>
-            <li data-i18n="p1.xlsx.degradations.chart"></li>
-            <li data-i18n="p1.xlsx.degradations.smartart"></li>
-            <li data-i18n="p1.xlsx.degradations.ole"></li>
-            <li data-i18n="p1.xlsx.degradations.formula"></li>
-            <li data-i18n="p1.xlsx.degradations.external"></li>
-            <li data-i18n="p1.pptx.degradations.chart"></li>
-            <li data-i18n="p1.pptx.degradations.smartart"></li>
-            <li data-i18n="p1.pptx.degradations.ole"></li>
-            <li data-i18n="p1.pptx.degradations.media"></li>
-          </ul>
+          <!-- Filled per file by app.js from DEGRADATION_KEYS, so the list only
+               shows the gaps that apply to the picked format. -->
+          <ul id="degradation-list"></ul>
         </details>
         <p id="upload-inspect" class="meta" hidden></p>
+        <p id="upload-warnings" class="note" hidden></p>
         <div class="actions">
           <button id="inspect-btn" type="button" class="btn" disabled data-i18n="p1.upload.inspect"></button>
           <button id="detect-btn" type="button" class="btn btn-primary" disabled data-i18n="p1.upload.continue"></button>

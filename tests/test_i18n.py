@@ -356,3 +356,60 @@ def test_reference_file_is_localised():
 
 def _tr_for(lang: str) -> Translator:
     return Translator(lang)
+
+
+# ------------------------------------------------------- P1 UI: badges + gaps
+def _format_js() -> str:
+    with open(os.path.join(ROOT, "web", "ui", "format.js"), encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _format_object(name: str) -> str:
+    source = _format_js()
+    start = source.index(f"export const {name} = Object.freeze({{")
+    return source[start:source.index("});", start)]
+
+
+def test_every_detection_source_has_a_badge_key():
+    """`core.Item.source` is the closed set the review table renders. Each one
+    must map to a locale key, and an unknown source must fall back to a generic
+    badge rather than leaking the raw internal code into the UI."""
+    with open(os.path.join(ROOT, "lethe", "core.py"), encoding="utf-8") as fh:
+        tiers = re.search(r"_TIER = \{([^}]*)\}", fh.read()).group(1)
+    sources = set(re.findall(r'"(\w+)":', tiers))
+    assert sources == {"dictionary", "preset_rule", "pattern", "manual"}
+    block = _format_object("SOURCE_KEYS")
+    for source in sources:
+        key = re.search(rf'^\s*{source}: "([\w.]+)"', block, re.M).group(1)
+        assert key in EN and key in ZH, f"{source} badge key {key} missing from a locale"
+    assert 'return SOURCE_KEYS[source] || "p1.source.unknown";' in _format_js()
+    assert "p1.source.unknown" in EN and "p1.source.unknown" in ZH
+
+
+def test_every_engine_degradation_code_maps_to_a_locale_key():
+    """The engines report internal English codes in `warnings`. Each code the
+    engine can emit must have a locale key, and the key must be one the per-format
+    list also shows — otherwise a run warns about a gap the upload panel hid."""
+    engine = ""
+    for name in ("xlsx_engine.py", "pptx_engine.py"):
+        with open(os.path.join(ROOT, "lethe", name), encoding="utf-8") as fh:
+            engine += fh.read()
+    codes = set(re.findall(r'warnings\.append\("((?:xlsx|pptx)\.[a-z_]+)"\)', engine))
+    assert len(codes) == 9, f"unexpected engine degradation codes: {sorted(codes)}"
+
+    code_block = _format_object("DEGRADATION_CODE_KEYS")
+    mapped = dict(re.findall(r'"([\w.]+)": "([\w.]+)"', code_block))
+    assert set(mapped) == codes, f"code mapping drifted: {set(mapped) ^ codes}"
+
+    list_block = _format_object("DEGRADATION_KEYS")
+    for code, key in mapped.items():
+        assert key in EN and key in ZH, f"{code} -> {key} missing from a locale"
+        fmt = code.split(".")[0]
+        assert f'"{key}"' in list_block, f"{key} is not listed for its format"
+        assert fmt in list_block, f"{fmt} has no list entry for {key}"
+    # every mapped key is listed, and the only listed-but-unmapped entry is a gap
+    # no writer can detect (text baked into a picture), which the panel can only
+    # announce up front
+    listed = set(re.findall(r'"(p1\.(?:xlsx|pptx)\.degradations\.[\w.]+)"', list_block))
+    assert set(mapped.values()) <= listed, f"listed/mapped drift: {listed ^ set(mapped.values())}"
+    assert listed - set(mapped.values()) == {"p1.pptx.degradations.media"}

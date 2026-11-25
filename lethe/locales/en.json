@@ -355,6 +355,7 @@
   "p1.source.pattern": "Pattern",
   "p1.source.preset_rule": "Context rule",
   "p1.source.manual": "Manual",
+  "p1.source.unknown": "Unknown",
   "p1.generate.title": "Your de-identified file",
   "p1.generate.ready": "{count} replacement(s) · {tokens} token(s)",
   "p1.generate.download": "Download de-identified file",

@@ -355,6 +355,7 @@
   "p1.source.pattern": "正则",
   "p1.source.preset_rule": "上下文规则",
   "p1.source.manual": "手动",
+  "p1.source.unknown": "未知",
   "p1.generate.title": "脱敏后的文件",
   "p1.generate.ready": "{count} 处替换 · {tokens} 个令牌",
   "p1.generate.download": "下载脱敏文件",
