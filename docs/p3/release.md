@@ -1,4 +1,58 @@
-# Release, cache invalidation and known degradation
+# Release, offline deployment and known degradation
+
+## Static release artifact
+
+The production artifact is the directory produced by:
+
+```text
+pixi run web-build
+```
+
+It is written to `dist/web` and is a complete same-origin static site. On the
+current baseline it contains 196 files and about 52 MiB, including 154 pinned
+vendor files (53,652,823 bytes). Its deployment shape is:
+
+```text
+dist/web/
+  index.html  manifest.webmanifest  sw.js  client-store.js
+  ui/         lib/        worker/       py/
+  locales/    static/     dictionary/  assets/vendor/
+```
+
+Publish the whole directory. It is not an SPA that can fetch files from a CDN,
+a second origin or a parent directory. The service worker and worker code use
+root-relative paths, so deploy at the origin root. Missing files are errors, not
+routes to another HTML page.
+
+### HTTPS and MIME requirements
+
+- Serve over HTTPS, or from `http://localhost` for local verification. Service
+  workers, OPFS, WebCrypto and installability require a secure context.
+- Serve `.mjs`/`.js` as `text/javascript`, `.wasm` as `application/wasm`,
+  `.json` as `application/json`, `.whl` as `application/octet-stream`, and
+  `.gz` as `application/gzip` (or `application/x-gzip`).
+- Send `Cache-Control: no-cache` for `/sw.js` and `/index.html` so deployment
+  checks can observe a new release. The service worker supplies the versioned
+  shell/runtime caches.
+- Do not cache `/api/*`, uploaded documents, extracted text, results or token
+  maps at the reverse proxy. The P3 app has no document API, but the same
+  origin may still host the frozen v1 app until cutover.
+
+Keep releases immutable and retain at least the current and previous trees:
+
+```text
+/srv/lethe/releases/<release-id>/...
+/srv/lethe/current -> ../releases/<release-id>
+```
+
+Publish into a new release directory, verify it, then atomically replace the
+`current` symlink. Do not overwrite the files of a release that users may still
+have open.
+
+Before building a release, bump `CACHE_VERSION` in `web/sw.js` whenever any
+shell, runtime asset or worker source changes. The static app currently
+registers `/sw.js` directly, so `CACHE_VERSION` is the reliable cache
+invalidation key. Do not rely on users clearing site data.
 
 ## Runtime load policy
 
@@ -27,16 +81,53 @@ network request.  A missing runtime-cache entry is an error; there is no
 silent network fallback.
 
 The service worker has separate shell and runtime caches named with
-`APP_VERSION` and `CACHE_VERSION`.  Every release changes the app version;
-cache-policy changes also bump `CACHE_VERSION` (currently `7`).  Activation
-deletes all older `lethe-*` caches, then claims the current clients.  A failed
-precache leaves the progress/error UI visible and exposes retry; the next
-successful attempt writes the new release cache.
+`APP_VERSION` and `CACHE_VERSION`. The static app does not append a query
+version when registering the worker, so `APP_VERSION` remains `dev`; every
+static release must bump `CACHE_VERSION` (currently `7`). Activation deletes
+all older `lethe-*` caches, then claims the current clients. A failed precache
+leaves the progress/error UI visible and exposes retry; the next successful
+attempt writes the new release cache.
 
 Changing `web/assets/vendor/VERSIONS.json` or
 `web/assets/vendor/manifest.json` is the trigger to rerun the complete
 `fidelity-corpus` gate.  The asset guard rejects version drift, unpinned files,
 CDN references and micropip.
+
+### Upgrade procedure
+
+1. Build and verify the new immutable release tree:
+
+   ```text
+   pixi run release-check
+   pixi run web-build
+   ```
+
+2. Copy `dist/web` to `/srv/lethe/releases/<new-release>`.
+3. Atomically point `/srv/lethe/current` at the new release.
+4. Open the app online once and wait for the preload/offline-ready indication.
+5. Reload once and confirm the new cache names are active and old `lethe-*`
+   caches are gone.
+6. Disable the network and complete the three-format acceptance run below.
+7. Keep the previous release tree until the upgrade has been accepted.
+
+IndexedDB and OPFS are origin-scoped. Upgrading the static files at the same
+origin preserves user entities, results and the active/previous signed
+dictionary packs. Changing host, port or scheme creates a different origin and
+will appear as empty user data.
+
+### Rollback procedure
+
+1. Point `/srv/lethe/current` back to the retained previous release directory.
+2. Open the app online once so the browser installs the previous `sw.js` and
+   repopulates its versioned caches.
+3. Reload and confirm the previous cache names are active.
+4. Disable the network and repeat the three-format acceptance run.
+5. Do not clear site data as part of rollback. The current IndexedDB schema is
+   additive and the same-origin user layer must survive an app rollback.
+
+The signed preset dictionary has its own two-slot OPFS rollback: the client can
+activate the retained previous pack without rolling back the static app. See
+`docs/p3/dictionary-distribution.md`.
 
 ## Fidelity gate
 
@@ -77,6 +168,74 @@ Pyodide heap alone, and no format may raise it.
 | docx | 52,230,244 B / 35 | 2.9 s | 1,108 MB | **2,050 MB** | 510 MB |
 | xlsx | 52,198,922 B / 250,001 | 33.1 s | 1,118 MB | **1,870 MB** | 178 MB |
 | pptx | 51,437,965 B / 506 | 1.0 s | 1,118 MB | **1,634 MB** | 926 MB |
+
+These are whole process-tree RSS peaks, including the browser and worker, not
+only the Pyodide heap.
+
+## File-size and machine limits
+
+- Files over 35 MB show a warning and remain processable.
+- Files over 50 MB are rejected before document libraries open them.
+- The 90-file fidelity gate keeps the 50 MB absolute peak at or below 2.5 GB
+  for docx/pptx and 2 GB for xlsx.
+- For deployment planning, reserve about 3.5 GB of transient RSS headroom for a
+  50 MB docx, including browser and OS overhead. This is deliberately more
+  conservative than the gate measurement and allows for allocator variance.
+- Intranet workstations should have at least 16 GB RAM.
+- On an 8 GB machine, limit files to 20 MB or less and process only xlsx/pptx.
+  Do not use 50 MB docx workloads on 8 GB machines.
+
+## Worker lifecycle
+
+The app deliberately uses one document Worker and one in-flight operation:
+
+- uploads are processed sequentially; a second operation receives `BUSY`
+  instead of starting a second Worker;
+- the UI disables processing controls while a run is active;
+- a completed result larger than 35 MB triggers Worker teardown and rebuild;
+- OOM, crash, watchdog timeout and cancellation after dispatch also recycle the
+  Worker;
+- after a large task, wait for the runtime badge to return to ready before
+  starting the next file.
+
+Do not batch several large documents concurrently in one browser profile.
+
+## Offline acceptance
+
+The automated acceptance path is:
+
+```text
+pixi run release-check
+pixi run release-offline
+```
+
+`release-offline` is the P1 DoD suite. It clears caches, starts online once,
+cuts the network, reloads from the service worker, then redacts and restores
+docx, xlsx and pptx fixtures. It asserts zero leaked names, character-identical
+restored text parts, no external requests, offline cryptography load, and the
+20 MB / 50 MB / repeated-35 MB memory and Worker-recycle gates.
+
+For a release-candidate sign-off, repeat this manual path in a clean Chromium
+profile against the HTTPS static origin:
+
+1. Clear site data, open the release online and wait for the preload progress
+   to finish with the offline-ready message.
+2. Close and reopen the installed PWA while online once; confirm it reaches
+   runtime ready without an HTTP error.
+3. Set DevTools Network to Offline, then reload. The app shell and Worker must
+   still initialise.
+4. Upload one docx, one xlsx and one pptx containing known dictionary names.
+   For each: inspect, detect, generate/download the redacted file, then restore
+   it using the saved conversion.
+5. Verify the redacted files contain no known source names and the restored
+   text matches the originals. Open the files in Office/LibreOffice and confirm
+   there is no repair prompt.
+6. Confirm the Network panel recorded no successful external request and that
+   CacheStorage contains only same-origin shell/runtime assets.
+7. Record the release SHA, browser version, sample SHA-256 values and the
+   observed memory figures with the release evidence.
+8. Repeat after an online upgrade and after rollback to the previous release;
+   user entities and saved conversions must remain visible and usable.
 
 ## Known degradation
 
