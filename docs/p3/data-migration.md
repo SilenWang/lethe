@@ -23,7 +23,9 @@ v1 `POST /api/migrate/export` endpoint.
 `window.lethMigration.importExport(data, passphrase)` imports this shape
 directly. Entities go through the user-layer normalisation, token types are
 unioned, and v1 `job_id` records are re-encrypted through the normal browser
-`saveJob` path. The Settings backup file picker auto-detects the same shape.
+`saveJob` path. The new passphrase is used exactly: if it is blank, imported
+mappings are stored unprotected even when the old vault had a passphrase. The
+Settings backup file picker auto-detects the same shape.
 
 ## Wrong passphrase
 

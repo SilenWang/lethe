@@ -268,7 +268,10 @@ def test_legacy_migration_preserves_vault_on_wrong_passphrase(server, tmp_path):
         dlg.locator("input").first.fill("wrong-pw")
         dlg.locator("input").nth(1).fill("new-pw")
         dlg.get_by_role("button", name="Import").click()
-        page.get_by_text("need the right old passphrase").wait_for(timeout=30000)
+        page.get_by_text("Migration failed", exact=False).wait_for(timeout=30000)
+        page.get_by_text("retry with the correct old passphrase", exact=False).wait_for(
+            timeout=30000
+        )
         ctx.close()
 
     # the legacy vault and its metadata are still in place for retry

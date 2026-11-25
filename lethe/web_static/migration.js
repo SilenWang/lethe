@@ -99,7 +99,7 @@
     if (!window.lethStore) return Promise.reject(new Error('Browser storage is not ready.'));
     return post('/api/migrate/export', { passphrase: oldPassphrase || '' })
       .then(function (data) {
-        return importExport(data, newPassphrase || (oldPassphrase || ''))
+        return importExport(data, newPassphrase || '')
           .then(function (counts) {
             return post('/api/migrate/finalize', {}).then(function (fin) {
               counts.archivedTo = fin.archived_to || null;

@@ -179,3 +179,43 @@ def test_v1_endpoint_success_imports_then_archives(page) -> None:
     assert page.evaluate("window.lethStore.getMapping('20260102-000000-abcd', 'new-pass')") == {
         "[PERSON_001]": "John Smith"
     }
+
+
+def test_blank_new_passphrase_does_not_reuse_old_passphrase(page) -> None:
+    assert page.evaluate("window.lethStore.init()")["ok"]
+    page.evaluate(
+        """() => {
+          window.fetch = async (url) => {
+            if (String(url).endsWith('/export')) {
+              return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                  entities: [],
+                  token_types: [],
+                  jobs: [{
+                    job_id:'20260103-000000-abcd',
+                    mapping:{'[PERSON_001]':'John Smith'}
+                  }],
+                  errors: []
+                })
+              };
+            }
+            return {
+              ok: true,
+              status: 200,
+              json: async () => ({archived:true, archived_to:'migrated-test'})
+            };
+          };
+        }"""
+    )
+    result = _run(page, "window.lethMigration.run('old-pass', '')")
+    assert result["ok"], result
+    assert page.evaluate(
+        "window.lethStore.getMapping('20260103-000000-abcd', '')"
+    ) == {"[PERSON_001]": "John Smith"}
+    wrong = _run(
+        page,
+        "window.lethStore.getMapping('20260103-000000-abcd', 'old-pass')",
+    )
+    assert wrong["ok"] is False
