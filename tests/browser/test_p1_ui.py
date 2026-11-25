@@ -295,3 +295,93 @@ def test_pptx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
     assert extract_all_text_parts(restored.read_bytes()) == extract_all_text_parts(
         (built / "samples" / "pptx-001.pptx").read_bytes()
     )
+
+
+
+def test_run_warnings_are_cleared_when_the_file_changes(page, built: Path) -> None:
+    """A run's degradation note belongs to the file that produced it.
+
+    `xlsx-001.xlsx` contains a formula literal, so detecting it records a real
+    warning. Picking a different file (or clearing the picker) must hide that
+    note immediately — otherwise the next file appears to carry a gap it never
+    triggered. The note lives in the upload panel, so this asserts the element's
+    own hidden state and text rather than on-screen visibility.
+    """
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.select_option("#lang-select", "en")
+    page.wait_for_function("document.documentElement.lang === 'en'")
+
+    page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
+    page.click("#detect-btn")
+    page.wait_for_selector("#panel-review:not([hidden])")
+    page.wait_for_function(
+        "() => { const node = document.querySelector('#upload-warnings');"
+        " return node.hidden === false && node.textContent.trim().length > 0; }"
+    )
+    assert "formula" in page.locator("#upload-warnings").text_content().lower()
+
+    # Switching the file must drop the previous run's warning at once.
+    page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
+    page.wait_for_function(
+        "() => { const node = document.querySelector('#upload-warnings');"
+        " return node.hidden === true && node.textContent.trim() === ''; }"
+    )
+    assert page.locator("#upload-warnings").text_content().strip() == ""
+
+    # Clearing the picker must leave nothing behind either. Detection moved to
+    # the review panel, so the upload panel and its buttons are hidden — drive
+    # them through the DOM, which runs the same handlers a click would.
+    page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
+    page.evaluate("document.getElementById('detect-btn').click()")
+    page.wait_for_function(
+        "() => document.querySelector('#upload-warnings').hidden === false"
+    )
+    page.evaluate("document.getElementById('clear-btn').click()")
+    page.wait_for_function(
+        "() => { const node = document.querySelector('#upload-warnings');"
+        " return node.hidden === true && node.textContent.trim() === ''; }"
+    )
+    assert page.locator("#upload-warnings").text_content().strip() == ""
+
+
+def test_unknown_degradation_code_shows_the_generic_note(page, built: Path) -> None:
+    """A newer worker may report a gap this build cannot categorise.
+
+    The raw code must never reach the interface, but the privacy warning must
+    still appear once — silently dropping it could hide content the writer left
+    untouched.
+    """
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.select_option("#lang-select", "en")
+    page.wait_for_function("document.documentElement.lang === 'en'")
+
+    page.evaluate(
+        """() => {
+            const bridge = window.__letheBridge;
+            const original = bridge.run.bind(bridge);
+            bridge.run = async (request) => {
+                const result = await original(request);
+                if (request.op === "redact") {
+                    result.warnings = ["xlsx.new_untouched_content"];
+                }
+                return result;
+            };
+        }"""
+    )
+    page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
+    page.click("#detect-btn")
+    page.wait_for_selector("#panel-review:not([hidden])")
+    page.wait_for_function(
+        "() => { const node = document.querySelector('#upload-warnings');"
+        " return node.hidden === false && node.textContent.trim().length > 0; }"
+    )
+    note = page.locator("#upload-warnings").text_content()
+    lowered = note.lower()
+    assert "left untouched" in lowered
+    assert "xlsx.new_untouched_content" not in note
+    # one generic note regardless of how many unknown codes arrive
+    assert lowered.count("left untouched") == 1

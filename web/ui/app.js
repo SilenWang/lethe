@@ -293,6 +293,9 @@ function pickFile(file) {
   state.detection = null;
   state.generated = null;
   state.selected = new Set();
+  // A new file has not been run yet: the previous file's degradation note must
+  // not survive, or the user reads it as a property of this one.
+  showWarnings([]);
   $("upload-file").hidden = false;
   $("upload-file").textContent = t("p1.upload.selected", { name: file.name, size: humanSize(file.size) });
   const note = $("upload-note");
@@ -319,6 +322,7 @@ function clearFile() {
   if ($("upload-degradations")) $("upload-degradations").hidden = true;
   const list = $("degradation-list");
   if (list) list.textContent = "";
+  showWarnings([]);
   $("upload-inspect").hidden = true;
   $("inspect-btn").disabled = true;
   $("detect-btn").disabled = true;
@@ -346,17 +350,27 @@ function renderDegradations(file) {
 }
 
 // The codes the engine actually hit for this file, in the interface language.
+// A code this build does not know still means "the writer left something
+// untouched": drop the internal string, but keep the privacy warning by
+// emitting the generic note once.
 function degradationNotes(warnings) {
   if (!Array.isArray(warnings)) return [];
   const seen = new Set();
   const keys = [];
+  let unknown = false;
   for (const code of warnings) {
     const key = DEGRADATION_CODE_KEYS[code];
-    if (!key || seen.has(key)) continue;
+    if (!key) {
+      unknown = true;
+      continue;
+    }
+    if (seen.has(key)) continue;
     seen.add(key);
     keys.push(key);
   }
-  return keys.map((key) => t(key));
+  const notes = keys.map((key) => t(key));
+  if (unknown) notes.push(t("p1.degradations.unknown"));
+  return notes;
 }
 
 function bindDropzone(zone, input, onFile) {

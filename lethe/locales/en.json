@@ -325,6 +325,7 @@
   "p1.upload.checked": "Package checked — all hard limits pass.",
   "p1.upload.wrong_type": "This build accepts .docx, .xlsx and .pptx files.",
   "p1.degradations.title": "What redaction does not rewrite (warned, not silently skipped)",
+  "p1.degradations.unknown": "Other content the writer left untouched (the engine reported a gap this build does not categorise — check the file yourself)",
   "p1.pptx.degradations.chart": "Chart numeric caches (chart titles in slide text are redacted)",
   "p1.pptx.degradations.smartart": "SmartArt / diagram text",
   "p1.pptx.degradations.ole": "OLE embedded objects",

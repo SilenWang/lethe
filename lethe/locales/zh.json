@@ -325,6 +325,7 @@
   "p1.upload.checked": "文件包检查通过——所有硬性上限均未触发。",
   "p1.upload.wrong_type": "本版本接受 .docx、.xlsx 与 .pptx 文件。",
   "p1.degradations.title": "脱敏不重写的内容（会提示，不会悄悄跳过）",
+  "p1.degradations.unknown": "其他未被重写的内容（引擎报告了本版本尚未归类的缺口，请自行核对文件）",
   "p1.pptx.degradations.chart": "图表数值缓存（幻灯片文本里的图表标题会脱敏）",
   "p1.pptx.degradations.smartart": "SmartArt / 图示文字",
   "p1.pptx.degradations.ole": "OLE 嵌入对象",

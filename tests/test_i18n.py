@@ -413,3 +413,21 @@ def test_every_engine_degradation_code_maps_to_a_locale_key():
     listed = set(re.findall(r'"(p1\.(?:xlsx|pptx)\.degradations\.[\w.]+)"', list_block))
     assert set(mapped.values()) <= listed, f"listed/mapped drift: {listed ^ set(mapped.values())}"
     assert listed - set(mapped.values()) == {"p1.pptx.degradations.media"}
+
+
+def test_unknown_degradation_code_falls_back_to_a_generic_note():
+    """A newer worker may report a code this build does not categorise. The raw
+    string must stay out of the UI, but the privacy warning must not vanish: the
+    run shows one generic "left untouched" note instead."""
+    with open(os.path.join(ROOT, "web", "ui", "app.js"), encoding="utf-8") as fh:
+        source = fh.read()
+    body = re.search(r"function degradationNotes\(warnings\) \{.*?\n\}\n", source, re.S)
+    assert body, "degradationNotes() is gone — the unknown-code fallback needs it"
+    notes = body.group(0)
+    assert "unknown = true" in notes, "an unmapped code must set the fallback flag"
+    assert 't("p1.degradations.unknown")' in notes, "the fallback note is never rendered"
+    assert notes.index("if (!key)") < notes.index('t("p1.degradations.unknown")')
+    # the generic note is localized, and it is not one of the code-mapped keys
+    for lang, data in (("en", EN), ("zh", ZH)):
+        assert data.get("p1.degradations.unknown", "").strip(), f"{lang} lacks the generic note"
+    assert "p1.degradations.unknown" not in _format_object("DEGRADATION_CODE_KEYS")
