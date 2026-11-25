@@ -9,9 +9,18 @@ import os
 import sys
 import tempfile
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lethe import Entity, entities_to_dicts, merge_entities, rows_to_entities, store, vault
+from lethe import (
+    Entity,
+    entities_to_dicts,
+    merge_entities,
+    rows_to_entities,
+    store,
+    vault,
+)
 
 
 # ---- dictionary rows <-> Entity objects -------------------------------------
@@ -82,6 +91,19 @@ def test_legacy_export_reports_wrong_passphrase_per_job():
         jobs, errors = vault.legacy_export(tmp, "not-the-pw")
         assert jobs == []
         assert len(errors) == 1 and errors[0]["job_id"] == "20260101-000000-abcd"
+
+
+def test_legacy_fernet_fixture_parity():
+    fixture_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "fixtures",
+        "legacy-vault-2026-01-01.json",
+    )
+    with open(fixture_path, "r", encoding="utf-8") as fh:
+        fixture = json.load(fh)
+    assert vault.decrypt_record(fixture["record"], fixture["passphrase"]) == fixture["expected"]
+    with pytest.raises(ValueError, match="Wrong passphrase"):
+        vault.decrypt_record(fixture["record"], "wrong-passphrase")
 
 
 def test_legacy_archive_moves_only_user_data():

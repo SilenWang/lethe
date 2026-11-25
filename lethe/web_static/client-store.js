@@ -388,6 +388,9 @@
   function getMapping(jobId, passphrase) {
     return getOne('jobs', jobId).then(function (record) {
       if (!record) throw new Error('That conversion is no longer in this browser.');
+      if (!record.passphraseProtected && passphrase) {
+        throw new Error('This conversion is not passphrase-protected; leave the passphrase blank.');
+      }
       return decryptMapping(record, passphrase || '');
     });
   }

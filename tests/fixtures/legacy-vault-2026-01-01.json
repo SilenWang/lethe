@@ -1,0 +1,18 @@
+{
+  "passphrase": "legacy-fixture-pass",
+  "record": {
+    "ciphertext": "gAAAAABrBxyuq5yR2rZtt53MVQaLUdpl-_KaNZEcMNWaoRJzfkzvMaE04icnSRwkkt--_nTW-56DheH9CCwjWAp0mZLTW3hPvQ1SahnENrV3lC8ETE0ud20AEj1xCHxbB-a0UTH5UDH6_wnLaVJJ382hGWQVRDey-zUIoQb1x_lElqZVX6ditY1rmYAeA7IUmmaX3EpQBXbHc1voag80-Wpv16zkZAC-eGwJxLQM0HQmiWl9wvduRW-Vmgy-zL3WZr4LIY3N2b9Rru4w3qBW_JEU3UDHUpv6m8BB02YiuLRw24XpKuqHAis=",
+    "salt": "PpmlKgysgQACrCebX81y/g=="
+  },
+  "expected": {
+    "job_id": "20260101-000000-abcd",
+    "created": "2026-01-01T00:00:00Z",
+    "meta": {
+      "source_file": "memo.docx",
+      "replacements": 3
+    },
+    "mapping": {
+      "[PERSON_001]": "John Smith"
+    }
+  }
+}

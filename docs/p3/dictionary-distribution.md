@@ -99,7 +99,8 @@ IndexedDB user entities never enter this module or its OPFS directory.
 1. User dictionary isolation: implemented separately in
    `docs/p3/user-dictionary-isolation.md`.
 2. Migration: IndexedDB v2/v3 compatibility, v1 `/api/migrate/export` import,
-   Fernet fixture parity and wrong-passphrase safety.
+   Fernet fixture parity and wrong-passphrase safety are implemented separately
+   in `docs/p3/data-migration.md`.
 3. i18n/cleanup: final key parity, source badges, gate/degradation copy and
    non-cutover dead-code removal.
 4. Release/docs: static deployment, offline install/upgrade, sizing and machine
