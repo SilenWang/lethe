@@ -28,7 +28,7 @@ import {
  */
 'use strict';
 
-var CACHE_VERSION = '7';
+var CACHE_VERSION = '8';
 var APP_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 var SHELL_CACHE = 'lethe-p1-shell-v' + APP_VERSION + '-r' + CACHE_VERSION;
 var RUNTIME_CACHE = 'lethe-p1-runtime-v' + APP_VERSION + '-r' + CACHE_VERSION;
@@ -39,6 +39,7 @@ var SHELL_PATHS = [
   '/index.html',
   '/manifest.webmanifest',
   '/client-store.js',
+  '/migration.js',
   '/ui/app.js',
   '/ui/app.css',
   '/ui/i18n.js',

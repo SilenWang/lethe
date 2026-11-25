@@ -29,6 +29,8 @@
           </select>
         </label>
         <button id="install-btn" type="button" class="btn btn-ghost" hidden data-i18n="p1.install"></button>
+        <button id="migration-import-btn" type="button" class="btn btn-ghost" data-i18n="p1.migration.import"></button>
+        <input id="migration-import-input" type="file" accept=".json,application/json" hidden />
       </div>
     </header>
 
@@ -168,6 +170,7 @@
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
     <script src="./client-store.js"></script>
+    <script src="./migration.js"></script>
     <script type="module" src="./ui/app.js"></script>
   </body>
 </html>

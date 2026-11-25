@@ -9,7 +9,7 @@ pixi run web-build
 ```
 
 It is written to `dist/web` and is a complete same-origin static site. On the
-current baseline it contains 198 files and about 52 MiB, including 154 pinned
+current baseline it contains 199 files and about 52 MiB, including 154 pinned
 vendor files (53,652,823 bytes). Its deployment shape is:
 
 ```text
@@ -82,7 +82,7 @@ silent network fallback.
 The service worker has separate shell and runtime caches named with
 `APP_VERSION` and `CACHE_VERSION`. The static app does not append a query
 version when registering the worker, so `APP_VERSION` remains `dev`; every
-static release must bump `CACHE_VERSION` (currently `7`). Activation deletes
+static release must bump `CACHE_VERSION` (currently `8`). Activation deletes
 all older `lethe-*` caches, then claims the current clients. A failed precache
 leaves the progress/error UI visible and exposes retry; the next successful
 attempt writes the new release cache.
@@ -164,9 +164,9 @@ Pyodide heap alone, and no format may raise it.
 
 | Format | Fixture / hits | Redact | Baseline | Peak | Headroom |
 |---|---:|---:|---:|---:|---:|
-| docx | 52,230,244 B / 35 | 2.9 s | 1,108 MB | **2,050 MB** | 510 MB |
-| xlsx | 52,198,922 B / 250,001 | 33.1 s | 1,118 MB | **1,870 MB** | 178 MB |
-| pptx | 51,437,965 B / 506 | 1.0 s | 1,118 MB | **1,634 MB** | 926 MB |
+| docx | 52,230,244 B / 35 | 2.8 s | 1,082 MB | **2,031 MB** | 529 MB |
+| xlsx | 52,198,922 B / 250,001 | 32.8 s | 1,092 MB | **1,756 MB** | 292 MB |
+| pptx | 51,437,965 B / 506 | 1.0 s | 1,090 MB | **1,596 MB** | 964 MB |
 
 These are whole process-tree RSS peaks, including the browser and worker, not
 only the Pyodide heap.

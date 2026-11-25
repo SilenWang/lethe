@@ -25,6 +25,7 @@ dev = [
     "pillow",
     "playwright",
     "python-docx",
+    "python-pptx",
     "pytest",
 ]
 

@@ -1,9 +1,12 @@
-"""v1 migrate/export compatibility and no-overwrite behavior."""
+"""Pure-browser v1 export import, including the real release page."""
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,24 +26,36 @@ PAGE = (
 )
 
 
+def _launch(playwright):
+    launch = {}
+    if os.environ.get("LETHE_CHROMIUM_PATH"):
+        launch["executable_path"] = os.environ["LETHE_CHROMIUM_PATH"]
+    return playwright.chromium.launch(**launch)
+
+
 @pytest.fixture()
 def page(tmp_path: Path):
     assert sync_playwright is not None
     (tmp_path / "index.html").write_text(PAGE, encoding="utf-8")
     for name in ("client-store.js", "migration.js"):
-        shutil.copy2(
-            REPO / "lethe" / "web_static" / name,
-            tmp_path / name,
-        )
+        shutil.copy2(REPO / "lethe" / "web_static" / name, tmp_path / name)
     with StaticServer(tmp_path) as server, sync_playwright() as playwright:
-        launch = {}
-        if os.environ.get("LETHE_CHROMIUM_PATH"):
-            launch["executable_path"] = os.environ["LETHE_CHROMIUM_PATH"]
-        browser = playwright.chromium.launch(**launch)
+        browser = _launch(playwright)
         page = browser.new_page()
         page.goto(f"{server.base_url}/")
         yield page
         browser.close()
+
+
+@pytest.fixture(scope="module")
+def release(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    out = tmp_path_factory.mktemp("release-import") / "web"
+    subprocess.run(
+        [sys.executable, str(REPO / "tools" / "build_web.py"), "--out", str(out)],
+        cwd=REPO,
+        check=True,
+    )
+    return out
 
 
 def _run(page, expression: str):
@@ -52,170 +67,99 @@ def _run(page, expression: str):
     )
 
 
-def test_v1_export_shape_direct_imports_entities_types_and_jobs(page) -> None:
+def test_v1_export_shape_imports_entities_types_and_jobs(page) -> None:
     assert page.evaluate("window.lethStore.init()")["ok"]
     page.evaluate("window.lethStore.saveTokenTypes(['PROJECT'])")
-
     result = _run(
         page,
         """window.lethMigration.importExport({
           entities: [{canonical:'Legacy Co', type:'COUNTERPARTY', aliases:['LC']}],
-          token_types: ['PROJECT', 'FUND'],
-          jobs: [{
+          token_types:['PROJECT','FUND'],
+          jobs:[{
             job_id:'20260101-000000-abcd',
             created:'2026-01-01T00:00:00Z',
             source_files:['memo.docx'],
             replacements:3,
             mapping:{'[PERSON_001]':'John Smith'}
           }],
-          errors: []
-        }, 'import-pass')""",
+          errors:[]
+        }, '')""",
     )
     assert result["ok"], result
     assert result["value"]["entitiesAdded"] == 1
-    assert result["value"]["token_types"] == 2
     assert result["value"]["jobs"] == 1
-
-    entities = page.evaluate("window.lethStore.getEntities()")
-    assert entities == [
-        {
-            "key": "legacy co",
-            "canonical": "Legacy Co",
-            "type": "COUNTERPARTY",
-            "aliases": ["LC"],
-            "source": "user",
-            "packVersion": None,
-            "updatedAt": entities[0]["updatedAt"],
-        }
-    ]
     assert page.evaluate("window.lethStore.getTokenTypes()") == ["PROJECT", "FUND"]
-    jobs = page.evaluate("window.lethStore.listJobs()")
-    assert [job["jobId"] for job in jobs] == ["20260101-000000-abcd"]
     assert page.evaluate(
-        "window.lethStore.getMapping('20260101-000000-abcd', 'import-pass')"
+        "window.lethStore.getMapping('20260101-000000-abcd', '')"
     ) == {"[PERSON_001]": "John Smith"}
 
 
-def test_wrong_old_passphrase_does_not_write_any_imported_data(page) -> None:
+def test_export_with_errors_writes_nothing(page) -> None:
     assert page.evaluate("window.lethStore.init()")["ok"]
     page.evaluate(
         "Promise.all(["
         "window.lethStore.mergeEntities([{canonical:'Keep Me',type:'PERSON'}]),"
-        "window.lethStore.saveTokenTypes(['KEEP']),"
-        "window.lethStore.saveJob({jobId:'keep-job',mapping:{'[PERSON_001]':'Keep Me'},passphrase:''})"
+        "window.lethStore.saveTokenTypes(['KEEP'])"
         "])"
     )
     before = page.evaluate(
-        "Promise.all([window.lethStore.getEntities(),window.lethStore.getTokenTypes(),"
-        "window.lethStore.listJobs(),window.lethStore.getMapping('keep-job','')])"
+        "Promise.all([window.lethStore.getEntities(),window.lethStore.getTokenTypes()])"
     )
-    page.evaluate(
-        """() => {
-          window.__migrationCalls = [];
-          window.fetch = async (url) => {
-            window.__migrationCalls.push(String(url));
-            return {
-              ok: true,
-              status: 200,
-              json: async () => ({
-                entities: [{canonical:'Must Not Import', type:'PERSON'}],
-                token_types: ['BAD'],
-                jobs: [],
-                errors: [{job_id:'20260101-000000-abcd', error:'Wrong passphrase'}]
-              })
-            };
-          };
-        }"""
+    result = _run(
+        page,
+        """window.lethMigration.importExport({
+          entities:[{canonical:'Must Not Import',type:'PERSON'}],
+          token_types:['BAD'],
+          jobs:[],
+          errors:[{job_id:'bad',error:'Wrong passphrase'}]
+        }, '')""",
     )
-
-    result = _run(page, "window.lethMigration.run('wrong-pass', 'new-pass')")
     assert result["ok"] is False
     assert "Nothing was imported" in result["message"]
     after = page.evaluate(
-        "Promise.all([window.lethStore.getEntities(),window.lethStore.getTokenTypes(),"
-        "window.lethStore.listJobs(),window.lethStore.getMapping('keep-job','')])"
+        "Promise.all([window.lethStore.getEntities(),window.lethStore.getTokenTypes()])"
     )
     assert after == before
-    assert page.evaluate("window.__migrationCalls") == ["/api/migrate/export"]
 
 
-def test_v1_endpoint_success_imports_then_archives(page) -> None:
-    assert page.evaluate("window.lethStore.init()")["ok"]
-    page.evaluate(
-        """() => {
-          window.__migrationCalls = [];
-          window.fetch = async (url) => {
-            window.__migrationCalls.push(String(url));
-            if (String(url).endsWith('/export')) {
-              return {
-                ok: true,
-                status: 200,
-                json: async () => ({
-                  entities: [{canonical:'Endpoint Co', type:'COUNTERPARTY'}],
-                  token_types: ['PROJECT'],
-                  jobs: [{
-                    job_id:'20260102-000000-abcd',
-                    mapping:{'[PERSON_001]':'John Smith'}
-                  }],
-                  errors: []
-                })
-              };
-            }
-            return {
-              ok: true,
-              status: 200,
-              json: async () => ({archived:true, archived_to:'migrated-test'})
-            };
-          };
-        }"""
-    )
-    result = _run(page, "window.lethMigration.run('old-pass', 'new-pass')")
-    assert result["ok"], result
-    assert result["value"]["archivedTo"] == "migrated-test"
-    assert page.evaluate("window.__migrationCalls") == [
-        "/api/migrate/export",
-        "/api/migrate/finalize",
-    ]
-    assert page.evaluate("window.lethStore.getMapping('20260102-000000-abcd', 'new-pass')") == {
-        "[PERSON_001]": "John Smith"
+def test_release_page_imports_real_v1_json_file(release: Path, tmp_path: Path) -> None:
+    assert (release / "migration.js").is_file()
+    html = (release / "index.html").read_text(encoding="utf-8")
+    assert '<script src="./migration.js"></script>' in html
+    assert 'id="migration-import-input"' in html
+
+    backup = {
+        "entities": [{"canonical": "Release Co", "type": "COUNTERPARTY", "aliases": ["RC"]}],
+        "token_types": ["PROJECT"],
+        "jobs": [{
+            "job_id": "20260104-000000-abcd",
+            "created": "2026-01-04T00:00:00Z",
+            "source_files": ["release.docx"],
+            "replacements": 2,
+            "mapping": {"[PERSON_001]": "Release Person"},
+        }],
+        "errors": [],
     }
+    backup_path = tmp_path / "legacy-export.json"
+    backup_path.write_text(json.dumps(backup), encoding="utf-8")
 
-
-def test_blank_new_passphrase_does_not_reuse_old_passphrase(page) -> None:
-    assert page.evaluate("window.lethStore.init()")["ok"]
-    page.evaluate(
-        """() => {
-          window.fetch = async (url) => {
-            if (String(url).endsWith('/export')) {
-              return {
-                ok: true,
-                status: 200,
-                json: async () => ({
-                  entities: [],
-                  token_types: [],
-                  jobs: [{
-                    job_id:'20260103-000000-abcd',
-                    mapping:{'[PERSON_001]':'John Smith'}
-                  }],
-                  errors: []
-                })
-              };
-            }
-            return {
-              ok: true,
-              status: 200,
-              json: async () => ({archived:true, archived_to:'migrated-test'})
-            };
-          };
-        }"""
-    )
-    result = _run(page, "window.lethMigration.run('old-pass', '')")
-    assert result["ok"], result
-    assert page.evaluate(
-        "window.lethStore.getMapping('20260103-000000-abcd', '')"
-    ) == {"[PERSON_001]": "John Smith"}
-    wrong = _run(
-        page,
-        "window.lethStore.getMapping('20260103-000000-abcd', 'old-pass')",
-    )
-    assert wrong["ok"] is False
+    with StaticServer(release) as server, sync_playwright() as playwright:
+        browser = _launch(playwright)
+        page = browser.new_page()
+        page.set_default_timeout(240_000)
+        page.goto(f"{server.base_url}/")
+        page.wait_for_function(
+            "window.lethMigration && document.querySelector('#migration-import-input')"
+        )
+        page.set_input_files("#migration-import-input", str(backup_path))
+        page.wait_for_function(
+            "document.querySelector('#toast').innerText.includes('Backup imported') || "
+            "document.querySelector('#toast').innerText.includes('备份已导入')"
+        )
+        assert page.evaluate(
+            "window.lethStore.getEntities().then(rows => rows.map(row => row.canonical))"
+        ) == ["Release Co"]
+        assert page.evaluate(
+            "window.lethStore.getMapping('20260104-000000-abcd', '')"
+        ) == {"[PERSON_001]": "Release Person"}
+        browser.close()

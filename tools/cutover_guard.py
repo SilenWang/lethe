@@ -55,6 +55,7 @@ FORBIDDEN_TERMS = [
     "Runtime" + "Store",
     "JOB_" + "TTL",
     "LEGACY_" + "FROZEN_COUNTS",
+    "/api/" + "migrate",
 ]
 
 

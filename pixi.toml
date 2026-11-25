@@ -15,6 +15,9 @@ mypy = ">=1.11"
 playwright = ">=1.47"
 pillow = ">=10"
 lxml = ">=6.0"
+openpyxl = ">=3.1"
+python-docx = ">=1.1"
+python-pptx = ">=1.0"
 
 [tasks]
 # ---- P0 gates: every command below is what the five CI jobs run -------------

@@ -31,6 +31,9 @@ mappings. Importing a v1 export re-encrypts each mapping with the passphrase
 entered for this browser. A wrong old passphrase rejects the entire import
 before IndexedDB is written. See [`p3/data-migration.md`](p3/data-migration.md).
 
+The PWA header's **Import backup** button imports both current JSON backups and
+previously downloaded v1 export files locally; it makes no server request.
+
 ## Offline and release notes
 
 Deployment, upgrade, rollback, machine sizing and the manual offline acceptance

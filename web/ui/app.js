@@ -749,6 +749,26 @@ async function boot() {
       toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
     });
   });
+  $("migration-import-btn").addEventListener("click", () => $("migration-import-input").click());
+  $("migration-import-input").addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    try {
+      const result = await window.lethMigration.importFile(file, "");
+      await refreshDict();
+      await refreshStorageLine();
+      await loadJobs();
+      toast(t("p1.migration.done", {
+        entities: result.entitiesAdded ?? result.added ?? 0,
+        jobs: result.jobs ?? 0,
+      }), "ok", 8000);
+    } catch (error) {
+      toast(t("p1.migration.failed", {
+        error: String(error?.message || error),
+      }), "error", 0);
+    }
+  });
   $("rescan-btn").addEventListener("click", detect);
   $("generate-btn").addEventListener("click", generate);
   $("select-all-btn").addEventListener("click", () => {

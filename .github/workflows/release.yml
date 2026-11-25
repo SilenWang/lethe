@@ -20,8 +20,12 @@ env:
 jobs:
   static-pwa:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: prefix-dev/setup-pixi@v0.8.8
         with:
@@ -37,10 +41,7 @@ jobs:
       - name: Package static site
         shell: bash
         run: |
-          ref="${GITHUB_REF_NAME}"
-          if [ -z "$ref" ] || [ "$ref" = "workflow_dispatch" ]; then
-            ref="${{ github.event.inputs.tag }}"
-          fi
+          ref="$RELEASE_TAG"
           version="${ref#v}"
           mkdir -p release
           zip -qr "release/lethe-${version}-web.zip" dist/web
@@ -52,7 +53,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.stage.outputs.tag }}" \
+          gh release create "$RELEASE_TAG" \
             release/lethe-${{ steps.stage.outputs.version }}-web.zip \
             release/lethe-${{ steps.stage.outputs.version }}-web.zip.sha256 \
             --draft \
