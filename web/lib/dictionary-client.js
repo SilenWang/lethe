@@ -439,6 +439,9 @@ export class DictionaryClient {
           previousHash ? candidate.previousVersion : null,
           previousHash,
         );
+        // Parsed rows carry packVersion metadata. A persistent fallback must
+        // not leave rows from the previous pointer epoch visible to this client.
+        this._entityCache.clear();
         return {
           pointer: { ...candidate, ...repaired, repaired: true },
           pack,
@@ -593,7 +596,12 @@ export class DictionaryClient {
       const entities = [];
       const seen = new Set();
       for (const shard of shards) {
-        let rows = this._entityCache.get(shard.sha256);
+        const cacheKey = [
+          selected.pointer.currentVersion,
+          selected.pointer.currentManifestSha256,
+          shard.sha256,
+        ].join(":");
+        let rows = this._entityCache.get(cacheKey);
         if (!rows) {
           const packed = await readBytesFile(shardsDir, shard.sha256);
           if (!packed) {
@@ -603,7 +611,7 @@ export class DictionaryClient {
             throw dictionaryError("SHARD_INVALID", `Dictionary shard ${shard.id} failed verification.`);
           }
           rows = parseEntities(await gunzip(packed), manifest);
-          this._entityCache.set(shard.sha256, rows);
+          this._entityCache.set(cacheKey, rows);
         }
         for (const row of rows) {
           const key = row.canonical.toLowerCase();

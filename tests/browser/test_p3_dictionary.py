@@ -276,6 +276,45 @@ def test_damaged_pointer_target_falls_back_to_previous_complete_slot(page, damag
     assert entities == {"ok": True, "value": ["Alpha Holdings", "Beta Person"]}
 
 
+def test_same_client_reload_after_fallback_returns_v1_pack_version(page) -> None:
+    page.evaluate(
+        "window.sharedDictionary = window.client('/v2');"
+        "window.sharedDictionary.baseUrl = '/v1'"
+    )
+    assert _run(page, "window.sharedDictionary.update()")["ok"]
+    page.evaluate("window.sharedDictionary.baseUrl = '/v2'")
+    assert _run(page, "window.sharedDictionary.update()")["ok"]
+    loaded_v2 = _run(
+        page,
+        "window.sharedDictionary.loadEntities({tier:'all'})"
+        ".then(rows => rows.map(row => ({canonical: row.canonical, packVersion: row.packVersion})))",
+    )
+    assert loaded_v2["ok"], loaded_v2
+    assert {row["packVersion"] for row in loaded_v2["value"]} == {"2026.11.25.2"}
+
+    assert page.evaluate(
+        """async () => {
+          const origin = await navigator.storage.getDirectory();
+          const root = await origin.getDirectoryHandle('lethe-dictionaries');
+          const packs = await root.getDirectoryHandle('packs');
+          const pack = await packs.getDirectoryHandle('2026.11.25.2');
+          await pack.removeEntry('manifest.json');
+          return true;
+        }"""
+    )
+    loaded_v1 = _run(
+        page,
+        "window.sharedDictionary.loadEntities({tier:'all'})"
+        ".then(rows => rows.map(row => ({canonical: row.canonical, packVersion: row.packVersion})))",
+    )
+    assert loaded_v1["ok"], loaded_v1
+    assert {row["packVersion"] for row in loaded_v1["value"]} == {"2026.11.25.1"}
+    assert [row["canonical"] for row in loaded_v1["value"]] == [
+        "Alpha Holdings",
+        "Beta Person",
+    ]
+
+
 def test_changed_v2_after_rollback_is_rejected_and_original_retained(page) -> None:
     assert _run(page, "window.client('/v1').update()")["ok"]
     assert _run(page, "window.client('/v2').update()")["ok"]

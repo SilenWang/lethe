@@ -76,6 +76,11 @@ writes a higher-sequence pointer that atomically promotes the previous
 complete slot. This makes activation and damage fallback atomic without
 relying on rename support.
 
+Parsed entity rows are cached by current `packVersion`, current manifest
+digest and shard SHA-256, never by shard SHA alone. A successful persistent
+fallback also clears the in-memory entity cache, so one client instance cannot
+continue returning rows labelled with the pre-fallback `packVersion`.
+
 Rollback swaps `currentVersion` and `previousVersion` through the same pointer
 mechanism. Both packs remain on disk, allowing a roll-forward after rollback.
 The current implementation intentionally does not garbage-collect old pack
