@@ -50,11 +50,6 @@
         "tarball": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz",
         "tarball_sha256": "4dad7ff8fae0f055c350ca34f85b4be18a6b6df5952a6ce36424f7a157b4ada2"
       },
-      "xlsx": {
-        "version": "0.5.1",
-        "tarball": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz",
-        "tarball_sha256": "51b68405ff07e60d10720ec8e16f397981f0c0ec105f0a0c12e528affae01490"
-      },
       "pptx": {
         "version": "0.5.1",
         "tarball": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz",
@@ -1066,144 +1061,6 @@
       "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/package.json"
     },
     {
-      "path": "betteroffice/xlsx/LICENSE",
-      "sha256": "db17c7e4531fd3e1a376cd87ad1ddf9a195118e47fde7f26b9feb657c8c114af",
-      "bytes": 11363,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/LICENSE"
-    },
-    {
-      "path": "betteroffice/xlsx/README.md",
-      "sha256": "f8452bb86c0b9602da8e604c5458f7b159e691264b93ef44fd03d91ede43882a",
-      "bytes": 6730,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/README.md"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/asyncReplica-DuZEFXjI.d.ts",
-      "sha256": "305468b6a9b2cf00dec3c8f96b19aded6451db8ef70eb6e6ef9aef44eb03637b",
-      "bytes": 8563,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/asyncReplica-DuZEFXjI.d.ts"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/chunk-DIDVDN7H.js",
-      "sha256": "6b119c849a7bc2bb1c0d542c3fe3bf37af9380341e388065d783614feb565b4b",
-      "bytes": 32305,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-DIDVDN7H.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/chunk-HJJEOLPD.js",
-      "sha256": "d21f9c39965219898f2c0ea34bb51c1009c8e3c17efe296fea7f22ce3ebaa8da",
-      "bytes": 64441,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-HJJEOLPD.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/chunk-JGTBRHCP.js",
-      "sha256": "a3bf114dada21bcc53f3b8f0e2182013f945a8a50cc55d3154c523c3f5108aae",
-      "bytes": 11074,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-JGTBRHCP.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/chunk-K7TMSGNA.js",
-      "sha256": "65d89f57ce3384932e20b9b0a2173a7aefcaa703f6cf5ee6d6f139bf4b0d60cd",
-      "bytes": 65979,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-K7TMSGNA.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/chunk-O2XFH626.js",
-      "sha256": "3ade205f0bac96a38ed4ca61f523c5b9a827c69746d45d5a10d3b1ed0d2c89d2",
-      "bytes": 185,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-O2XFH626.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/chunk-SXM2HKJL.js",
-      "sha256": "0fbd65cf0344015559ea0707971b4c9bf1971800b2dab9f36eb05195979f2493",
-      "bytes": 9932,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/chunk-SXM2HKJL.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/collaboration.d.ts",
-      "sha256": "b1c54c889f52c7d454902e3684b30ac3d55b3c05ca5712f63d5b11cc655294fe",
-      "bytes": 6279,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/collaboration.d.ts"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/collaboration.js",
-      "sha256": "bedfafb6adabb784620b36dec38f301c13a2b52e959108497be511a19b5e2c5b",
-      "bytes": 655,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/collaboration.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/editPeer-DiFeIMPk.d.ts",
-      "sha256": "17571213991b0c90bd516479ca6463f9cb8b571b228c2bd920fd4b8ac109e7fc",
-      "bytes": 75811,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/editPeer-DiFeIMPk.d.ts"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/generated/xlsx_wasm_bg.wasm",
-      "sha256": "21bed8aaac3fe3832455b686084f69548ffed3859feffadc271d138962be9933",
-      "bytes": 7581717,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/generated/xlsx_wasm_bg.wasm"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/headless.d.ts",
-      "sha256": "1e437d690c4f8a17d05b2eac1cae7650a1aa5399825f39fb72b35e356a186841",
-      "bytes": 12565,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/headless.d.ts"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/headless.js",
-      "sha256": "d28f33b3b2d11c609fcef34cbb634521e3fa5cea037cab94f6a1fd34a02a4ab8",
-      "bytes": 481,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/headless.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/index.d.ts",
-      "sha256": "1651c8211633fedd5f6b554b90efad273176179aee8646a5529269667c643701",
-      "bytes": 5790,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/index.d.ts"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/index.js",
-      "sha256": "e8584112166834b46220ff65a0ff33c10b45c98051a12285f42ba01e6cc66b72",
-      "bytes": 12719,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/index.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/types-DdoEoFSX.d.ts",
-      "sha256": "47cb0c7cf737c406691ebfc67f3b86baa11f0c29b42a5fcef0befa0d566b95d4",
-      "bytes": 11065,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/types-DdoEoFSX.d.ts"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/worker.d.ts",
-      "sha256": "abe11622cc26d511b4d760928e51755ca1b2f4b3ebba03555d09057c8488cafe",
-      "bytes": 2699,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/worker.d.ts"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/worker.js",
-      "sha256": "455ac9d473734455b560323744e7dec1ffbbe6dbf576c8aff08752adcddd135c",
-      "bytes": 557,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/worker.js"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/xlsxSessionWorker.d.ts",
-      "sha256": "6caa0b04bdc10582a3729dae9244f21c5bec0b9ffe7e2a84999c2f868f5dd9be",
-      "bytes": 13,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/xlsxSessionWorker.d.ts"
-    },
-    {
-      "path": "betteroffice/xlsx/dist/xlsxSessionWorker.mjs",
-      "sha256": "87d12788c565a0f55f3a492747b40ba40f5d305f3d6942a5f10b2fc94034eef2",
-      "bytes": 66436,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/dist/xlsxSessionWorker.mjs"
-    },
-    {
-      "path": "betteroffice/xlsx/package.json",
-      "sha256": "a9bc9a76f860b68a0965c2e0b853888640009d10a445f5e7f62fe516299c7e1c",
-      "bytes": 1830,
-      "source": "https://registry.npmjs.org/@betteroffice/xlsx/-/xlsx-0.5.1.tgz::package/package.json"
-    },
-    {
       "path": "pyodide/cffi-1.17.1-cp313-cp313-pyemscripten_2025_0_wasm32.whl",
       "sha256": "2c93a856325b97d30e1f9dfced3d1e490f256309b89edb65c505b2b5d737eaf5",
       "bytes": 147738,
@@ -1271,7 +1128,7 @@
     }
   ],
   "totals": {
-    "files": 201,
-    "bytes": 68335708
+    "files": 178,
+    "bytes": 60346519
   }
 }

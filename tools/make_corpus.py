@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import html
 import io
 import re
 import sys
@@ -48,6 +49,7 @@ W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 CT = "http://schemas.openxmlformats.org/package/2006/content-types"
+SS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 P = "http://schemas.openxmlformats.org/presentationml/2006/main"
 A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 C = "http://schemas.openxmlformats.org/drawingml/2006/chart"
@@ -321,11 +323,194 @@ def _add_xlsx_textbox(parts: dict[str, bytes], marker: str, case: int) -> None:
     parts[name] = _xml(root)
 
 
+_CELL_OPEN = re.compile(rb"<c(?=[\s/>])[^>]*>")
+
+
+def _iter_cells(data: bytes):
+    position = 0
+    for match in _CELL_OPEN.finditer(data):
+        if match.start() < position:
+            continue
+        tag = match.group(0)
+        if tag.endswith(b"/>"):
+            position = match.end()
+            yield match.start(), match.end(), tag
+            continue
+        end = data.find(b"</c>", match.end())
+        if end < 0:
+            break
+        end += 4
+        position = end
+        yield match.start(), end, data[match.start() : end]
+
+
+def _inline_text(chunk: bytes) -> str:
+    return "".join(
+        html.unescape(match.group(1).decode("utf-8"))
+        for match in re.finditer(rb"<t(?:\s[^>]*)?>(.*?)</t>", chunk, re.DOTALL)
+    )
+
+
+def _convert_inline_to_shared(parts: dict[str, bytes], fraction: float) -> None:
+    """Turn a deterministic share of inline cells into shared-string cells.
+
+    P2 needs all three storage forms in the corpus: pure SST, pure inline and
+    mixed.  ``fraction`` 1.0 / 0.0 / 0.5 selects them.
+    """
+    if fraction <= 0:
+        return
+    shared: list[str] = []
+    index: dict[str, int] = {}
+    inline_seen = 0
+    for name in sorted(parts):
+        if not re.fullmatch(r"xl/worksheets/sheet\d+\.xml", name):
+            continue
+        data = parts[name]
+        pieces: list[bytes] = []
+        last = 0
+        for start, end, chunk in _iter_cells(data):
+            tag_end = chunk.find(b">")
+            tag = chunk[: tag_end + 1]
+            if b't="inlineStr"' not in tag:
+                continue
+            convert = fraction >= 1.0 or (fraction > 0 and inline_seen % 2 == 0)
+            inline_seen += 1
+            if not convert:
+                continue
+            text = _inline_text(chunk)
+            if text not in index:
+                index[text] = len(shared)
+                shared.append(text)
+            new_tag = tag.replace(b't="inlineStr"', b't="s"')
+            new_chunk = new_tag + b"<v>" + str(index[text]).encode() + b"</v></c>"
+            pieces.append(data[last:start])
+            pieces.append(new_chunk)
+            last = end
+        if pieces:
+            pieces.append(data[last:])
+            parts[name] = b"".join(pieces)
+    if not shared:
+        return
+    items = "".join(
+        f"<si><t>{escape(text)}</t></si>" for text in shared
+    )
+    parts["xl/sharedStrings.xml"] = (
+        f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<sst xmlns="{SS_MAIN}" count="{len(shared)}" uniqueCount="{len(shared)}">'
+        f"{items}</sst>"
+    ).encode()
+    ct = parts["[Content_Types].xml"].decode("utf-8")
+    if "/xl/sharedStrings.xml" not in ct:
+        ct = ct.replace(
+            "</Types>",
+            '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/></Types>',
+        )
+        parts["[Content_Types].xml"] = ct.encode("utf-8")
+    rels_name = "xl/_rels/workbook.xml.rels"
+    rels = parts[rels_name].decode("utf-8")
+    if "sharedStrings.xml" not in rels:
+        rid = _next_rid(etree.fromstring(rels.encode("utf-8")))
+        rels = rels.replace(
+            "</Relationships>",
+            f'<Relationship Id="{rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>',
+        )
+        parts[rels_name] = rels.encode("utf-8")
+
+
+def _add_xlsx_text_parts(parts: dict[str, bytes], marker: str, case: int) -> None:
+    """Add the P2 text-part coverage: persons, threaded comments, customXml."""
+    person_id = "{11111111-1111-1111-1111-111111111111}"
+    comment_id = "{22222222-2222-2222-2222-222222222222}"
+    parts["xl/persons/person1.xml"] = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<personList xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">'
+        f'<person displayName="Alice Chen" id="{person_id}" userId="alice" providerId="None"/>'
+        "</personList>"
+    ).encode()
+    parts["xl/threadedComments/threadedComment1.xml"] = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<ThreadedComments xmlns="http://schemas.microsoft.com/office/spreadsheetml/2018/threadedcomments">'
+        f'<threadedComment ref="A1" personId="{person_id}" id="{comment_id}" '
+        'dT="2026-01-01T00:00:00Z">'
+        f"<text>John Smith should review {marker}</text></threadedComment></ThreadedComments>"
+    ).encode()
+    parts["customXml/item1.xml"] = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<root xmlns="urn:lethe:corpus">'
+        f"<owner>John Smith</owner><note>Alice Chen {marker}</note></root>"
+    ).encode()
+    parts["customXml/itemProps1.xml"] = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<ds:datastoreItem ds:itemID="{33333333-3333-3333-3333-333333333333}" '
+        b'xmlns:ds="http://schemas.openxmlformats.org/officeDocument/2006/customXml">'
+        b"<ds:schemaRefs/></ds:datastoreItem>"
+    )
+    parts["customXml/_rels/item1.xml.rels"] = (
+        b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        b'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        b'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXmlProps" Target="itemProps1.xml"/>'
+        b"</Relationships>"
+    )
+    ct = parts["[Content_Types].xml"].decode("utf-8")
+    for part_name, content_type in (
+        ("/xl/persons/person1.xml", "application/vnd.ms-excel.person+xml"),
+        (
+            "/xl/threadedComments/threadedComment1.xml",
+            "application/vnd.ms-excel.threadedcomments+xml",
+        ),
+        (
+            "/customXml/itemProps1.xml",
+            "application/vnd.openxmlformats-officedocument.customXmlProperties+xml",
+        ),
+    ):
+        if part_name not in ct:
+            ct = ct.replace(
+                "</Types>",
+                f'<Override PartName="{part_name}" ContentType="{content_type}"/></Types>',
+            )
+    parts["[Content_Types].xml"] = ct.encode("utf-8")
+    rels_name = "xl/_rels/workbook.xml.rels"
+    rels = parts[rels_name].decode("utf-8")
+    root = etree.fromstring(rels.encode("utf-8"))
+    additions = [
+        (
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml",
+            "../customXml/item1.xml",
+        ),
+        (
+            "http://schemas.microsoft.com/office/2017/10/relationships/person",
+            "persons/person1.xml",
+        ),
+    ]
+    for rel_type, target in additions:
+        if target not in rels:
+            rid = _next_rid(root)
+            rels = rels.replace(
+                "</Relationships>",
+                f'<Relationship Id="{rid}" Type="{rel_type}" Target="{target}"/></Relationships>',
+            )
+            root = etree.fromstring(rels.encode("utf-8"))
+    parts[rels_name] = rels.encode("utf-8")
+    sheet_rels_name = "xl/worksheets/_rels/sheet1.xml.rels"
+    sheet_rels = parts.get(sheet_rels_name, b"").decode("utf-8")
+    if "threadedComments" not in sheet_rels:
+        tag = (
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            if not sheet_rels
+            else sheet_rels.split("</Relationships>")[0]
+        )
+        tag += (
+            '<Relationship Id="rId102" Type="http://schemas.microsoft.com/office/2017/10/relationships/threadedComment" Target="../threadedComments/threadedComment1.xml"/>'
+            "</Relationships>"
+        )
+        parts[sheet_rels_name] = tag.encode("utf-8")
+
+
 def build_xlsx(case: int) -> bytes:
     marker = f"CASE-XLSX-{case:03d}"
     wb = Workbook()
-    wb.properties.creator = "tools/make_corpus.py"
-    wb.properties.lastModifiedBy = "tools/make_corpus.py"
+    wb.properties.creator = "Alice Chen"
+    wb.properties.lastModifiedBy = "John Smith"
     wb.properties.created = datetime(2026, 1, 1, 0, 0, 0)
     wb.properties.modified = datetime(2026, 1, 1, 0, 0, 0)
     ws = wb.active
@@ -381,6 +566,8 @@ def build_xlsx(case: int) -> bytes:
     )
     parts["docProps/core.xml"] = core.encode("utf-8")
     _add_xlsx_textbox(parts, marker, case)
+    _add_xlsx_text_parts(parts, marker, case)
+    _convert_inline_to_shared(parts, {1: 1.0, 2: 0.0, 3: 0.5}.get(case, 0.0))
     return normalize_zip(write_parts(parts))
 
 

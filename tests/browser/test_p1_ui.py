@@ -53,6 +53,7 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     samples = out / "samples"
     samples.mkdir()
     shutil.copy2(REPO / "corpus" / "docx" / "docx-001.docx", samples / "docx-001.docx")
+    shutil.copy2(REPO / "corpus" / "xlsx" / "xlsx-001.xlsx", samples / "xlsx-001.xlsx")
     return out
 
 
@@ -65,6 +66,9 @@ def page(built: Path):
         page.set_default_timeout(240_000)
         page.goto(f"{server.base_url}/")
         page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+        page.wait_for_function(
+            "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+        )
         yield page
         browser.close()
 
@@ -112,6 +116,9 @@ def test_docx_roundtrip_review_generate_restore_and_cache_privacy(
     )
     page.reload()
     page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
 
     page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
     page.click("#detect-btn")
@@ -171,3 +178,56 @@ def test_docx_roundtrip_review_generate_restore_and_cache_privacy(
     assert not [path for path in paths if "samples" in path or path.endswith(".docx")]
     assert any(path.startswith("/assets/vendor/pyodide/") for path in paths)
     assert "/index.html" in paths
+
+
+def test_xlsx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) -> None:
+    page.evaluate(
+        "window.lethStore.mergeEntities([{canonical:'John Smith',"
+        "type:'PERSON',aliases:['J. Smith']}])"
+    )
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+
+    page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
+    page.wait_for_selector("#upload-degradations:not([hidden])")
+    page.select_option("#lang-select", "en")
+    page.wait_for_function(
+        "document.querySelector('#upload-degradations summary').innerText.includes('xlsx')"
+    )
+    page.click("#upload-degradations summary")
+    assert "pivot" in page.locator("#upload-degradations").inner_text().lower()
+    page.click("#detect-btn")
+    page.wait_for_selector("#panel-review:not([hidden])")
+    assert "John Smith" in page.locator("#review-rows").inner_text()
+    page.click("#generate-btn")
+    page.wait_for_selector("#panel-generate:not([hidden])")
+
+    with page.expect_download() as redacted_info:
+        page.click("#download-btn")
+    redacted = tmp_path / "xlsx-001-redacted.xlsx"
+    redacted_info.value.save_as(str(redacted))
+    assert redacted.name.endswith(".xlsx")
+    assert redacted.read_bytes()[:2] == b"PK"
+
+    page.click("#goto-restore-btn")
+    page.wait_for_selector("#panel-restore:not([hidden])")
+    page.wait_for_function("document.querySelectorAll('#restore-job option').length > 1")
+    page.select_option("#restore-job", index=1)
+    page.set_input_files("#restore-input", str(redacted))
+    page.wait_for_function("!document.querySelector('#restore-btn').disabled")
+    page.click("#restore-btn")
+    page.wait_for_selector("#restore-result:not([hidden])")
+    with page.expect_download() as restored_info:
+        page.click("#restore-download")
+    restored = tmp_path / "xlsx-001-restored.xlsx"
+    restored_info.value.save_as(str(restored))
+    assert restored.name.endswith(".xlsx")
+
+    from lethe.xlsx_engine import extract_all_text_parts
+
+    assert extract_all_text_parts(restored.read_bytes()) == extract_all_text_parts(
+        (built / "samples" / "xlsx-001.xlsx").read_bytes()
+    )

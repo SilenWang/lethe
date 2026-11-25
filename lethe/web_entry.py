@@ -13,7 +13,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from lethe import core, docx_engine, gates, postprocess
+from lethe import core, docx_engine, gates, postprocess, xlsx_engine
 
 PROTOCOL = 1
 IMPLEMENTED_OPS = ("echo", "inspect", "redact", "restore", "finish")
@@ -86,8 +86,22 @@ def _entities(raw_entities: list[dict[str, object]]) -> list[core.Entity]:
     return entities
 
 
-def _redact(path: str, raw_entities: list[dict[str, object]]) -> str:
-    result = docx_engine.redact(Path(path).read_bytes(), _entities(raw_entities))
+def _redact(
+    path: str, raw_entities: list[dict[str, object]], file_name: str
+) -> str:
+    raw = Path(path).read_bytes()
+    if file_name.lower().endswith(".xlsx"):
+        xlsx_result = xlsx_engine.redact(raw, _entities(raw_entities))
+        Path("/tmp/final.xlsx").write_bytes(xlsx_result.output)
+        return _ok(
+            final_path="/tmp/final.xlsx",
+            tokens=xlsx_result.tokens,
+            items=xlsx_result.items,
+            counts=xlsx_result.counts,
+            hits=xlsx_result.hits,
+            warnings=xlsx_result.warnings,
+        )
+    result = docx_engine.redact(raw, _entities(raw_entities))
     return _ok(
         updates=result.updates,
         tokens=result.tokens,
@@ -97,8 +111,19 @@ def _redact(path: str, raw_entities: list[dict[str, object]]) -> str:
     )
 
 
-def _restore(path: str, token_map: dict[str, str]) -> str:
-    result = docx_engine.restore(Path(path).read_bytes(), token_map)
+def _restore(path: str, token_map: dict[str, str], file_name: str) -> str:
+    raw = Path(path).read_bytes()
+    if file_name.lower().endswith(".xlsx"):
+        xlsx_result = xlsx_engine.restore(raw, token_map)
+        Path("/tmp/final.xlsx").write_bytes(xlsx_result.output)
+        return _ok(
+            final_path="/tmp/final.xlsx",
+            tokens=xlsx_result.tokens,
+            counts=xlsx_result.counts,
+            hits=xlsx_result.hits,
+            warnings=xlsx_result.warnings,
+        )
+    result = docx_engine.restore(raw, token_map)
     return _ok(updates=result.updates, tokens=result.tokens, counts=result.counts,
                hits=result.hits)
 
@@ -123,9 +148,17 @@ def dispatch(request_json: str) -> str:
         if op == "inspect":
             return _inspect(str(request["path"]), str(request.get("file_name", "upload.docx")))
         if op == "redact":
-            return _redact(str(request["path"]), list(request.get("entities") or []))
+            return _redact(
+                str(request["path"]),
+                list(request.get("entities") or []),
+                str(request.get("file_name", "upload.docx")),
+            )
         if op == "restore":
-            return _restore(str(request["path"]), dict(request.get("token_map") or {}))
+            return _restore(
+                str(request["path"]),
+                dict(request.get("token_map") or {}),
+                str(request.get("file_name", "upload.docx")),
+            )
         if op == "finish":
             return _finish(
                 str(request["source"]),

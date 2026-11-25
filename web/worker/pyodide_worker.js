@@ -4,6 +4,13 @@
 // Everything is same-origin. There is no CDN import and no micropip: the
 // Pyodide runtime, wheels and BetterOffice bundles are the P0 vendored assets.
 import { OPS, PROTOCOL_VERSION } from "../lib/protocol.js";
+import {
+  BETTEROFFICE_PACKAGES,
+  DEFERRED_PYODIDE_PACKAGES,
+  PYODIDE_PACKAGES,
+  PY_SOURCES,
+  TOOL_SOURCES,
+} from "../lib/runtime-config.js";
 
 const PYODIDE_DIR = new URL("../assets/vendor/pyodide/", self.location.href);
 const PY_SRC_DIR = new URL("../py/lethe/", self.location.href);
@@ -16,19 +23,11 @@ const OPC_ENTRY = new URL(
   "../assets/vendor/betteroffice/docx/dist/wasm-opc.mjs",
   self.location.href,
 );
-const PY_SOURCES = [
-  "__init__.py",
-  "core.py",
-  "docx_engine.py",
-  "gates.py",
-  "postprocess.py",
-  "web_entry.py",
-];
-const TOOL_SOURCES = ["__init__.py", "postprocess_contract.py"];
-
 let pyodide = null;
 let docxModule = null;
 let opcReady = null;
+let docxWasmReady = false;
+let cryptoReady = false;
 let initPromise = null;
 
 const post = (message, transfer = []) => self.postMessage(message, transfer);
@@ -44,7 +43,7 @@ async function initRuntime() {
     post({ type: "init-progress", phase: "pyodide" });
     const { loadPyodide } = await import(new URL("pyodide.mjs", PYODIDE_DIR).href);
     pyodide = await loadPyodide({ indexURL: PYODIDE_DIR.href });
-    await pyodide.loadPackage(["lxml"]);
+    await pyodide.loadPackage(PYODIDE_PACKAGES);
 
     post({ type: "init-progress", phase: "python-src" });
     pyodide.FS.mkdirTree("/lethe");
@@ -72,6 +71,8 @@ import lethe.web_entry  # fail at init, not on the first upload
     post({
       type: "ready",
       protocol: PROTOCOL_VERSION,
+      cryptoReady: cryptoReady,
+      docxWasm: docxWasmReady,
       pyodide: pyodide.version,
       ops: OPS,
     });
@@ -95,6 +96,12 @@ async function loadDocx() {
   }
   await opcReady;
   return docxModule;
+}
+
+async function ensureCrypto() {
+  if (cryptoReady) return;
+  await pyodide.loadPackage(DEFERRED_PYODIDE_PACKAGES);
+  cryptoReady = true;
 }
 
 function countParagraphs(node) {
@@ -121,9 +128,28 @@ async function runInspect(id, bytes, fileName) {
   pyodide.FS.writeFile("/tmp/input.docx", bytes);
   const gated = callPython({ op: "inspect", path: "/tmp/input.docx", file_name: fileName });
   if (!gated.ok) return gated;
+  if (fileName.toLowerCase().endsWith(".xlsx")) {
+    pyodide.runPython(`
+import os
+try:
+    os.remove("/tmp/input.docx")
+except OSError:
+    pass
+`);
+    return {
+      ok: true,
+      parts: gated.parts,
+      paragraphs: 0,
+      status: gated.status,
+      warnings: gated.warnings,
+      docxWasm: docxWasmReady,
+      heapBytes: heapBytes(),
+    };
+  }
 
   post(progress({ type: "progress", id, phase: "parse" }));
   const { parseDocx } = await loadDocx();
+  docxWasmReady = true;
   const document = await parseDocx(bytes);
   const paragraphs = countParagraphs(document.package.document.content);
 
@@ -142,24 +168,43 @@ except OSError:
     paragraphs,
     status: gated.status,
     warnings: gated.warnings,
+    docxWasm: true,
     heapBytes: heapBytes(),
   };
 }
 
-async function runWrite(id, op, bytes, options) {
+async function runWrite(id, op, bytes, options, fileName) {
   const pyodideRuntime = await initRuntime();
   pyodideRuntime.FS.writeFile("/tmp/source.docx", bytes);
   post(progress({ type: "progress", id, phase: "detect" }));
   const plan = callPython({
     op,
     path: "/tmp/source.docx",
+    file_name: fileName,
     entities: options.entities || [],
     token_map: options.token_map || {},
   });
   if (!plan.ok) return plan;
+  if (plan.final_path) {
+    post(progress({ type: "progress", id, phase: "postprocess" }));
+    const output = pyodideRuntime.FS.readFile(plan.final_path);
+    return {
+      ok: true,
+      bytes: output,
+      tokens: plan.tokens || [],
+      items: plan.items || [],
+      counts: plan.counts || {},
+      hits: plan.hits || 0,
+      warnings: plan.warnings || [],
+      size: output.byteLength,
+      docxWasm: docxWasmReady,
+      heapBytes: heapBytes(),
+    };
+  }
 
   post(progress({ type: "progress", id, phase: "write" }));
   const { updateMultipleFiles } = await loadDocx();
+  docxWasmReady = true;
   const library = await updateMultipleFiles(
     bytes.buffer,
     new Map(Object.entries(plan.updates)),
@@ -183,6 +228,7 @@ async function runWrite(id, op, bytes, options) {
     counts: plan.counts,
     hits: plan.hits,
     size: output.byteLength,
+    docxWasm: true,
     heapBytes: heapBytes(),
   };
 }
@@ -191,7 +237,7 @@ function cleanupTemp() {
   try {
     pyodide.runPython(`
 import os
-for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx", "/tmp/input.docx"):
+for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx", "/tmp/final.xlsx", "/tmp/input.docx"):
     try:
         os.remove(_path)
     except OSError:
@@ -224,7 +270,13 @@ async function handleRun(message) {
       return;
     }
     if (op === "redact" || op === "restore") {
-      const result = await runWrite(id, op, bytes, message.options || {});
+      const result = await runWrite(
+        id,
+        op,
+        bytes,
+        message.options || {},
+        String(message.fileName || "upload.docx"),
+      );
       if (!result.ok) {
         post({ type: "error", id, ...result });
         return;
@@ -257,6 +309,21 @@ self.onmessage = async (event) => {
   const message = event.data;
   if (message?.type === "stats") {
     post({ type: "stats", id: message.id, heapBytes: heapBytes() });
+    return;
+  }
+  if (message?.type === "vault") {
+    try {
+      await initRuntime();
+      await ensureCrypto();
+      post({ type: "vault-ready", id: message.id, cryptoReady: cryptoReady });
+    } catch (error) {
+      post({
+        type: "vault-error",
+        id: message.id,
+        code: classifyError(error),
+        message: String(error?.message || error),
+      });
+    }
     return;
   }
   if (message?.type !== "run") return;

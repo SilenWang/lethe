@@ -1,0 +1,14 @@
+{
+  "fixture": "xlsx-50mb.xlsx",
+  "inputBytes": 52198922,
+  "hits": 250001,
+  "redactMs": 32789,
+  "redactedBytes": 52026941,
+  "baselineRssMB": 1093.0,
+  "peakRssMB": 1791.6,
+  "deltaRssMB": 698.6,
+  "pyodideHeapMB": 564.6,
+  "abort": false,
+  "leaks": 0,
+  "docxWasm": false
+}
