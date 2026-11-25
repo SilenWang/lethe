@@ -124,9 +124,8 @@
             legacy.openCursor().onsuccess = function (cursorEvent) {
               var cursor = cursorEvent.target.result;
               if (!cursor) return;
-              var row = cursor.value || {};
-              if (!row.source) row.source = 'user';
-              userEnts.put(row);
+              var entity = normaliseEntity(cursor.value || {});
+              if (entity) userEnts.put(entity);
               cursor.continue();
             };
           }

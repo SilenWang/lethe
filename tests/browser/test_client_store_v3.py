@@ -50,6 +50,43 @@ SEED_V2 = """async () => {
   return true;
 }"""
 
+SEED_V2_MIXED_SOURCES = """async () => {
+  await new Promise((resolve, reject) => {
+    const open = indexedDB.open('lethe', 2);
+    open.onupgradeneeded = () => {
+      const db = open.result;
+      const entities = db.createObjectStore('entities', {keyPath: 'key'});
+      entities.createIndex('by_type', 'type');
+      db.createObjectStore('token_types', {keyPath: 'id'});
+      db.createObjectStore('jobs', {keyPath: 'jobId'});
+      db.createObjectStore('outputs', {keyPath: 'jobId'});
+      const meta = db.createObjectStore('meta', {keyPath: 'key'});
+      entities.put({
+        key: 'legacy', canonical: 'Legacy User', type: 'PERSON', aliases: [],
+      });
+      entities.put({
+        key: 'user', canonical: 'Explicit User', type: 'PERSON', aliases: [],
+        source: 'user',
+      });
+      entities.put({
+        key: 'preset', canonical: 'Preset Must Not Move', type: 'PERSON', aliases: [],
+        source: 'preset',
+      });
+      entities.put({
+        key: 'invalid', canonical: 'Invalid Must Not Move', type: 'PERSON', aliases: [],
+        source: 'external',
+      });
+      meta.put({key: 'lethe.schema.v2', value: 2});
+    };
+    open.onsuccess = () => {
+      open.result.close();
+      resolve(true);
+    };
+    open.onerror = () => reject(open.error);
+  });
+  return true;
+}"""
+
 
 @pytest.fixture()
 def page(tmp_path: Path):
@@ -108,3 +145,29 @@ def test_v2_rows_are_copied_once_with_source(page) -> None:
         "req.onsuccess = () => { db.close(); r(req.result); }; }; }))"
     )
     assert legacy["canonical"] == "Acme Ltd"
+
+
+def test_v2_upgrade_never_writes_non_user_sources_to_user_layer(page) -> None:
+    page.evaluate(SEED_V2_MIXED_SOURCES)
+    init = page.evaluate("window.lethStore.init()")
+    assert init["ok"] and init["schemaVersion"] == 3 and init["upgradedFrom"] == 2
+
+    raw = page.evaluate(
+        """async () => {
+          const db = await new Promise((resolve, reject) => {
+            const open = indexedDB.open('lethe');
+            open.onsuccess = () => resolve(open.result);
+            open.onerror = () => reject(open.error);
+          });
+          const rows = await new Promise((resolve, reject) => {
+            const req = db.transaction('user_entities').objectStore('user_entities').getAll();
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          });
+          db.close();
+          return rows;
+        }"""
+    )
+    assert sorted(row["canonical"] for row in raw) == ["Explicit User", "Legacy User"]
+    assert {row["source"] for row in raw} == {"user"}
+    assert {row["packVersion"] for row in raw} == {None}

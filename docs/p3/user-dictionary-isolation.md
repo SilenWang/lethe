@@ -17,6 +17,10 @@ lifecycles.
 source are treated as user-owned, so older exports remain importable without
 becoming part of the preset layer.
 
+The v2 -> v3 IndexedDB upgrade applies the same normalisation before writing
+`user_entities`: missing source becomes `user`, while `preset` and every other
+non-user value are skipped rather than physically copied.
+
 ## Read-time merge
 
 `web/lib/dictionary-merge.js` builds the detection list in memory:
