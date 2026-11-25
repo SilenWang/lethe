@@ -54,6 +54,7 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     samples.mkdir()
     shutil.copy2(REPO / "corpus" / "docx" / "docx-001.docx", samples / "docx-001.docx")
     shutil.copy2(REPO / "corpus" / "xlsx" / "xlsx-001.xlsx", samples / "xlsx-001.xlsx")
+    shutil.copy2(REPO / "corpus" / "pptx" / "pptx-001.pptx", samples / "pptx-001.pptx")
     return out
 
 
@@ -195,7 +196,7 @@ def test_xlsx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
     page.wait_for_selector("#upload-degradations:not([hidden])")
     page.select_option("#lang-select", "en")
     page.wait_for_function(
-        "document.querySelector('#upload-degradations summary').innerText.includes('xlsx')"
+        "document.querySelector('#upload-degradations summary').innerText.includes('redaction')"
     )
     page.click("#upload-degradations summary")
     assert "pivot" in page.locator("#upload-degradations").inner_text().lower()
@@ -230,4 +231,57 @@ def test_xlsx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
 
     assert extract_all_text_parts(restored.read_bytes()) == extract_all_text_parts(
         (built / "samples" / "xlsx-001.xlsx").read_bytes()
+    )
+
+
+def test_pptx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) -> None:
+    page.evaluate(
+        "window.lethStore.mergeEntities([{canonical:'Alice Chen',"
+        "type:'PERSON',aliases:[]}])"
+    )
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+
+    page.set_input_files("#upload-input", str(built / "samples" / "pptx-001.pptx"))
+    page.wait_for_selector("#upload-degradations:not([hidden])")
+    page.select_option("#lang-select", "en")
+    page.wait_for_function(
+        "document.querySelector('#upload-degradations summary').innerText.includes('redaction')"
+    )
+    page.click("#upload-degradations summary")
+    assert "smartart" in page.locator("#upload-degradations").inner_text().lower()
+    page.click("#detect-btn")
+    page.wait_for_selector("#panel-review:not([hidden])")
+    assert "Alice Chen" in page.locator("#review-rows").inner_text()
+    page.click("#generate-btn")
+    page.wait_for_selector("#panel-generate:not([hidden])")
+
+    with page.expect_download() as redacted_info:
+        page.click("#download-btn")
+    redacted = tmp_path / "pptx-001-redacted.pptx"
+    redacted_info.value.save_as(str(redacted))
+    assert redacted.name.endswith(".pptx")
+    assert redacted.read_bytes()[:2] == b"PK"
+
+    page.click("#goto-restore-btn")
+    page.wait_for_selector("#panel-restore:not([hidden])")
+    page.wait_for_function("document.querySelectorAll('#restore-job option').length > 1")
+    page.select_option("#restore-job", index=1)
+    page.set_input_files("#restore-input", str(redacted))
+    page.wait_for_function("!document.querySelector('#restore-btn').disabled")
+    page.click("#restore-btn")
+    page.wait_for_selector("#restore-result:not([hidden])")
+    with page.expect_download() as restored_info:
+        page.click("#restore-download")
+    restored = tmp_path / "pptx-001-restored.pptx"
+    restored_info.value.save_as(str(restored))
+    assert restored.name.endswith(".pptx")
+
+    from lethe.pptx_engine import extract_all_text_parts
+
+    assert extract_all_text_parts(restored.read_bytes()) == extract_all_text_parts(
+        (built / "samples" / "pptx-001.pptx").read_bytes()
     )

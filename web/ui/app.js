@@ -10,6 +10,7 @@ import {
   RECYCLE_BYTES,
   gateLevel,
   humanSize,
+  isPptx,
   isSupported,
   isXlsx,
   mimeFor,
@@ -110,6 +111,7 @@ function onStatus(event) {
       pyodide: "p1.init.pyodide",
       "python-src": "p1.init.python_src",
       "betteroffice-docx": "p1.init.docx",
+      "betteroffice-pptx": "p1.init.pptx",
     };
     badge.textContent = t(initKeys[event.phase] || "p1.runtime.initializing");
     if (event.reason && event.reason !== "init") {
@@ -158,7 +160,7 @@ async function preloadRuntime() {
     type: "module",
   });
   await navigator.serviceWorker.ready;
-  if (!navigator.onLine) return;
+  if (!navigator.onLine) return; // offline cold start: the cache is the source
   const active = registration.active || registration.waiting || registration.installing;
   if (!active) throw new Error("service worker has no active worker");
   showPreload(0, 0);
@@ -273,7 +275,7 @@ function pickFile(file) {
   $("upload-file").textContent = t("p1.upload.selected", { name: file.name, size: humanSize(file.size) });
   const note = $("upload-note");
   const degradations = $("upload-degradations");
-  if (degradations) degradations.hidden = !isXlsx(file);
+  if (degradations) degradations.hidden = !isXlsx(file) && !isPptx(file);
   if (gate.level === "warn") {
     note.hidden = false;
     note.textContent = t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 }) +
@@ -336,7 +338,11 @@ async function inspectFile() {
   try {
     const result = await runOp({ op: "inspect", file: state.file });
     $("upload-inspect").hidden = false;
-    const partsKey = isXlsx(state.file) ? "p1.upload.parts_xlsx" : "p1.upload.parts";
+    const partsKey = isXlsx(state.file)
+      ? "p1.upload.parts_xlsx"
+      : isPptx(state.file)
+        ? "p1.upload.parts_pptx"
+        : "p1.upload.parts";
     $("upload-inspect").textContent =
       `${t("p1.upload.checked")} ` +
       t(partsKey, { parts: result.parts, paragraphs: result.paragraphs });

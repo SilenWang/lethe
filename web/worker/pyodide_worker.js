@@ -5,7 +5,6 @@
 // Pyodide runtime, wheels and BetterOffice bundles are the P0 vendored assets.
 import { OPS, PROTOCOL_VERSION } from "../lib/protocol.js";
 import {
-  BETTEROFFICE_PACKAGES,
   DEFERRED_PYODIDE_PACKAGES,
   PYODIDE_PACKAGES,
   PY_SOURCES,
@@ -73,6 +72,7 @@ import lethe.web_entry  # fail at init, not on the first upload
       protocol: PROTOCOL_VERSION,
       cryptoReady: cryptoReady,
       docxWasm: docxWasmReady,
+      pptxPartDirect: true,
       pyodide: pyodide.version,
       ops: OPS,
     });
@@ -128,7 +128,7 @@ async function runInspect(id, bytes, fileName) {
   pyodide.FS.writeFile("/tmp/input.docx", bytes);
   const gated = callPython({ op: "inspect", path: "/tmp/input.docx", file_name: fileName });
   if (!gated.ok) return gated;
-  if (fileName.toLowerCase().endsWith(".xlsx")) {
+  if (/\.(xlsx|pptx)$/i.test(fileName)) {
     pyodide.runPython(`
 import os
 try:
@@ -174,6 +174,9 @@ except OSError:
 }
 
 async function runWrite(id, op, bytes, options, fileName) {
+  if (/\.(xlsx|pptx)$/i.test(fileName)) {
+    return runPartDirectWrite(id, op, bytes, options, fileName);
+  }
   const pyodideRuntime = await initRuntime();
   pyodideRuntime.FS.writeFile("/tmp/source.docx", bytes);
   post(progress({ type: "progress", id, phase: "detect" }));
@@ -233,11 +236,46 @@ async function runWrite(id, op, bytes, options, fileName) {
   };
 }
 
+async function runPartDirectWrite(id, op, bytes, options, fileName) {
+  const pyodideRuntime = await initRuntime();
+  pyodideRuntime.FS.writeFile("/tmp/source.part", bytes);
+  post(progress({ type: "progress", id, phase: "detect" }));
+  const plan = callPython({
+    op,
+    path: "/tmp/source.part",
+    file_name: fileName,
+    entities: options.entities || [],
+    token_map: options.token_map || {},
+  });
+  if (!plan.ok) return plan;
+  if (!plan.final_path) {
+    return { ok: false, code: "INTERNAL", message: "part-direct engine returned no final_path" };
+  }
+
+  post(progress({ type: "progress", id, phase: "postprocess" }));
+  const output = pyodideRuntime.FS.readFile(plan.final_path);
+  return {
+    ok: true,
+    bytes: output,
+    tokens: plan.tokens || [],
+    items: plan.items || [],
+    counts: plan.counts || {},
+    hits: plan.hits || 0,
+    warnings: plan.warnings || [],
+    docxWasm: docxWasmReady,
+    pptxPartDirect: /\.pptx$/i.test(fileName),
+    size: output.byteLength,
+    heapBytes: heapBytes(),
+  };
+}
+
 function cleanupTemp() {
   try {
     pyodide.runPython(`
 import os
-for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx", "/tmp/final.xlsx", "/tmp/input.docx"):
+for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx",
+              "/tmp/source.part", "/tmp/final.xlsx", "/tmp/final.pptx",
+              "/tmp/input.docx"):
     try:
         os.remove(_path)
     except OSError:

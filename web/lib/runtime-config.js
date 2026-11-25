@@ -1,7 +1,7 @@
 // One source of truth for the browser runtime.  Both the worker and the
 // service worker import this file, so the eager-preload set cannot drift from
 // what the worker actually initialises.
-export const SUPPORTED_FORMATS = Object.freeze(["docx", "xlsx"]);
+export const SUPPORTED_FORMATS = Object.freeze(["docx", "xlsx", "pptx"]);
 export const BETTEROFFICE_PACKAGES = Object.freeze(["docx"]);
 export const PY_SOURCES = Object.freeze([
   "__init__.py",
@@ -9,6 +9,7 @@ export const PY_SOURCES = Object.freeze([
   "docx_engine.py",
   "gates.py",
   "postprocess.py",
+  "pptx_engine.py",
   "xlsx_engine.py",
   "web_entry.py",
 ]);

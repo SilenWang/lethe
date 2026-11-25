@@ -31,6 +31,7 @@ PY_MODULES = (
     "docx_engine.py",
     "gates.py",
     "postprocess.py",
+    "pptx_engine.py",
     "xlsx_engine.py",
     "web_entry.py",
 )

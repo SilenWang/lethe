@@ -13,7 +13,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from lethe import core, docx_engine, gates, postprocess, xlsx_engine
+from lethe import core, docx_engine, gates, postprocess, pptx_engine, xlsx_engine
 
 PROTOCOL = 1
 IMPLEMENTED_OPS = ("echo", "inspect", "redact", "restore", "finish")
@@ -90,6 +90,18 @@ def _redact(
     path: str, raw_entities: list[dict[str, object]], file_name: str
 ) -> str:
     raw = Path(path).read_bytes()
+    if file_name.lower().endswith(".pptx"):
+        pptx_result = pptx_engine.redact(raw, _entities(raw_entities))
+        Path("/tmp/final.pptx").write_bytes(pptx_result.output or raw)
+        return _ok(
+            final_path="/tmp/final.pptx",
+            tokens=pptx_result.tokens,
+            items=pptx_result.items,
+            counts=pptx_result.counts,
+            hits=pptx_result.hits,
+            warnings=pptx_result.warnings,
+            surfaces=pptx_result.surfaces,
+        )
     if file_name.lower().endswith(".xlsx"):
         xlsx_result = xlsx_engine.redact(raw, _entities(raw_entities))
         Path("/tmp/final.xlsx").write_bytes(xlsx_result.output)
@@ -113,6 +125,16 @@ def _redact(
 
 def _restore(path: str, token_map: dict[str, str], file_name: str) -> str:
     raw = Path(path).read_bytes()
+    if file_name.lower().endswith(".pptx"):
+        pptx_result = pptx_engine.restore(raw, token_map)
+        Path("/tmp/final.pptx").write_bytes(pptx_result.output or raw)
+        return _ok(
+            final_path="/tmp/final.pptx",
+            tokens=pptx_result.tokens,
+            counts=pptx_result.counts,
+            hits=pptx_result.hits,
+            warnings=pptx_result.warnings,
+        )
     if file_name.lower().endswith(".xlsx"):
         xlsx_result = xlsx_engine.restore(raw, token_map)
         Path("/tmp/final.xlsx").write_bytes(xlsx_result.output)

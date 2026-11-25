@@ -1,0 +1,12 @@
+{
+  "fixture": "pptx-50mb.pptx",
+  "inputBytes": 51645794,
+  "hits": 10101,
+  "redactMs": 5556,
+  "baselineRssMB": 1098.3,
+  "processPeakRssMB": 1619.6,
+  "processDeltaMB": 521.3,
+  "pyodideHeapMB": 393.0,
+  "pptxPartDirect": true,
+  "abort": false
+}

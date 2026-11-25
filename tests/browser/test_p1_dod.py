@@ -20,6 +20,8 @@ import pytest
 from _server import StaticServer
 
 from lethe.docx_engine import extract_all_text_parts, scan_leaks
+from lethe.pptx_engine import extract_all_text_parts as pptx_extract
+from lethe.pptx_engine import scan_leaks as pptx_leaks
 from lethe.xlsx_engine import extract_all_text_parts as xlsx_extract
 from lethe.xlsx_engine import scan_leaks as xlsx_leaks
 
@@ -143,6 +145,10 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
     ):
         data = (REPO / "corpus" / "docx" / "docx-001.docx").read_bytes() if size is None else _padded_docx(size)
         (samples / name).write_bytes(data)
+    shutil.copy2(
+        REPO / "corpus" / "seeds" / "pptx-02-enhanced.pptx",
+        samples / "pptx-02-enhanced.pptx",
+    )
     shutil.copy2(REPO / "corpus" / "xlsx" / "xlsx-001.xlsx", samples / "xlsx-001.xlsx")
     return out
 
@@ -163,7 +169,7 @@ def server(built: Path):
         yield running
 
 
-def test_offline_install_and_docx_xlsx_roundtrip(server: StaticServer, built: Path) -> None:
+def test_offline_install_and_three_format_roundtrip(server: StaticServer, built: Path) -> None:
     assert sync_playwright is not None
     external: list[str] = []
     with sync_playwright() as playwright:
@@ -196,9 +202,9 @@ def test_offline_install_and_docx_xlsx_roundtrip(server: StaticServer, built: Pa
             assert status == 200, icon["src"]
         assert page.evaluate("window.isSecureContext") is True
 
-        # Eager preload: the first online visit caches Pyodide, the wheels, the
-        # docx bundle and the Python engine (xlsx is part-direct). The next
-        # visit is only a cold-start check, then the network is cut.
+        # Eager preload: the first online visit caches Pyodide, the wheels,
+        # the docx bundle and the Python sources (xlsx/pptx are part-direct).
+        # The next visit is only a cold-start check, then the network is cut.
         page.reload()
         page.wait_for_function(
             "window.__letheBridge && window.__letheBridge.state() === 'ready'"
@@ -212,6 +218,7 @@ def test_offline_install_and_docx_xlsx_roundtrip(server: StaticServer, built: Pa
                     if (
                         paths.includes("/assets/vendor/pyodide/pyodide.asm.wasm") &&
                         paths.includes("/assets/vendor/betteroffice/docx/dist/docx/index.mjs") &&
+                        paths.includes("/py/lethe/pptx_engine.py") &&
                         paths.includes("/py/lethe/xlsx_engine.py")
                     ) return true;
                 }
@@ -262,6 +269,29 @@ def test_offline_install_and_docx_xlsx_roundtrip(server: StaticServer, built: Pa
         xlsx_restored = base64.b64decode(xlsx_outcome["resB64"])
         assert xlsx_leaks(xlsx_redacted, ["John Smith", "Alice Chen"]) == []
         assert xlsx_extract(xlsx_restored) == xlsx_extract(xlsx_sample)
+
+        pptx_sample = (built / "samples" / "pptx-02-enhanced.pptx").read_bytes()
+        page.evaluate(
+            "(bytes) => { window.__sampleBytes = new Uint8Array(bytes); }",
+            list(pptx_sample),
+        )
+        pptx_outcome = page.evaluate(
+            RUN_ROUNDTRIP,
+            {
+                "entities": [
+                    {"canonical": "John Smith", "type": "PERSON", "aliases": []},
+                    {"canonical": "Alice Chen", "type": "PERSON", "aliases": []},
+                ],
+                "fileName": "offline.pptx",
+            },
+        )
+        assert pptx_outcome["ok"], pptx_outcome
+        assert pptx_outcome["hits"] > 0
+        assert pptx_outcome["restoreHits"] > 0
+        pptx_redacted = base64.b64decode(pptx_outcome["redB64"])
+        pptx_restored = base64.b64decode(pptx_outcome["resB64"])
+        assert pptx_leaks(pptx_redacted, ["John Smith", "Alice Chen"]) == []
+        assert pptx_extract(pptx_restored) == pptx_extract(pptx_sample)
 
         vault = page.evaluate("window.__letheBridge.vault()")
         assert vault["cryptoReady"] is True

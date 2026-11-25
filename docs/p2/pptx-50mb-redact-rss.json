@@ -1,0 +1,27 @@
+{
+  "policy": "pptx part-direct with lxml; BetterOffice pptx is not used",
+  "realistic": {
+    "inputBytes": 51437965,
+    "hits": 506,
+    "redactMs": 1100,
+    "baselineRssMB": 1097.5,
+    "processPeakRssMB": 1541.5,
+    "processDeltaMB": 444.0,
+    "pyodideHeapMB": 390.5,
+    "pptxPartDirect": true,
+    "abort": false
+  },
+  "stress": {
+    "inputBytes": 51645794,
+    "hits": 10101,
+    "redactMs": 5556,
+    "baselineRssMB": 1098.3,
+    "processPeakRssMB": 1619.6,
+    "processDeltaMB": 521.3,
+    "pyodideHeapMB": 393.0,
+    "pptxPartDirect": true,
+    "abort": false
+  },
+  "gate": "absolute RSS <= 2500 MB",
+  "result": "pass; headroom 958.5 / 880.4 MB"
+}

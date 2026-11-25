@@ -25,6 +25,10 @@ export function isDocx(file) {
   return !!file && /\.docx$/i.test(file.name || "");
 }
 
+export function isPptx(file) {
+  return !!file && /\.pptx$/i.test(file.name || "");
+}
+
 export function isXlsx(file) {
   return !!file && /\.xlsx$/i.test(file.name || "");
 }
@@ -35,6 +39,9 @@ export function isSupported(file) {
 }
 
 export function mimeFor(name) {
+  if (/\.pptx$/i.test(String(name || ""))) {
+    return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  }
   return /\.xlsx$/i.test(String(name || ""))
     ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     : "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -48,7 +55,7 @@ export function humanSize(bytes) {
 
 export function replaceSuffix(name, suffix) {
   const value = String(name || "document.docx");
-  const match = value.match(/\.(docx|xlsx)$/i);
+  const match = value.match(/\.(docx|xlsx|pptx)$/i);
   if (!match) return value + suffix;
   return value.slice(0, -match[0].length) + suffix + match[0].toLowerCase();
 }
