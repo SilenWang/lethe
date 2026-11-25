@@ -9,7 +9,7 @@ pixi run web-build
 ```
 
 It is written to `dist/web` and is a complete same-origin static site. On the
-current baseline it contains 196 files and about 52 MiB, including 154 pinned
+current baseline it contains 198 files and about 52 MiB, including 154 pinned
 vendor files (53,652,823 bytes). Its deployment shape is:
 
 ```text
@@ -42,7 +42,7 @@ Keep releases immutable and retain at least the current and previous trees:
 
 ```text
 /srv/lethe/releases/<release-id>/...
-/srv/lethe/current -> ../releases/<release-id>
+/srv/lethe/current -> releases/<release-id>
 ```
 
 Publish into a new release directory, verify it, then atomically replace the
@@ -192,7 +192,8 @@ The app deliberately uses one document Worker and one in-flight operation:
 - uploads are processed sequentially; a second operation receives `BUSY`
   instead of starting a second Worker;
 - the UI disables processing controls while a run is active;
-- a completed result larger than 35 MB triggers Worker teardown and rebuild;
+- an input document larger than 35 MB triggers Worker teardown and rebuild after
+  its result is delivered;
 - OOM, crash, watchdog timeout and cancellation after dispatch also recycle the
   Worker;
 - after a large task, wait for the runtime badge to return to ready before
