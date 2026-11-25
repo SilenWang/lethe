@@ -45,6 +45,6 @@ def test_unused_betteroffice_pptx_bundle_is_gone() -> None:
 
 def test_release_bumped_cache_and_activation_drops_old_entries() -> None:
     source = (REPO / "web" / "sw.js").read_text(encoding="utf-8")
-    assert "var CACHE_VERSION = '7';" in source
+    assert "var CACHE_VERSION = '8';" in source
     assert "key.indexOf('lethe-') === 0" in source
     assert "caches.delete(key)" in source

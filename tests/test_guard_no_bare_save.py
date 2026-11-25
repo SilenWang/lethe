@@ -84,25 +84,6 @@ def test_repo_product_paths_are_clean() -> None:
     assert violations == [], "\n".join(v.render() for v in violations)
 
 
-def test_frozen_v1_allowlist_does_not_grow() -> None:
-    """v1 ``lethe/docio.py`` is the only exemption until the P3 cutover."""
-    assert set(guard.LEGACY_FROZEN_COUNTS) == {"lethe/docio.py"}
-    allowed = guard.LEGACY_FROZEN_COUNTS["lethe/docio.py"]
-    found = _scan(["lethe/docio.py"], respect_legacy=False)
-    assert len(found) <= allowed, (
-        "the frozen v1 allowlist grew: "
-        f"{len(found)} call sites > {allowed}; route new writes through postprocess()"
-    )
-
-
-def test_frozen_entries_must_still_exist() -> None:
-    """At the P3 cutover deleting v1 must also delete its exemption."""
-    for rel in guard.LEGACY_FROZEN_COUNTS:
-        assert (REPO / rel).exists(), (
-            f"{rel} is gone but still in LEGACY_FROZEN_COUNTS; drop the exemption"
-        )
-
-
 def test_scan_ignores_tests_and_vendor_bundles() -> None:
     assert _scan(["tests"]) == []
     assert _scan(["web/assets/vendor"]) == []

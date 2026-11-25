@@ -82,7 +82,7 @@
 
   function announce(reason) {
     broadcast(reason);
-    // Let the NiceGUI side refresh its tables when this tab changes the data.
+    // Let compatible embedding pages refresh their views.
     try {
       if (typeof window.emitEvent === 'function') {
         window.emitEvent('leth-data-changed', { reason: reason });
@@ -763,8 +763,8 @@
           window.dispatchEvent(new CustomEvent('leth-data-changed', { detail: detail }));
         } catch (e) { /* ignore */ }
         try {
-          // Ask the NiceGUI side of every open tab to refresh its browser-backed
-          // panels, so a change in one tab shows up in the others.
+          // Ask every open tab to refresh its browser-backed panels, so a
+          // change in one tab shows up in the others.
           if (typeof window.emitEvent === 'function') {
             window.emitEvent('leth-data-changed', detail);
           }

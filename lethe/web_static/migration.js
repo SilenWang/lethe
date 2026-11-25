@@ -1,29 +1,12 @@
 /*
- * Lethe — one-time migration of a legacy server-side DATA_DIR, plus backup
- * import UI glue. Runs entirely against the local /api/migrate/* endpoints
- * (loopback only) and writes the imported data into window.lethStore.
+ * Lethe — pure-browser legacy export/backup import.
+ *
+ * The v1 server is gone. This module only reads a user-selected JSON file and
+ * writes through client-store.js; no network endpoint is involved.
  */
 (function () {
   'use strict';
 
-  function post(url, body) {
-    return fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    }).then(function (resp) {
-      return resp.json().then(function (data) {
-        if (!resp.ok) throw new Error(data.error || ('Request failed (' + resp.status + ').'));
-        return data;
-      });
-    });
-  }
-
-  /** Import the JSON returned by v1's /api/migrate/export endpoint.
-   *
-   * Vault errors are preflighted before any IndexedDB write, so a wrong old
-   * passphrase cannot partially replace the existing browser data.
-   */
   function importExport(data, passphrase) {
     if (!window.lethStore) return Promise.reject(new Error('Browser storage is not ready.'));
     if (!data || typeof data !== 'object' || Array.isArray(data)) {
@@ -56,8 +39,8 @@
     if (tokenTypes.length) {
       steps.push(window.lethStore.getTokenTypes().then(function (existing) {
         var merged = existing.slice();
-        tokenTypes.forEach(function (t) {
-          if (merged.indexOf(t) === -1) merged.push(t);
+        tokenTypes.forEach(function (type) {
+          if (merged.indexOf(type) === -1) merged.push(type);
         });
         return window.lethStore.saveTokenTypes(merged).then(function () {
           return { kind: 'token_types', added: merged.length };
@@ -77,8 +60,8 @@
 
     return Promise.all(steps).then(function (results) {
       var addedEntities = 0;
-      results.forEach(function (r) {
-        if (r && r.kind === 'entities') addedEntities = r.added;
+      results.forEach(function (result) {
+        if (result && result.kind === 'entities') addedEntities = result.added;
       });
       return {
         entities: entities.length,
@@ -91,77 +74,32 @@
     });
   }
 
-  /** Export the legacy server data and import it into this browser.
-   *  - oldPassphrase: passphrase used by the legacy vault (blank = none)
-   *  - newPassphrase: passphrase the imported mappings are re-encrypted with
-   * Returns import counts and the archive path for the UI. */
-  function run(oldPassphrase, newPassphrase) {
-    if (!window.lethStore) return Promise.reject(new Error('Browser storage is not ready.'));
-    return post('/api/migrate/export', { passphrase: oldPassphrase || '' })
-      .then(function (data) {
-        return importExport(data, newPassphrase || '')
-          .then(function (counts) {
-            return post('/api/migrate/finalize', {}).then(function (fin) {
-              counts.archivedTo = fin.archived_to || null;
-              return counts;
-            });
-          });
-      });
-  }
-
-  function status() {
-    return fetch('/api/migrate/status').then(function (resp) { return resp.json(); });
-  }
-
-  /** Wire a file <input> so choosing a JSON backup imports it into the store. */
-  function wireBackupImport(fileInputId) {
-    var input = document.getElementById(fileInputId);
-    if (!input || input.dataset.lethWired === '1') return;
-    input.dataset.lethWired = '1';
-    input.addEventListener('change', function () {
-      var file = input.files && input.files[0];
-      input.value = '';
-      if (!file) return;
+  function importFile(file, passphrase) {
+    if (!file) return Promise.reject(new Error('Choose a backup file first.'));
+    return new Promise(function (resolve, reject) {
       var reader = new FileReader();
+      reader.onerror = function () { reject(reader.error || new Error('Could not read the file.')); };
       reader.onload = function () {
         var backup;
         try {
           backup = JSON.parse(reader.result);
-        } catch (e) {
-          announce({ ok: false, error: 'That file is not valid JSON.' });
+        } catch (error) {
+          reject(new Error('That file is not valid JSON.'));
           return;
         }
         var isLegacyExport = backup && backup.errors !== undefined &&
           (Array.isArray(backup.jobs) || Array.isArray(backup.entities));
         var importing = isLegacyExport
-          ? importExport(backup, '')
+          ? importExport(backup, passphrase || '')
           : window.lethStore.importBackup(backup);
-        importing.then(function (r) {
-          announce({
-            ok: true,
-            entities: r.entitiesAdded !== undefined ? r.entitiesAdded : r.added,
-            jobs: r.jobs
-          });
-        }).catch(function (e) {
-          announce({ ok: false, error: e.message || String(e) });
-        });
+        importing.then(resolve, reject);
       };
       reader.readAsText(file);
     });
   }
 
-  function announce(result) {
-    try {
-      if (typeof window.emitEvent === 'function') {
-        window.emitEvent('leth-backup-imported', result);
-      }
-    } catch (e) { /* ignore */ }
-  }
-
   window.lethMigration = {
-    run: run,
     importExport: importExport,
-    status: status,
-    wireBackupImport: wireBackupImport
+    importFile: importFile
   };
 })();

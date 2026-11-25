@@ -39,7 +39,8 @@ series.
 
 1. Fork the repository and create a topic branch.
 2. Make your change; keep it focused and match the surrounding code style.
-3. Run the smoke tests where applicable (`tests/test_smoke.py`, `tests/test_doc.py`).
+3. Run `pixi run lint`, `pixi run typecheck`, and `pixi run unit`; use
+   `pixi run browser` for UI/runtime changes.
 4. Commit with `-s` (DCO sign-off) and open a pull request that explains the
    change and why.
 

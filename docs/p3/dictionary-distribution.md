@@ -2,7 +2,7 @@
 
 This document defines the immutable preset-dictionary layer. The separate
 user-owned IndexedDB layer and its read-time merge are documented in
-`docs/p3/user-dictionary-isolation.md`. Neither layer removes any v1 module.
+`docs/p3/user-dictionary-isolation.md`.
 
 ## Release artifact
 
@@ -105,5 +105,5 @@ IndexedDB user entities never enter this module or its OPFS directory.
    non-cutover dead-code removal.
 4. Release/docs: static deployment, offline install/upgrade, sizing and machine
    recommendations.
-5. Cutover: remove v1 server/NLP/PDF/email paths and extras. This is a separate
-   review gate after the four slices above, never part of this PR.
+5. Cutover: tracked separately in `docs/p3/cutover.md`, with its own review and
+   user-acceptance gate.

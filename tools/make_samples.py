@@ -1,10 +1,9 @@
-"""Generate sample .docx / .pdf / .xlsx files for testing the De-identifier UI."""
+"""Generate sample .docx / .xlsx files for testing the de-identifier."""
 import os
 
 from docx import Document
 from openpyxl import Workbook
 from openpyxl.styles import Font
-from fpdf import FPDF
 
 # Always write to the repo-root samples/ folder, regardless of where this dev
 # script is launched from.
@@ -14,12 +13,16 @@ os.makedirs(SAMPLES, exist_ok=True)
 MEMO = [
     "Dear Mr John Smith,",
     "",
-    "Acme Capital Partners (Acme) confirms the secondary transaction with "
-    "Meridian Holdings Pte Ltd. The mandate was led by Priya Raman and "
-    "counter-signed by Wibowo Santoso of Garuda Ventures.",
+    (
+        "Acme Capital Partners (Acme) confirms the secondary transaction with "
+        "Meridian Holdings Pte Ltd. The mandate was led by Priya Raman and "
+        "counter-signed by Wibowo Santoso of Garuda Ventures."
+    ),
     "",
-    "Please remit to the DBS Bank account. Queries: john.smith@acme.com or "
-    "+65 6789 1234. Reference account 1234-5678-9012.",
+    (
+        "Please remit to the DBS Bank account. Queries: john.smith@acme.com or "
+        "+65 6789 1234. Reference account 1234-5678-9012."
+    ),
     "",
     "Kind regards,",
     "Jane Doe",
@@ -44,18 +47,6 @@ for cp, contact, email in [
     row[0].text, row[1].text, row[2].text = cp, contact, email
 doc.save(os.path.join(SAMPLES, "sample-memo.docx"))
 
-# ---- .pdf (ASCII-safe so the core PDF font is happy) ------------------------
-pdf = FPDF()
-pdf.add_page()
-pdf.set_font("Helvetica", "B", 14)
-pdf.cell(0, 10, "Transaction Confirmation", new_x="LMARGIN", new_y="NEXT")
-pdf.ln(2)
-pdf.set_font("Helvetica", size=11)
-for line in MEMO:
-    pdf.set_x(pdf.l_margin)
-    pdf.multi_cell(pdf.epw, 7, line if line else " ")
-pdf.output(os.path.join(SAMPLES, "sample-memo.pdf"))
-
 # ---- .xlsx (a counterparty register, with a formula) ------------------------
 wb = Workbook()
 ws = wb.active
@@ -76,5 +67,5 @@ ws["D5"] = "Total"
 wb.save(os.path.join(SAMPLES, "sample-counterparties.xlsx"))
 
 print("Created:")
-for f in ("sample-memo.docx", "sample-memo.pdf", "sample-counterparties.xlsx"):
+for f in ("sample-memo.docx", "sample-counterparties.xlsx"):
     print("  samples/" + f)

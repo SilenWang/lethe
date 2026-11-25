@@ -1,7 +1,9 @@
 # Data migration
 
-The browser store supports both current backups and the JSON response from the
-v1 `POST /api/migrate/export` endpoint.
+The browser store supports both current backups and previously downloaded JSON
+responses from the retired v1 migration/export surface. The cutover release no
+longer runs that server endpoint, so late migrations must use a previously
+exported file.
 
 ## v1 export shape
 

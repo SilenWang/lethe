@@ -143,7 +143,7 @@ def build(out: Path) -> None:
         # Plain copies (not hard links): the UI test re-stages these files over
         # the build output, and copytree must not collide with the repo inode.
         shutil.copytree(WEB / "ui", out / "ui", dirs_exist_ok=True)
-    for entry in ("client-store.js", "manifest.webmanifest"):
+    for entry in ("client-store.js", "migration.js", "manifest.webmanifest"):
         shutil.copy2(REPO / "lethe" / "web_static" / entry, out / entry)
     shutil.copytree(
         REPO / "lethe" / "web_static" / "icons", out / "static" / "icons", dirs_exist_ok=True

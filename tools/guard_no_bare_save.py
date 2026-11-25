@@ -11,12 +11,10 @@ Scope (job name: ``guard``):
 * ``web/**``             — the v2 front end (JS/TS/Python, if any)
 * ``lethe/**``           — engine code, excluding tests and vendored assets
 
-Exemptions, all explicit and counted:
+Exemptions:
 
 * test files (``tests/``, ``test_*.py``, ``conftest.py``, ``*.test.js``)
 * third-party bundles (``*/assets/vendor/**``, ``node_modules``)
-* the frozen v1 engine file(s) in ``LEGACY_FROZEN_COUNTS``.  v1 is deleted in
-  the P3 cutover; until then its count may not grow.
 
 Every violation is printed as::
 
@@ -39,11 +37,6 @@ from pathlib import Path
 JOB = "guard"
 RULE_SAVE = "P0-GUARD-SAVE"
 RULE_TOBYTES = "P0-GUARD-TOBYTES"
-
-# v1 files that still call save()/toBytes() today.  The value is the number of
-# call sites; adding one to the count is a guard failure.  ``lethe/docio.py``
-# disappears in the P3 cutover, after which this map must be empty.
-LEGACY_FROZEN_COUNTS = {"lethe/docio.py": 5}
 
 SKIP_DIR_PARTS = {
     ".git",
@@ -180,9 +173,8 @@ def scan_js(path: Path, root: Path) -> list[Violation]:
     return out
 
 
-def scan(paths: list[str], root: Path, *, respect_legacy: bool = True) -> list[Violation]:
+def scan(paths: list[str], root: Path) -> list[Violation]:
     violations: list[Violation] = []
-    seen: dict[str, int] = {}
     for entry in paths:
         base = (root / entry).resolve()
         if not base.exists():
@@ -194,32 +186,7 @@ def scan(paths: list[str], root: Path, *, respect_legacy: bool = True) -> list[V
             if path.suffix.lower() not in SOURCE_SUFFIXES:
                 continue
             found = scan_python(path, root) if path.suffix == ".py" else scan_js(path, root)
-            rel = path.relative_to(root).as_posix()
-            if found:
-                seen[rel] = len(found)
             violations.extend(found)
-    if respect_legacy:
-        for rel, count in seen.items():
-            if rel in LEGACY_FROZEN_COUNTS:
-                if count > LEGACY_FROZEN_COUNTS[rel]:
-                    violations.append(
-                        Violation(
-                            rule="P0-GUARD-LEGACY-GROWTH",
-                            api="save(",
-                            path=rel,
-                            line=0,
-                            snippet=(
-                                f"frozen v1 allowlist says {LEGACY_FROZEN_COUNTS[rel]} "
-                                f"call sites, found {count}"
-                            ),
-                        )
-                    )
-                continue
-        violations = [
-            v
-            for v in violations
-            if v.path not in LEGACY_FROZEN_COUNTS or v.rule == "P0-GUARD-LEGACY-GROWTH"
-        ]
     return violations
 
 
@@ -227,14 +194,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paths", nargs="+", default=["web", "lethe"])
     parser.add_argument("--root", default=".", help="repository root")
-    parser.add_argument(
-        "--include-legacy",
-        action="store_true",
-        help="report the frozen v1 allowlist too (P3 cutover check)",
-    )
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
-    violations = scan(args.paths, root, respect_legacy=not args.include_legacy)
+    violations = scan(args.paths, root)
     for violation in violations:
         print(violation.render(), file=sys.stderr)
     if violations:

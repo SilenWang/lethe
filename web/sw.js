@@ -9,8 +9,7 @@ import {
 } from "./lib/dictionary-config.js";
 
 /*
- * Lethe — service worker for the static P1 app (web/). The frozen v1 NiceGUI
- * app keeps its own worker at lethe/web_static/sw.js; P3 removes that one.
+ * Lethe — service worker for the static P1 app (web/).
  *
  * PRIVACY BOUNDARY — what may enter CacheStorage:
  *   1. the app shell: exact same-origin paths listed in SHELL_PATHS;
@@ -29,7 +28,7 @@ import {
  */
 'use strict';
 
-var CACHE_VERSION = '7';
+var CACHE_VERSION = '8';
 var APP_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 var SHELL_CACHE = 'lethe-p1-shell-v' + APP_VERSION + '-r' + CACHE_VERSION;
 var RUNTIME_CACHE = 'lethe-p1-runtime-v' + APP_VERSION + '-r' + CACHE_VERSION;
@@ -40,6 +39,7 @@ var SHELL_PATHS = [
   '/index.html',
   '/manifest.webmanifest',
   '/client-store.js',
+  '/migration.js',
   '/ui/app.js',
   '/ui/app.css',
   '/ui/i18n.js',

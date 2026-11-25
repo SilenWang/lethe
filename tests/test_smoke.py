@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lethe import core, docio, store, vault  # noqa: F401
+from lethe import core, store, vault  # noqa: F401
 from lethe import (Entity, assign_tokens, build_replacer, build_restorer,
                    detect)
 
