@@ -196,7 +196,7 @@ def test_xlsx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
     page.wait_for_selector("#upload-degradations:not([hidden])")
     page.select_option("#lang-select", "en")
     page.wait_for_function(
-        "document.querySelector('#upload-degradations summary').innerText.includes('xlsx')"
+        "document.querySelector('#upload-degradations summary').innerText.includes('redaction')"
     )
     page.click("#upload-degradations summary")
     assert "pivot" in page.locator("#upload-degradations").inner_text().lower()
