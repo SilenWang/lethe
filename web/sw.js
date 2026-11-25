@@ -3,6 +3,10 @@ import {
   PY_SOURCES,
   TOOL_SOURCES,
 } from "./lib/runtime-config.js";
+import {
+  DICTIONARY_MANIFEST_PATH,
+  DICTIONARY_SIGNATURE_PATH,
+} from "./lib/dictionary-config.js";
 
 /*
  * Lethe — service worker for the static P1 app (web/). The frozen v1 NiceGUI
@@ -25,7 +29,7 @@ import {
  */
 'use strict';
 
-var CACHE_VERSION = '5';
+var CACHE_VERSION = '6';
 var APP_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 var SHELL_CACHE = 'lethe-p1-shell-v' + APP_VERSION + '-r' + CACHE_VERSION;
 var RUNTIME_CACHE = 'lethe-p1-runtime-v' + APP_VERSION + '-r' + CACHE_VERSION;
@@ -48,6 +52,8 @@ var SHELL_PATHS = [
   '/lib/pyodide_bridge.js',
   '/lib/protocol.js',
   '/lib/runtime-config.js',
+  '/lib/dictionary-client.js',
+  '/lib/dictionary-config.js',
   '/worker/pyodide_worker.js',
   '/locales/en.json',
   '/locales/zh.json'
@@ -59,6 +65,7 @@ var SHELL_PATHS = [
 var RUNTIME_PREFIXES = [
   '/assets/vendor/pyodide/',
   '/assets/vendor/betteroffice/',
+  '/dictionary/',
   '/py/'
 ];
 
@@ -66,6 +73,11 @@ var precachePromise = null;
 
 async function runtimePaths() {
   var manifest = await (await fetch('/assets/vendor/manifest.json', { cache: 'no-cache' })).json();
+  var dictionaryResponse = await fetch(DICTIONARY_MANIFEST_PATH, { cache: 'no-cache' });
+  if (!dictionaryResponse.ok) {
+    throw new Error(DICTIONARY_MANIFEST_PATH + ': HTTP ' + dictionaryResponse.status);
+  }
+  var dictionary = await dictionaryResponse.json();
   var paths = manifest.files
     .map(function (item) { return '/assets/vendor/' + item.path; })
     .filter(function (path) {
@@ -75,6 +87,10 @@ async function runtimePaths() {
       });
     });
   paths.push('/assets/vendor/manifest.json', '/assets/vendor/VERSIONS.json');
+  paths.push(DICTIONARY_MANIFEST_PATH, DICTIONARY_SIGNATURE_PATH);
+  dictionary.shards
+    .filter(function (shard) { return dictionary.coreShards.indexOf(shard.id) !== -1; })
+    .forEach(function (shard) { paths.push('/dictionary/' + shard.path); });
   PY_SOURCES.forEach(function (name) { paths.push('/py/lethe/' + name); });
   TOOL_SOURCES.forEach(function (name) { paths.push('/py/tools/' + name); });
   return Array.from(new Set(paths));

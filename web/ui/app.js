@@ -4,6 +4,7 @@
 // (docs/p1/worker-interface.md). This module only owns presentation, the
 // review selection (sent to the worker as `options.entities`) and IndexedDB.
 import { createBridge } from "../lib/pyodide_bridge.js";
+import { createDictionaryClient } from "../lib/dictionary-client.js";
 import { createI18n } from "./i18n.js";
 import {
   ENTITY_TYPES,
@@ -37,6 +38,7 @@ const state = {
   jobs: [],
   storageOk: false,
   installEvent: null,
+  dictionary: null,
 };
 
 const t = (key, vars) => state.i18n.t(key, vars);
@@ -203,6 +205,11 @@ async function preloadRuntime() {
     navigator.serviceWorker.addEventListener("message", onMessage);
     active.postMessage({ type: "PRECACHE" });
   });
+}
+
+async function installPresetDictionary() {
+  state.dictionary = createDictionaryClient();
+  return state.dictionary.update();
 }
 
 // ------------------------------------------------------------- worker runs
@@ -732,6 +739,14 @@ async function boot() {
   window.addEventListener("appinstalled", () => { $("install-btn").hidden = true; });
 
   await preloadRuntime().catch((error) => failPreload(error?.message || String(error)));
+  try {
+    await installPresetDictionary();
+  } catch (error) {
+    // Detection still works from the user layer while a signed preset update
+    // cannot be installed. The follow-on dictionary UI PR owns the visible
+    // error/retry surface; never fall back to an unverified pack.
+    console.warn("Preset dictionary is unavailable:", error);
+  }
   state.bridge = createBridge({
     workerUrl: "./worker/pyodide_worker.js",
     onStatus,

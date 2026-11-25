@@ -40,6 +40,8 @@ jobs:
         run: pixi run lint
       - name: mypy
         run: pixi run typecheck
+      - name: signed dictionary pack
+        run: pixi run dictionary-check
 
   unit:
     name: unit (pytest)
