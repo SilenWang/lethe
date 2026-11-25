@@ -34,9 +34,8 @@ routes to another HTML page.
 - Send `Cache-Control: no-cache` for `/sw.js` and `/index.html` so deployment
   checks can observe a new release. The service worker supplies the versioned
   shell/runtime caches.
-- Do not cache `/api/*`, uploaded documents, extracted text, results or token
-  maps at the reverse proxy. The P3 app has no document API, but the same
-  origin may still host the frozen v1 app until cutover.
+- Do not cache uploaded documents, extracted text, results or token maps at the
+  reverse proxy. The cutover release has no document-processing API.
 
 Keep releases immutable and retain at least the current and previous trees:
 

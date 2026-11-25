@@ -1,76 +1,60 @@
-name: Release (Windows installer)
+name: Release (static PWA)
 
-# Cuts a release when you push a version tag, e.g.:
-#   git tag v1.0.0 && git push origin v1.0.0
-# It builds the self-contained Windows portable bundle (embedded Python + app +
-# deps) and the Inno Setup installer on a clean Windows runner, then publishes a
-# DRAFT GitHub Release with both attached. Review/test the installer, then click
-# "Publish release". Can also be run manually from the Actions tab.
-
+# Builds the same-origin static artifact on a version tag and creates a draft
+# GitHub Release containing the directory as a zip plus its SHA-256 digest.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to release (e.g. v1.0.0)"
+        description: "Existing tag to release (e.g. v2.0.0)"
         required: true
 
 permissions:
-  contents: write   # required to create the release
+  contents: write
+
+env:
+  PIXI_VERSION: "0.76.1"
 
 jobs:
-  windows-installer:
-    runs-on: windows-latest
+  static-pwa:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      - name: Resolve version
-        id: ver
-        shell: pwsh
+      - uses: prefix-dev/setup-pixi@v0.8.8
+        with:
+          pixi-version: v${{ env.PIXI_VERSION }}
+          cache: true
+          run-install: true
+
+      - name: Build and verify static artifact
         run: |
-          $ref = if ($env:GITHUB_REF_NAME -like "v*") { $env:GITHUB_REF_NAME } else { "${{ github.event.inputs.tag }}" }
-          $ver = $ref.TrimStart("v")
-          "tag=$ref"   | Out-File $env:GITHUB_OUTPUT -Append
-          "ver=$ver"   | Out-File $env:GITHUB_OUTPUT -Append
+          pixi run release-check
+          pixi run web-build
 
-      - name: Stamp installer version from the tag
-        shell: pwsh
+      - name: Package static site
+        shell: bash
         run: |
-          (Get-Content installer.iss) -replace '#define AppVer  ".*"', "#define AppVer  ""${{ steps.ver.outputs.ver }}""" |
-            Set-Content installer.iss
-
-      - name: Build portable bundle (embedded Python + app + NLP engine)
-        shell: pwsh
-        run: ./build_portable.ps1
-
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --no-progress -y
-
-      - name: Compile the installer
-        shell: pwsh
-        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
-
-      - name: Stage release assets
+          ref="${GITHUB_REF_NAME}"
+          if [ -z "$ref" ] || [ "$ref" = "workflow_dispatch" ]; then
+            ref="${{ github.event.inputs.tag }}"
+          fi
+          version="${ref#v}"
+          mkdir -p release
+          zip -qr "release/lethe-${version}-web.zip" dist/web
+          sha256sum "release/lethe-${version}-web.zip" > "release/lethe-${version}-web.zip.sha256"
+          printf 'tag=%s\nversion=%s\n' "$ref" "$version" >> "$GITHUB_OUTPUT"
         id: stage
-        shell: pwsh
-        run: |
-          $ver = "${{ steps.ver.outputs.ver }}"
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          $exe = Get-ChildItem dist\*Setup.exe   | Select-Object -First 1
-          $zip = Get-ChildItem dist\*Portable.zip | Select-Object -First 1
-          Copy-Item $exe.FullName "release\Lethe-$ver-Setup.exe"
-          Copy-Item $zip.FullName "release\Lethe-$ver-Portable.zip"
-          Get-ChildItem release | Format-Table Name, Length
 
       - name: Create draft GitHub Release
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ steps.ver.outputs.tag }}" `
-            (Get-ChildItem release\*).FullName `
-            --draft `
-            --title "Lethe ${{ steps.ver.outputs.tag }}" `
-            --notes-file .github/release-notes.md
+          gh release create "${{ steps.stage.outputs.tag }}" \
+            release/lethe-${{ steps.stage.outputs.version }}-web.zip \
+            release/lethe-${{ steps.stage.outputs.version }}-web.zip.sha256 \
+            --draft \
+            --generate-notes \
+            --title "Lethe ${{ steps.stage.outputs.tag }}"

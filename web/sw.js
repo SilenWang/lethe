@@ -9,8 +9,7 @@ import {
 } from "./lib/dictionary-config.js";
 
 /*
- * Lethe — service worker for the static P1 app (web/). The frozen v1 NiceGUI
- * app keeps its own worker at lethe/web_static/sw.js; P3 removes that one.
+ * Lethe — service worker for the static P1 app (web/).
  *
  * PRIVACY BOUNDARY — what may enter CacheStorage:
  *   1. the app shell: exact same-origin paths listed in SHELL_PATHS;

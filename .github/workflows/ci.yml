@@ -42,6 +42,8 @@ jobs:
         run: pixi run typecheck
       - name: signed dictionary pack
         run: pixi run dictionary-check
+      - name: v1 cutover guard
+        run: pixi run cutover-check
 
   unit:
     name: unit (pytest)

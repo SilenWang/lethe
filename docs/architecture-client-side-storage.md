@@ -1,4 +1,9 @@
-# Lethe 架构方案：客户端存储 + 服务端纯运算 + 5 分钟 TTL
+# [Archived] Lethe 架构方案：客户端存储 + 服务端纯运算 + 5 分钟 TTL
+
+> **历史文档。** 本文记录 v1 服务端阶段的设计。P3 cutover 后服务端进程、
+> 临时运行时与相关格式路径均已删除；当前架构和发布方式以
+> [`p3/release.md`](p3/release.md)、[`p3/cutover.md`](p3/cutover.md) 和
+> [`user-guide.md`](user-guide.md) 为准。
 
 > 任务：VYB-356（父任务 VYB-354 / T1）
 > 版本基线：Lethe v1.3.1，`main`/`dev` 均在 `736c3ea`
