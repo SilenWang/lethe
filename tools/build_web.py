@@ -9,7 +9,8 @@ Two invariants are checked on every build:
 
 * no ``http://`` / ``https://`` reference in product sources (no CDN), and
 * the runtime config pins the same Pyodide/BetterOffice versions as
-  ``web/assets/vendor/VERSIONS.json``.
+  ``web/assets/vendor/VERSIONS.json``, and
+* the signed preset-dictionary pack and trust anchor verify together.
 """
 
 from __future__ import annotations
@@ -36,6 +37,9 @@ PY_MODULES = (
     "web_entry.py",
 )
 TOOL_MODULES = ("__init__.py", "postprocess_contract.py")
+
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 
 
 def _link_or_copy(src: Path, dst: Path) -> None:
@@ -128,7 +132,7 @@ def build(out: Path) -> None:
     for entry in ("index.html",):
         if (WEB / entry).is_file():
             shutil.copy2(WEB / entry, out / entry)
-    for entry in ("p1", "lib", "worker", "assets"):
+    for entry in ("p1", "lib", "worker", "assets", "dictionary"):
         source = WEB / entry
         if source.is_dir():
             _copy_tree(source, out / entry)
@@ -162,7 +166,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args(argv)
 
+    from tools.build_dictionary import DictionaryError, verify_dictionary
+
     problems = check_sources() + check_versions() + check_runtime_config()
+    try:
+        verify_dictionary()
+    except DictionaryError as exc:
+        problems.append(f"dictionary: {exc}")
     if problems:
         for problem in problems:
             print(f"web-build: {problem}", file=sys.stderr)

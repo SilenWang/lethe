@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +28,8 @@ def test_build_is_self_contained(tmp_path: Path) -> None:
     )
     assert (out / "p1" / "harness.html").is_file()
     assert (out / "assets" / "vendor" / "pyodide" / "pyodide.mjs").is_file()
+    assert (out / "dictionary" / "manifest.json").is_file()
+    assert (out / "dictionary" / "manifest.sig").is_file()
     vendor = out / "assets" / "vendor"
     for path in out.rglob("*"):
         if vendor in path.parents:
@@ -46,7 +49,10 @@ def test_built_harness_loads_pyodide_offline(tmp_path: Path) -> None:
     )
     external: list[str] = []
     with StaticServer(out) as server, sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        launch = {}
+        if os.environ.get("LETHE_CHROMIUM_PATH"):
+            launch["executable_path"] = os.environ["LETHE_CHROMIUM_PATH"]
+        browser = playwright.chromium.launch(**launch)
         page = browser.new_page()
         page.set_default_timeout(180_000)
 

@@ -13,6 +13,12 @@ The cached assets are served from the same origin.  Uploaded documents,
 extracted text, results, token maps and IndexedDB data never enter
 CacheStorage.
 
+The signed preset dictionary is part of the same eager pre-cache contract:
+`/dictionary/manifest.json`, `/dictionary/manifest.sig` and the gzip shards
+listed in `coreShards`.  The core is capped at 150 KiB; the complete optional
+set is capped at 8 MiB.  `docs/p3/dictionary-distribution.md` defines the
+signature, content-addressed shard, OPFS activation and rollback rules.
+
 ## Cold start and release upgrade
 
 After the first successful online precache, a fully offline reload starts the
@@ -22,7 +28,7 @@ silent network fallback.
 
 The service worker has separate shell and runtime caches named with
 `APP_VERSION` and `CACHE_VERSION`.  Every release changes the app version;
-cache-policy changes also bump `CACHE_VERSION` (currently `5`).  Activation
+cache-policy changes also bump `CACHE_VERSION` (currently `6`).  Activation
 deletes all older `lethe-*` caches, then claims the current clients.  A failed
 precache leaves the progress/error UI visible and exposes retry; the next
 successful attempt writes the new release cache.

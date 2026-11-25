@@ -48,6 +48,10 @@ dist/web/
 # P0 asset fetch scratch (the vendored result lives in web/assets/vendor)
 .vendor-tmp/
 
+# Release-only private signing keys (the public key is committed)
+*.dictionary-signing-key.pem
+.dictionary-signing-key.pem
+
 # Claude Code local (machine-specific) settings — keep memory + project CLAUDE.md,
 # but not per-user permission grants.
 .claude/settings.local.json

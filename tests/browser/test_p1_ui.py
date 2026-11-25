@@ -7,6 +7,7 @@ built static app in Chromium, including one real docx redact→restore round tri
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -62,7 +63,10 @@ def built(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def page(built: Path):
     assert sync_playwright is not None
     with StaticServer(built) as server, sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        launch = {}
+        if os.environ.get("LETHE_CHROMIUM_PATH"):
+            launch["executable_path"] = os.environ["LETHE_CHROMIUM_PATH"]
+        browser = playwright.chromium.launch(**launch)
         page = browser.new_page()
         page.set_default_timeout(240_000)
         page.goto(f"{server.base_url}/")
@@ -178,6 +182,9 @@ def test_docx_roundtrip_review_generate_restore_and_cache_privacy(
     paths = [path for entries in cached.values() for path in entries]
     assert not [path for path in paths if "samples" in path or path.endswith(".docx")]
     assert any(path.startswith("/assets/vendor/pyodide/") for path in paths)
+    assert "/dictionary/manifest.json" in paths
+    assert "/dictionary/manifest.sig" in paths
+    assert any(path.startswith("/dictionary/packs/") for path in paths)
     assert "/index.html" in paths
 
 
