@@ -49,11 +49,6 @@
         "version": "0.5.1",
         "tarball": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz",
         "tarball_sha256": "4dad7ff8fae0f055c350ca34f85b4be18a6b6df5952a6ce36424f7a157b4ada2"
-      },
-      "pptx": {
-        "version": "0.5.1",
-        "tarball": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz",
-        "tarball_sha256": "7c4dd44e35072c7314c46f523566ce4b049a4f8a27bbfa588becc2df2eb953d3"
       }
     }
   },
@@ -917,150 +912,6 @@
       "source": "https://registry.npmjs.org/@betteroffice/docx/-/docx-0.5.1.tgz::package/package.json"
     },
     {
-      "path": "betteroffice/pptx/LICENSE",
-      "sha256": "db17c7e4531fd3e1a376cd87ad1ddf9a195118e47fde7f26b9feb657c8c114af",
-      "bytes": 11363,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/LICENSE"
-    },
-    {
-      "path": "betteroffice/pptx/README.md",
-      "sha256": "9869b954b711eb28e2ed6b8c6cbe049140c2ee52f5438d375dfb42e35a805c24",
-      "bytes": 6999,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/README.md"
-    },
-    {
-      "path": "betteroffice/pptx/dist/chunk-2CPM3HRW.js",
-      "sha256": "0bb04d96c0ebdf9cbd5d96a212cef21348c597020c09620ea52e0c039f43eee6",
-      "bytes": 10570,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-2CPM3HRW.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/chunk-3TTZUGDD.js",
-      "sha256": "0616dbceb78d20ce962ee1e41d404bbf7e5553a41158bd70533ec877926733a4",
-      "bytes": 2185,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-3TTZUGDD.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/chunk-B6OFSXHM.js",
-      "sha256": "013e8bd9d8c64ef6ab08248188a138eca458d9e0c11932e312dc5a4e0df3957a",
-      "bytes": 20174,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-B6OFSXHM.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/chunk-DDNX2Z7E.js",
-      "sha256": "bc579100b9fc5daa7e05ad348c29ef83026f80bc1caef0400088f400a4902b37",
-      "bytes": 53697,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-DDNX2Z7E.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/chunk-JZOLK2OC.js",
-      "sha256": "7673438fed921d91c3f5abe97eb066d19b8cc9c43bf12c58bc883032dbaaa202",
-      "bytes": 29507,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-JZOLK2OC.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/chunk-NWXUJY6L.js",
-      "sha256": "0f0a5ec7f3b9f6dc5896e8361cd70e0ca96d1a029413ef5bd3baccc317661620",
-      "bytes": 16515,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-NWXUJY6L.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/chunk-O2XFH626.js",
-      "sha256": "3ade205f0bac96a38ed4ca61f523c5b9a827c69746d45d5a10d3b1ed0d2c89d2",
-      "bytes": 185,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-O2XFH626.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/chunk-YMIVEAXD.js",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "bytes": 0,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/chunk-YMIVEAXD.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/collaboration.d.ts",
-      "sha256": "87f7cf00556c0011b1cbd4d0fc70486c9a2a4459a6b691ac8711c85998147d94",
-      "bytes": 1322,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/collaboration.d.ts"
-    },
-    {
-      "path": "betteroffice/pptx/dist/collaboration.js",
-      "sha256": "b26b97c53f1a7a3d3c8a73996c42b64fb3327a00d51dd3e444c015c3306272a9",
-      "bytes": 290,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/collaboration.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/editorSession-Cl_EWgAi.d.ts",
-      "sha256": "27c63c76bd42ddc484a8a4918f3f8bd99a99944a8ee24d7d2d38fef4eaf44d07",
-      "bytes": 62646,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/editorSession-Cl_EWgAi.d.ts"
-    },
-    {
-      "path": "betteroffice/pptx/dist/generated/pptx_wasm_bg.wasm",
-      "sha256": "3a4be9329de1bca77437137ce6417c7910e35c1c7c0e78571bb81f9fe16e5563",
-      "bytes": 6302176,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/generated/pptx_wasm_bg.wasm"
-    },
-    {
-      "path": "betteroffice/pptx/dist/index.d.ts",
-      "sha256": "69aacd8f614d23edc519ada7de5c15c8ba186a9c6770423f3cb1e41e5d24b41c",
-      "bytes": 5471,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/index.d.ts"
-    },
-    {
-      "path": "betteroffice/pptx/dist/index.js",
-      "sha256": "26601b384cb381bf01e5b288ef3d92e71751056fe652c56e12464d7d9173f1a9",
-      "bytes": 15106,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/index.js"
-    },
-    {
-      "path": "betteroffice/pptx/dist/main-C6-cc0fR.d.ts",
-      "sha256": "e40f62dccfc9175a78542a499afcad94259585d586f746f6f8289eb212e37d09",
-      "bytes": 3931,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/main-C6-cc0fR.d.ts"
-    },
-    {
-      "path": "betteroffice/pptx/dist/pptxSessionWorker.d.ts",
-      "sha256": "6caa0b04bdc10582a3729dae9244f21c5bec0b9ffe7e2a84999c2f868f5dd9be",
-      "bytes": 13,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/pptxSessionWorker.d.ts"
-    },
-    {
-      "path": "betteroffice/pptx/dist/pptxSessionWorker.mjs",
-      "sha256": "547ee4710bf9a1c29fdda42d3b7075cba9f1bbe17cb8986578b080463d2ae24b",
-      "bytes": 68855,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/pptxSessionWorker.mjs"
-    },
-    {
-      "path": "betteroffice/pptx/dist/presence-C1o8TDwu.d.ts",
-      "sha256": "fcf5c165fce7b115f45c3eb0ba832a339ddeb5018a99ddbda0cd761198f49c5c",
-      "bytes": 3560,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/presence-C1o8TDwu.d.ts"
-    },
-    {
-      "path": "betteroffice/pptx/dist/types-ui_ARP0o.d.ts",
-      "sha256": "e8ad392cc81f6a4011b45431ec988a0ce866f19da2be79a7dc8488bcbb07608f",
-      "bytes": 4002,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/types-ui_ARP0o.d.ts"
-    },
-    {
-      "path": "betteroffice/pptx/dist/worker.d.ts",
-      "sha256": "cad2db9542d7b202d60490f616dc497f7ced2067ad76754178c5c0448453dbe6",
-      "bytes": 26997,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/worker.d.ts"
-    },
-    {
-      "path": "betteroffice/pptx/dist/worker.js",
-      "sha256": "012327a2c783257ce128dd31fde48dd808ae2503799f54dda469b2a240afcf40",
-      "bytes": 46412,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/dist/worker.js"
-    },
-    {
-      "path": "betteroffice/pptx/package.json",
-      "sha256": "9ea37b6e865dc7680519dcfcae966a79afcf4e32c90fb78c270cced36b4f85aa",
-      "bytes": 1720,
-      "source": "https://registry.npmjs.org/@betteroffice/pptx/-/pptx-0.5.1.tgz::package/package.json"
-    },
-    {
       "path": "pyodide/cffi-1.17.1-cp313-cp313-pyemscripten_2025_0_wasm32.whl",
       "sha256": "2c93a856325b97d30e1f9dfced3d1e490f256309b89edb65c505b2b5d737eaf5",
       "bytes": 147738,
@@ -1128,7 +979,7 @@
     }
   ],
   "totals": {
-    "files": 178,
-    "bytes": 60346519
+    "files": 154,
+    "bytes": 53652823
   }
 }
