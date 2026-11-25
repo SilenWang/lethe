@@ -14,20 +14,21 @@ offline vault load.  The SW serves all assets from the runtime cache.
 
 ## 50 MB matrix
 
-| Format | Baseline | Peak absolute RSS | Gate |
-|---|---:|---:|---:|
-| xlsx part-direct | 1,093 MB | **1,792 MB** | ≤2 GB |
-| pptx part-direct | 1,098 MB | **1,542 MB** | ≤2.5 GB |
-| pptx stress | 1,098 MB | **1,620 MB** | ≤2.5 GB |
-| docx | P1 DoD | P1 DoD | ≤2.5 GB |
+| Format | Redact time | Baseline | Peak absolute RSS | Gate |
+|---|---:|---:|---:|---:|
+| docx BetterOffice | 2.9 s | 1,108 MB | **2,050 MB** | ≤2.5 GB |
+| xlsx part-direct | 33.1 s | 1,118 MB | **1,870 MB** | ≤2 GB |
+| pptx part-direct | 1.0 s | 1,118 MB | **1,634 MB** | ≤2.5 GB |
 
-No gate changed.  The pptx BetterOffice asset is no longer initialised or
-preloaded; removing the vendored directory can be a P3 cleanup.
+No gate changed.  The unused pptx BetterOffice bundle has been removed from
+the repository, manifest and service-worker precache.  The resulting manifest
+has **154 files / 53,652,823 bytes (51.2 MiB)**.
 
-## Remaining P3
+Raw fixtures, sha256 and Pyodide heap values are in
+[`runtime-50mb.json`](runtime-50mb.json).
 
-1. Final five-layer regression PR hooked into `fidelity-corpus` (1–1.5 d).
-2. Delete unused pptx BetterOffice asset and update asset manifest/docs (0.5 d).
-3. Release/cache-invalidation docs and merged 50 MB/offline report (0.5–1 d).
+## Final P2 regression
 
-Total: **2–3 person-days** excluding review/merge queue.
+`pixi run fidelity-corpus` now runs part/hash integrity, text-only C14N,
+zero-leak/character-exact restore, LibreOffice SSIM and the recorded 50 MB
+runtime gates.  Release and cache rules are in `docs/p3/release.md`.

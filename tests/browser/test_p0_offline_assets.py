@@ -7,8 +7,8 @@ aborted, and the page then:
 2. imports lxml and cryptography from the vendored wheels;
 3. recomputes SHA-256 for every vendored file in the browser and compares it
    with ``manifest.json``;
-4. compiles every wasm bundle with ``WebAssembly.compile`` (Pyodide + the four
-   BetterOffice modules).
+4. compiles every wasm bundle with ``WebAssembly.compile`` (Pyodide + the
+   BetterOffice docx modules).
 
 If anything still points at a CDN, the aborted-request list is non-empty and
 the test fails with the URLs named.
@@ -141,5 +141,6 @@ root.find("b").text + ":" + str(len(token))
     broken = [item["path"] for item in hash_results if item["compiled"] is not True]
     assert broken == [], f"wasm failed to compile: {broken}"
     assert any(str(item["path"]).endswith("pyodide.asm.wasm") for item in hash_results)
-    for package in ("docx", "pptx"):
+    for package in ("docx",):
         assert any(str(item["path"]).startswith(f"betteroffice/{package}/") for item in hash_results)
+    assert not any("betteroffice/pptx/" in str(item["path"]) for item in hash_results)

@@ -2,7 +2,7 @@
 
 The v2 app is plain ES modules served from the same origin as the vendored
 Pyodide/BetterOffice assets.  There is no bundler and no npm step: this script
-copies the allow-listed source tree and hard-links the 58MB vendor directory so
+copies the allow-listed source tree and hard-links the 51MB vendor directory so
 the build stays cheap and reproducible.
 
 Two invariants are checked on every build:
@@ -102,8 +102,11 @@ def check_runtime_config() -> list[str]:
     problems: list[str] = []
     if not formats:
         problems.append("runtime-config: SUPPORTED_FORMATS is empty")
-    if "xlsx" in packages:
-        problems.append("runtime-config: BetterOffice xlsx must not be preloaded (part-direct)")
+    for package in ("xlsx", "pptx"):
+        if package in packages:
+            problems.append(
+                f"runtime-config: BetterOffice {package} must not be preloaded (part-direct)"
+            )
     for package in packages:
         if not (VENDOR / "betteroffice" / package).is_dir():
             problems.append(f"runtime-config: BetterOffice package {package} is not vendored")

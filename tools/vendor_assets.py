@@ -6,9 +6,8 @@ step; ``--verify-only`` is what CI runs and what proves the offline promise:
 
 * Pyodide **0.29.5** (Python 3.13.2): core loader/wasm/stdlib + the lxml 6.0.2
   and cryptography 46.0.3 wheels (+ cffi/pycparser/six).
-* BetterOffice **0.5.1**: the docx (parse 6.4MB + edit 24.4MB) and pptx
-  6.3MB wasm bundles, extracted from the npm tarballs.  XLSX is part-direct
-  since P2 (the xlsx bundle was 7.6MB and saved nothing), so it is not
+* BetterOffice **0.5.1**: the docx bundle, extracted from the npm tarball.
+  XLSX and PPTX are part-direct since P2, so their unused bundles are not
   vendored or precached.
 
 ``web/assets/vendor/manifest.json`` records every file's sha256 and byte size;
@@ -44,7 +43,7 @@ PYODIDE_CORE = [
 ]
 PYODIDE_WHEELS = ["lxml", "cryptography", "cffi", "pycparser", "six"]
 BETTEROFFICE_VERSION = "0.5.1"
-BETTEROFFICE_PACKAGES = ["docx", "pptx"]
+BETTEROFFICE_PACKAGES = ["docx"]
 BETTEROFFICE_TARBALL = "https://registry.npmjs.org/@betteroffice/{pkg}/-/{pkg}-" + f"{BETTEROFFICE_VERSION}.tgz"
 
 
