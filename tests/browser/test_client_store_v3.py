@@ -7,6 +7,7 @@ over once, with ``source: "user"``, and nothing else is rewritten.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -56,7 +57,10 @@ def page(tmp_path: Path):
     (tmp_path / "index.html").write_text(PAGE, encoding="utf-8")
     shutil.copy2(REPO / "lethe" / "web_static" / "client-store.js", tmp_path / "client-store.js")
     with StaticServer(tmp_path) as server, sync_playwright() as playwright:
-        browser = playwright.chromium.launch()
+        launch = {}
+        if os.environ.get("LETHE_CHROMIUM_PATH"):
+            launch["executable_path"] = os.environ["LETHE_CHROMIUM_PATH"]
+        browser = playwright.chromium.launch(**launch)
         page = browser.new_page()
         page.goto(f"{server.base_url}/")
         yield page
@@ -71,6 +75,7 @@ def test_fresh_store_uses_user_entities_with_source(page) -> None:
     )
     rows = page.evaluate("window.lethStore.getEntities()")
     assert [row["source"] for row in rows] == ["user"]
+    assert [row["packVersion"] for row in rows] == [None]
     stores = page.evaluate(
         """async () => {
             const db = await new Promise((resolve, reject) => {
@@ -93,6 +98,7 @@ def test_v2_rows_are_copied_once_with_source(page) -> None:
     rows = page.evaluate("window.lethStore.getEntities()")
     assert [row["canonical"] for row in rows] == ["Acme Ltd"]
     assert rows[0]["source"] == "user"
+    assert rows[0]["packVersion"] is None
     # The legacy record is left untouched for the frozen v1 build.
     legacy = page.evaluate(
         "window.lethStore.getEntities().then(() => new Promise((r) => {"

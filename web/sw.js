@@ -29,7 +29,7 @@ import {
  */
 'use strict';
 
-var CACHE_VERSION = '6';
+var CACHE_VERSION = '7';
 var APP_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 var SHELL_CACHE = 'lethe-p1-shell-v' + APP_VERSION + '-r' + CACHE_VERSION;
 var RUNTIME_CACHE = 'lethe-p1-runtime-v' + APP_VERSION + '-r' + CACHE_VERSION;
@@ -54,6 +54,7 @@ var SHELL_PATHS = [
   '/lib/runtime-config.js',
   '/lib/dictionary-client.js',
   '/lib/dictionary-config.js',
+  '/lib/dictionary-merge.js',
   '/worker/pyodide_worker.js',
   '/locales/en.json',
   '/locales/zh.json'
