@@ -55,6 +55,10 @@ REQUIRED = {
         "merged_cell",
         "media",
         "chart",
+        "persons",
+        "threaded_comments",
+        "custom_xml",
+        "doc_props",
         "unique_marker",
     ],
     "pptx": [
@@ -69,6 +73,12 @@ REQUIRED = {
         "speaker_notes",
         "unique_marker",
     ],
+}
+
+# Storage forms are mutually exclusive per file, so they are tracked for
+# coverage (at least one file each) instead of required in every file.
+TRACKED = {
+    "xlsx": ["shared_strings", "inline_strings", "mixed_strings"],
 }
 
 
@@ -142,9 +152,35 @@ def xlsx_features(data: bytes) -> set[str]:
                 features.add("comment_with_author")
         if any(re.fullmatch(r"xl/threadedComments/threadedComment\d*\.xml", n) for n in names):
             xml = _text(archive.read(next(n for n in names if re.fullmatch(r"xl/threadedComments/threadedComment\d*\.xml", n))))
-            if "personId=" in xml and _has_text(xml):
-                features.add("threaded_comment")
+            if "personId=" in xml and re.search(r"<text[^>]*>[^<]+</text>", xml):
+                features.add("threaded_comments")
+        if any(re.fullmatch(r"xl/persons/person\d*\.xml", n) for n in names):
+            xml = _text(archive.read(next(n for n in names if re.fullmatch(r"xl/persons/person\d*\.xml", n))))
+            if 'displayName="' in xml:
+                features.add("persons")
+        custom = [
+            n
+            for n in names
+            if n.startswith("customXml/item") and n.endswith(".xml") and "itemProps" not in n
+        ]
+        if custom and any(re.search(r">[^<>]+<", _text(archive.read(n))) for n in custom):
+            features.add("custom_xml")
+        if "docProps/core.xml" in names:
+            core = _text(archive.read("docProps/core.xml"))
+            if re.search(r"<dc:creator>[^<]+</dc:creator>", core) or "lastModifiedBy" in core:
+                features.add("doc_props")
+        if "xl/sharedStrings.xml" in names and re.search(
+            r"<t[^>]*>[^<]+</t>", _text(archive.read("xl/sharedStrings.xml"))
+        ):
+            features.add("shared_strings")
         sheet_xmls = [_text(archive.read(n)) for n in names if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n)]
+        if any(
+            't="inlineStr"' in x and re.search(r"<t[^>]*>[^<]+</t>", x)
+            for x in sheet_xmls
+        ):
+            features.add("inline_strings")
+        if "shared_strings" in features and "inline_strings" in features:
+            features.add("mixed_strings")
         if any("<headerFooter" in x and "<oddHeader" in x for x in sheet_xmls):
             features.add("header_footer")
         drawings = [
@@ -287,6 +323,15 @@ def verify(strict: bool = True) -> list[str]:
             for feature, count in feature_counts.items():
                 if count < MIN_PER_FORMAT:
                     errors.append(f"{fmt}: feature {feature} covered by {count} files, need {MIN_PER_FORMAT}")
+        for fmt, tracked in TRACKED.items():
+            for feature in tracked:
+                count = sum(
+                    1
+                    for row in rows
+                    if row["format"] == fmt and feature in row["features"].split(";")
+                )
+                if count < 1:
+                    errors.append(f"{fmt}: tracked feature {feature} has no corpus file")
     return errors
 
 
@@ -313,6 +358,8 @@ def coverage_table() -> str:
     for fmt, required in REQUIRED.items():
         for feature in required:
             lines.append(f"| {fmt} | {feature} | {features[fmt].get(feature, 0)}/{MIN_PER_FORMAT} |")
+        for feature in TRACKED.get(fmt, []):
+            lines.append(f"| {fmt} | {feature} | {features[fmt].get(feature, 0)}/{counts[fmt]} |")
     lines.append("")
     return "\n".join(lines)
 

@@ -141,5 +141,5 @@ root.find("b").text + ":" + str(len(token))
     broken = [item["path"] for item in hash_results if item["compiled"] is not True]
     assert broken == [], f"wasm failed to compile: {broken}"
     assert any(str(item["path"]).endswith("pyodide.asm.wasm") for item in hash_results)
-    for package in ("docx", "xlsx", "pptx"):
+    for package in ("docx", "pptx"):
         assert any(str(item["path"]).startswith(f"betteroffice/{package}/") for item in hash_results)

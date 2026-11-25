@@ -248,3 +248,36 @@ def postprocess(
 def digest(data: bytes) -> str:
     """Short sha256 helper used by tests and CI logs."""
     return hashlib.sha256(data).hexdigest()
+
+
+def repack(source: bytes, replacements: Mapping[str, bytes | str]) -> bytes:
+    """Rebuild ``source`` with ``replacements`` and raw-copy every other entry.
+
+    This is the same source-priority rule as :func:`postprocess`, for writers
+    (xlsx part-direct) that produce the edited parts themselves instead of
+    taking them from BetterOffice.  The result passes the same C1/C2/C3
+    contract assertions.
+    """
+    changed = {
+        name: value.encode("utf-8") if isinstance(value, str) else value
+        for name, value in replacements.items()
+    }
+    if not changed:
+        return source
+    with zipfile.ZipFile(io.BytesIO(source)) as src:
+        missing = sorted(set(changed) - set(src.namelist()))
+        if missing:
+            raise PostprocessError(f"cannot replace missing parts: {missing}")
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as edited:
+            for name, value in changed.items():
+                edited.writestr(name, value)
+        with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as output:
+            rebuilt = _rebuild(src, output, set(changed))
+    for assertion in (
+        assert_source_priority,
+        assert_unedited_part_sha256,
+        assert_unedited_compressed_stream,
+    ):
+        assertion(io.BytesIO(source), io.BytesIO(rebuilt), set(changed))
+    return rebuilt

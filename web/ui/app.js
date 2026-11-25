@@ -12,6 +12,7 @@ import {
   humanSize,
   isPptx,
   isSupported,
+  isXlsx,
   mimeFor,
   errorKey,
   replaceSuffix,
@@ -274,7 +275,7 @@ function pickFile(file) {
   $("upload-file").textContent = t("p1.upload.selected", { name: file.name, size: humanSize(file.size) });
   const note = $("upload-note");
   const degradations = $("upload-degradations");
-  if (degradations) degradations.hidden = !isPptx(file);
+  if (degradations) degradations.hidden = !isXlsx(file) && !isPptx(file);
   if (gate.level === "warn") {
     note.hidden = false;
     note.textContent = t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 }) +
@@ -337,7 +338,11 @@ async function inspectFile() {
   try {
     const result = await runOp({ op: "inspect", file: state.file });
     $("upload-inspect").hidden = false;
-    const partsKey = isPptx(state.file) ? "p1.upload.parts_pptx" : "p1.upload.parts";
+    const partsKey = isXlsx(state.file)
+      ? "p1.upload.parts_xlsx"
+      : isPptx(state.file)
+        ? "p1.upload.parts_pptx"
+        : "p1.upload.parts";
     $("upload-inspect").textContent =
       `${t("p1.upload.checked")} ` +
       t(partsKey, { parts: result.parts, paragraphs: result.paragraphs });

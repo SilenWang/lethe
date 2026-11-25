@@ -28,12 +28,13 @@ bridge.stats();       // {runs, recycles, lastBytes, lastDurationMs}
 | op | status | result |
 |---|---|---|
 | `inspect` | P1 foundation | `{parts, paragraphs, status, warnings}` |
-| `redact` | P1 docx | `{bytes, tokens, items, counts, hits, size, heapBytes}` |
-| `restore` | P1 docx | `{bytes, tokens, counts, hits, size, heapBytes}` |
+| `redact` | P1 docx / P2 xlsx | `{bytes, tokens, items, counts, hits, size, heapBytes, warnings}` |
+| `restore` | P1 docx / P2 xlsx | `{bytes, tokens, counts, hits, size, heapBytes, warnings}` |
 | `echo` | diagnostics only | `{payload, protocol}` |
 
 `inspect` runs the four hard gates in Pyodide **before** BetterOffice
-`parseDocx`, then reports the part count and paragraph count.
+`parseDocx`, then reports the part count and paragraph count.  For `.xlsx` it
+does not call a document library at all (`paragraphs` is 0).
 
 `redact` options: `{entities: [{canonical, type, aliases}]}`. It replaces every
 text container (body, headers, footers, footnotes, endnotes, comments,
@@ -41,6 +42,13 @@ tracked-change text, author attributes, `docProps/core.xml`), then repacks via
 BetterOffice and routes the result through `postprocess()`.
 
 `restore` options: `{token_map: {"[PERSON_001]": "John Smith"}}`.
+
+For `.xlsx`, `redact` / `restore` run the Python part-direct engine
+(`lethe/xlsx_engine.py`) and return the finished package; BetterOffice is not
+involved.  They return `bytes` the same way, plus `warnings` with the xlsx
+degradation codes (`xlsx.pivot_cache`, `xlsx.chart_cache`, `xlsx.smartart`,
+`xlsx.ole`, `xlsx.formula_literal`, `xlsx.external_links`).  The progress
+phases are `detect → postprocess` (there is no library write phase).
 
 Both return `bytes` as a transferred `Uint8Array`; the worker also emits
 `detect → write → postprocess` progress phases.

@@ -13,7 +13,7 @@ def _function_body(source: str, start_name: str, end_name: str) -> str:
     return source[start:end]
 
 
-def test_pptx_is_part_direct_and_has_no_betteroffice_path() -> None:
+def test_pptx_part_direct_and_deferred_docx_crypto() -> None:
     source = (REPO / "web" / "worker" / "pyodide_worker.js").read_text(encoding="utf-8")
     init = _function_body(source, "async function initRuntime", "async function loadDocx")
     # docx stays lazy; pptx has no BetterOffice path at all.
@@ -30,8 +30,8 @@ def test_pptx_is_part_direct_and_has_no_betteroffice_path() -> None:
     assert "pptxPartDirect: true" in source
     inspect = _function_body(source, "async function runInspect", "async function runWrite")
     assert "loadDocx()" in inspect
-    write = _function_body(source, "async function runWrite", "async function runPptxWrite")
+    write = _function_body(source, "async function runWrite", "async function runPartDirectWrite")
     assert "loadDocx()" in write
-    run = _function_body(source, "async function runPptxWrite", "function cleanupTemp")
+    run = _function_body(source, "async function runPartDirectWrite", "function cleanupTemp")
     assert "final_path" in run
     assert "loadPptx" not in run

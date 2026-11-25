@@ -151,6 +151,10 @@ _ZH_NAME_RE = re.compile(
 
 def _preset_rule_spans(text: str) -> list[_Span]:
     """The two deterministic context rules; both are default-checked."""
+    # Both rules require CJK script; an ASCII spreadsheet should not pay for a
+    # full Japanese/Chinese regex scan of a 30MB corpus.
+    if not _CJK_RE.search(text):
+        return []
     out: list[_Span] = []
     for match in _ZH_NAME_RE.finditer(text):
         group = 1 if match.group(1) else 2
@@ -197,18 +201,20 @@ def detect(text: str, entities: list[Entity], enable_patterns: bool = True,
         spans.extend(_preset_rule_spans(text))
 
     # ---- resolve overlaps by longest-wins, then source tier -----------------
-    def _overlaps(sp: _Span, taken: list[tuple[int, int]]) -> bool:
-        return any(sp.start < e and s < sp.end for s, e in taken)
-
     primary = list(spans)
     primary.sort(key=lambda s: (s.length, _TIER[s.source], _TYPE_RANK.get(s.type, 0)), reverse=True)
     accepted: list[_Span] = []
-    taken: list[tuple[int, int]] = []
+    # Character occupancy is the same rule as "any accepted span overlaps",
+    # but O(text) instead of O(spans^2): a 50MB sheet can yield tens of
+    # thousands of account matches, and the quadratic scan was the bottleneck.
+    occupied = bytearray(len(text))
     for sp in primary:
-        if _overlaps(sp, taken):
+        if sp.start < 0 or sp.end > len(text) or sp.end <= sp.start:
+            continue
+        if any(occupied[sp.start : sp.end]):
             continue
         accepted.append(sp)
-        taken.append((sp.start, sp.end))
+        occupied[sp.start : sp.end] = b"\x01" * (sp.end - sp.start)
 
     # ---- group accepted spans into items by canonical value ----------------
     groups: dict[str, Item] = {}
@@ -273,6 +279,91 @@ def build_replacer(items: list[Item]):
         return text, hits
 
     return replace, token_to_real
+
+
+def build_fast_replacer(items: list[Item]):
+    """Same semantics as :func:`build_replacer`, one combined regex.
+
+    The per-surface loop is O(surfaces) Python calls per text node, which is
+    fine for a docx paragraph but not for an xlsx with 200k cells and tens of
+    thousands of pattern hits.  Alternation keeps the same longest-first order.
+    """
+    token_to_real: dict[str, str] = {}
+    entries: list[tuple[str, str]] = []
+    pattern_tokens: dict[str, str] = {}
+    for it in items:
+        if not it.include or not it.token:
+            continue
+        token_to_real[it.token] = it.canonical
+        for surface in it.surfaces:
+            if it.source == "pattern":
+                pattern_tokens[surface.casefold()] = it.token
+            else:
+                entries.append((surface, it.token))
+    if not entries and not pattern_tokens:
+        return (lambda text: (text, 0)), token_to_real
+    entries.sort(key=lambda entry: len(entry[0]), reverse=True)
+    pattern = (
+        re.compile(
+            "|".join(f"(?:{_whole_word_regex(surface).pattern})" for surface, _ in entries),
+            re.IGNORECASE,
+        )
+        if entries
+        else None
+    )
+    token_by_surface = {surface.casefold(): token for surface, token in entries}
+
+    def replace(text: str) -> tuple[str, int]:
+        hits = 0
+
+        if pattern is not None:
+            def sub_dictionary(match: re.Match[str]) -> str:
+                nonlocal hits
+                token = token_by_surface.get(match.group(0).casefold())
+                if token is None:
+                    return match.group(0)
+                hits += 1
+                return token
+
+            text = pattern.sub(sub_dictionary, text)
+
+        # Pattern detectors (email/phone/account) already know the exact
+        # values; run their three cheap regexes instead of thousands of
+        # one-value alternatives.
+        for pattern_re in PATTERNS.values():
+            def sub_pattern(match: re.Match[str]) -> str:
+                nonlocal hits
+                raw = match.group(0)
+                value = raw.strip()
+                token = pattern_tokens.get(value.casefold())
+                if token is None:
+                    return raw
+                hits += 1
+                return raw.replace(value, token, 1)
+
+            text = pattern_re.sub(sub_pattern, text)
+        return text, hits
+
+    return replace, token_to_real
+
+
+def build_fast_restorer(token_to_real: dict[str, str]):
+    tokens = sorted(token_to_real, key=len, reverse=True)
+    if not tokens:
+        return lambda text: (text, 0)
+    pattern = re.compile("|".join(re.escape(token) for token in tokens))
+
+    def restore(text: str) -> tuple[str, int]:
+        hits = 0
+
+        def sub(match: re.Match[str]) -> str:
+            nonlocal hits
+            hits += 1
+            return token_to_real[match.group(0)]
+
+        return pattern.sub(sub, text), hits
+
+    return restore
 
 
 def build_restorer(token_to_real: dict[str, str]):

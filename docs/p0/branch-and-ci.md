@@ -85,8 +85,9 @@ must be rejected before BetterOffice builds its document model. A check after
   `pyodide-lock.json`, plus lxml 6.0.2 and cryptography 46.0.3 with
   cffi/pycparser/six.
 - BetterOffice **0.5.1**: the full `dist/` of `@betteroffice/docx`,
-  `@betteroffice/xlsx` and `@betteroffice/pptx` (docx parse 6.4MB + edit
-  24.4MB, xlsx 7.6MB, pptx 6.3MB).
+  `@betteroffice/pptx` (docx parse 6.4MB + edit 24.4MB, pptx 6.3MB).  The
+  xlsx bundle was removed in P2: xlsx is part-direct, so it is neither
+  vendored nor precached.
 - Everything is served from `web/assets/vendor/`; `web/assets/runtime-config.json`
   pins `cdn=false`, `micropip=false`, `sameOrigin=true`.
 - `tools/vendor_assets.py --verify-only` checks every file against

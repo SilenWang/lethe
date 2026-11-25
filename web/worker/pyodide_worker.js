@@ -128,7 +128,7 @@ async function runInspect(id, bytes, fileName) {
   pyodide.FS.writeFile("/tmp/input.docx", bytes);
   const gated = callPython({ op: "inspect", path: "/tmp/input.docx", file_name: fileName });
   if (!gated.ok) return gated;
-  if (/\.pptx$/i.test(fileName)) {
+  if (/\.(xlsx|pptx)$/i.test(fileName)) {
     pyodide.runPython(`
 import os
 try:
@@ -174,8 +174,8 @@ except OSError:
 }
 
 async function runWrite(id, op, bytes, options, fileName) {
-  if (/\.pptx$/i.test(fileName)) {
-    return runPptxWrite(id, op, bytes, options, fileName);
+  if (/\.(xlsx|pptx)$/i.test(fileName)) {
+    return runPartDirectWrite(id, op, bytes, options, fileName);
   }
   const pyodideRuntime = await initRuntime();
   pyodideRuntime.FS.writeFile("/tmp/source.docx", bytes);
@@ -188,6 +188,22 @@ async function runWrite(id, op, bytes, options, fileName) {
     token_map: options.token_map || {},
   });
   if (!plan.ok) return plan;
+  if (plan.final_path) {
+    post(progress({ type: "progress", id, phase: "postprocess" }));
+    const output = pyodideRuntime.FS.readFile(plan.final_path);
+    return {
+      ok: true,
+      bytes: output,
+      tokens: plan.tokens || [],
+      items: plan.items || [],
+      counts: plan.counts || {},
+      hits: plan.hits || 0,
+      warnings: plan.warnings || [],
+      size: output.byteLength,
+      docxWasm: docxWasmReady,
+      heapBytes: heapBytes(),
+    };
+  }
 
   post(progress({ type: "progress", id, phase: "write" }));
   const { updateMultipleFiles } = await loadDocx();
@@ -220,18 +236,21 @@ async function runWrite(id, op, bytes, options, fileName) {
   };
 }
 
-async function runPptxWrite(id, op, bytes, options, fileName) {
+async function runPartDirectWrite(id, op, bytes, options, fileName) {
   const pyodideRuntime = await initRuntime();
-  pyodideRuntime.FS.writeFile("/tmp/source.pptx", bytes);
+  pyodideRuntime.FS.writeFile("/tmp/source.part", bytes);
   post(progress({ type: "progress", id, phase: "detect" }));
   const plan = callPython({
     op,
-    path: "/tmp/source.pptx",
+    path: "/tmp/source.part",
     file_name: fileName,
     entities: options.entities || [],
     token_map: options.token_map || {},
   });
   if (!plan.ok) return plan;
+  if (!plan.final_path) {
+    return { ok: false, code: "INTERNAL", message: "part-direct engine returned no final_path" };
+  }
 
   post(progress({ type: "progress", id, phase: "postprocess" }));
   const output = pyodideRuntime.FS.readFile(plan.final_path);
@@ -243,7 +262,8 @@ async function runPptxWrite(id, op, bytes, options, fileName) {
     counts: plan.counts || {},
     hits: plan.hits || 0,
     warnings: plan.warnings || [],
-    pptxPartDirect: true,
+    docxWasm: docxWasmReady,
+    pptxPartDirect: /\.pptx$/i.test(fileName),
     size: output.byteLength,
     heapBytes: heapBytes(),
   };
@@ -254,7 +274,7 @@ function cleanupTemp() {
     pyodide.runPython(`
 import os
 for _path in ("/tmp/source.docx", "/tmp/library.docx", "/tmp/final.docx",
-              "/tmp/source.pptx", "/tmp/library.pptx", "/tmp/final.pptx",
+              "/tmp/source.part", "/tmp/final.xlsx", "/tmp/final.pptx",
               "/tmp/input.docx"):
     try:
         os.remove(_path)
