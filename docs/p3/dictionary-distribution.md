@@ -1,8 +1,8 @@
 # Preset dictionary distribution
 
-This slice establishes the immutable preset-dictionary layer. It does not
-write, migrate or merge `user_entities`; that remains a separate user-dictionary
-PR. It also does not remove any v1 module.
+This document defines the immutable preset-dictionary layer. The separate
+user-owned IndexedDB layer and its read-time merge are documented in
+`docs/p3/user-dictionary-isolation.md`. Neither layer removes any v1 module.
 
 ## Release artifact
 
@@ -96,9 +96,8 @@ IndexedDB user entities never enter this module or its OPFS directory.
 
 ## Follow-on PR boundaries
 
-1. User dictionary isolation: physically separate `user_entities`, merge the
-   verified preset layer at read time only, and add `source` + `packVersion` to
-   user import/export.
+1. User dictionary isolation: implemented separately in
+   `docs/p3/user-dictionary-isolation.md`.
 2. Migration: IndexedDB v2/v3 compatibility, v1 `/api/migrate/export` import,
    Fernet fixture parity and wrong-passphrase safety.
 3. i18n/cleanup: final key parity, source badges, gate/degradation copy and

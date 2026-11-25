@@ -28,7 +28,7 @@ silent network fallback.
 
 The service worker has separate shell and runtime caches named with
 `APP_VERSION` and `CACHE_VERSION`.  Every release changes the app version;
-cache-policy changes also bump `CACHE_VERSION` (currently `6`).  Activation
+cache-policy changes also bump `CACHE_VERSION` (currently `7`).  Activation
 deletes all older `lethe-*` caches, then claims the current clients.  A failed
 precache leaves the progress/error UI visible and exposes retry; the next
 successful attempt writes the new release cache.

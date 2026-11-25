@@ -7,7 +7,8 @@
  * server only computes (see the client-side storage architecture doc).
  *
  * Backing stores (IndexedDB database "lethe", schema version 3):
- *   user_entities keyPath "key"    { key, canonical, type, aliases, source, updatedAt }
+ *   user_entities keyPath "key"    { key, canonical, type, aliases, source,
+ *                                  packVersion, updatedAt }
  *   entities     keyPath "key"     v1/v2 legacy rows (migrated once into
  *                                  user_entities; kept so older builds can
  *                                  still read a database a newer build opened)
@@ -123,9 +124,8 @@
             legacy.openCursor().onsuccess = function (cursorEvent) {
               var cursor = cursorEvent.target.result;
               if (!cursor) return;
-              var row = cursor.value || {};
-              if (!row.source) row.source = 'user';
-              userEnts.put(row);
+              var entity = normaliseEntity(cursor.value || {});
+              if (entity) userEnts.put(entity);
               cursor.continue();
             };
           }
@@ -214,24 +214,31 @@
 
   function normaliseEntity(row) {
     var canonical = String(row && row.canonical != null ? row.canonical : '').trim();
+    var source = String((row && row.source) || 'user').trim().toLowerCase();
+    if (source !== 'user') return null;
     var aliases = (row && row.aliases) || [];
     if (typeof aliases === 'string') {
       aliases = aliases.split(',').map(function (a) { return a.trim(); }).filter(Boolean);
     }
     aliases = aliases.map(function (a) { return String(a).trim(); }).filter(Boolean);
+    var packVersion = (row && row.packVersion != null) ? String(row.packVersion).trim() : '';
     return {
       key: normKey(canonical),
       canonical: canonical,
       type: String((row && row.type) || 'COUNTERPARTY'),
       aliases: aliases,
-      source: String((row && row.source) || 'user'),
+      source: 'user',
+      packVersion: packVersion || null,
       updatedAt: (row && row.updatedAt) || nowIso()
     };
   }
 
   function getEntities() {
     return getAll('user_entities').then(function (rows) {
-      return rows.filter(function (r) { return r && r.canonical; });
+      return rows
+        .filter(function (r) { return r && r.canonical; })
+        .map(normaliseEntity)
+        .filter(Boolean);
     });
   }
 
@@ -239,7 +246,7 @@
     var byKey = {};
     (rows || []).forEach(function (row) {
       var e = normaliseEntity(row);
-      if (e.key) byKey[e.key] = e;
+      if (e && e.key) byKey[e.key] = e;
     });
     var out = Object.keys(byKey).map(function (k) { return byKey[k]; });
     return putAll('user_entities', out).then(function () {
@@ -258,7 +265,7 @@
       var added = 0;
       (rows || []).forEach(function (row) {
         var e = normaliseEntity(row);
-        if (!e.key) return;
+        if (!e || !e.key) return;
         var cur = byKey[e.key];
         if (cur) {
           var have = {};
@@ -581,8 +588,10 @@
     if (version > SCHEMA_VERSION) {
       return Promise.reject(new Error('That backup was written by a newer Lethe version.'));
     }
+    var importable = incoming.map(normaliseEntity).filter(Boolean);
+    var skipped = incoming.length - importable.length;
     var added = 0;
-      return mergeEntities(incoming).then(function (n) {
+    return mergeEntities(importable).then(function (n) {
       added = n;
       return saveTokenTypes((backup.token_types || []).concat([]));
     }).then(function () {
@@ -595,7 +604,12 @@
       });
     }).then(function (n) {
       announce('jobs');
-      return { entities: incoming.length, added: added, jobs: n.__value || n };
+      return {
+        entities: incoming.length,
+        added: added,
+        skipped: skipped,
+        jobs: n.__value || n
+      };
     });
   }
 

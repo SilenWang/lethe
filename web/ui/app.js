@@ -5,6 +5,7 @@
 // review selection (sent to the worker as `options.entities`) and IndexedDB.
 import { createBridge } from "../lib/pyodide_bridge.js";
 import { createDictionaryClient } from "../lib/dictionary-client.js";
+import { mergeDictionaryLayers } from "../lib/dictionary-merge.js";
 import { createI18n } from "./i18n.js";
 import {
   ENTITY_TYPES,
@@ -529,7 +530,8 @@ function renderGenerate() {
   $("generate-job").textContent = `${t("p1.generate.job")}: ${out.jobId}`;
   const names = [...out.checked].filter((name) => {
     const item = state.detection?.items?.find((row) => row.canonical === name);
-    return item && item.source !== "pattern";
+    const known = state.dictByKey.get(String(name).toLowerCase());
+    return item && item.source !== "pattern" && known?.source !== "preset";
   });
   $("generate-dict-label").hidden = names.length === 0;
   $("generate-dict").checked = false;
@@ -625,7 +627,16 @@ async function restore() {
 // ---------------------------------------------------------------- storage
 
 async function refreshDict() {
-  const rows = await store.getUserEntities();
+  const userRows = await store.getUserEntities();
+  let presetRows = [];
+  if (state.dictionary) {
+    try {
+      presetRows = await state.dictionary.loadEntities({ tier: "all" });
+    } catch (error) {
+      console.warn("Preset dictionary is unavailable:", error);
+    }
+  }
+  const rows = mergeDictionaryLayers(userRows, presetRows);
   state.dictByKey = new Map(rows.map((row) => [String(row.canonical).toLowerCase(), row]));
 }
 
@@ -649,8 +660,6 @@ async function boot() {
   const init = await store.initStore();
   state.storageOk = !!init.ok;
   if (!state.storageOk && init.error) toast(t("p1.storage.unavailable"), "info");
-  await refreshDict();
-  refreshStorageLine().catch(() => {});
 
   bindDropzone($("upload-drop"), $("upload-input"), pickFile);
   bindDropzone($("restore-drop"), $("restore-input"), pickRestoreFile);
@@ -702,7 +711,11 @@ async function boot() {
     if (!event.target.checked) return;
     const rows = [...(state.generated?.checked || [])]
       .map((name) => state.detection?.items?.find((item) => item.canonical === name))
-      .filter((item) => item && item.source !== "pattern")
+      .filter((item) => {
+        if (!item || item.source === "pattern") return false;
+        const known = state.dictByKey.get(String(item.canonical).toLowerCase());
+        return known?.source !== "preset";
+      })
       .map((item) => ({ canonical: item.canonical, type: state.types.get(item.canonical) || item.type, aliases: [] }));
     try {
       const added = await store.mergeUserEntities(rows);
@@ -747,6 +760,8 @@ async function boot() {
     // error/retry surface; never fall back to an unverified pack.
     console.warn("Preset dictionary is unavailable:", error);
   }
+  await refreshDict();
+  refreshStorageLine().catch(() => {});
   state.bridge = createBridge({
     workerUrl: "./worker/pyodide_worker.js",
     onStatus,
