@@ -50,6 +50,16 @@ V2 = [
         "tier": "full",
     },
 ]
+V2_CONFLICT = [
+    *V2,
+    {
+        "canonical": "Delta Person",
+        "type": "PERSON",
+        "aliases": [],
+        "shard": "people",
+        "tier": "full",
+    },
+]
 
 
 def _pack(root: Path, name: str, rows: list[dict[str, object]], version: str, key):
@@ -88,6 +98,7 @@ def _fixture_root(tmp_path: Path) -> tuple[Path, str, Ed25519PrivateKey]:
     )
     _pack(tmp_path, "v1", V1, "2026.11.25.1", key)
     _pack(tmp_path, "v2", V2, "2026.11.25.2", key)
+    _pack(tmp_path, "v2-conflict", V2_CONFLICT, "2026.11.25.2", key)
     shutil.copytree(tmp_path / "v1", tmp_path / "same-version")
     same_manifest = json.loads((tmp_path / "same-version" / "manifest.json").read_text())
     same_manifest["shards"][0]["sha256"] = "0" * 64
@@ -189,31 +200,104 @@ def test_install_update_reuses_unchanged_shards_and_rolls_back(page) -> None:
     assert layout == ["active-0.json", "active-1.json", "packs", "shards"]
 
 
-def test_damaged_inactive_pointer_leaves_previous_pack_active(page) -> None:
+@pytest.mark.parametrize(
+    ("damaged_slot", "expected_current"),
+    [(0, "2026.11.25.2"), (1, "2026.11.25.1")],
+)
+def test_each_pointer_slot_can_be_damaged(
+    page, damaged_slot: int, expected_current: str
+) -> None:
     assert _run(page, "window.client('/v1').update()")["ok"]
     assert _run(page, "window.client('/v2').update()")["ok"]
     damaged = page.evaluate(
-        """async () => {
+        """async (slot) => {
           const origin = await navigator.storage.getDirectory();
           const root = await origin.getDirectoryHandle('lethe-dictionaries');
-          const slots = [];
-          for (let i = 0; i < 2; i++) {
-            const file = await (await root.getFileHandle(`active-${i}.json`)).getFile();
-            slots.push(JSON.parse(await file.text()).sequence);
-          }
-          const newest = slots[0] > slots[1] ? 0 : 1;
-          const handle = await root.getFileHandle(`active-${newest}.json`);
+          const handle = await root.getFileHandle(`active-${slot}.json`);
           const writable = await handle.createWritable();
           await writable.write(new TextEncoder().encode('{"broken"'));
           await writable.close();
           return true;
-        }"""
+        }""",
+        damaged_slot,
     )
     assert damaged
     status = _run(page, "window.client('/v2').status()")
     assert status["ok"], status
+    assert status["value"]["currentVersion"] == expected_current
+    assert status["value"]["repaired"] is True
+    stable = _run(page, "window.client('/v2').status()")
+    assert stable["value"]["currentVersion"] == expected_current
+    assert stable["value"]["repaired"] is False
+
+
+@pytest.mark.parametrize("damage", ["manifest", "signature", "shard"])
+def test_damaged_pointer_target_falls_back_to_previous_complete_slot(page, damage: str) -> None:
+    assert _run(page, "window.client('/v1').update()")["ok"]
+    assert _run(page, "window.client('/v2').update()")["ok"]
+    assert page.evaluate(
+        """async (damage) => {
+          const version = '2026.11.25.2';
+          const origin = await navigator.storage.getDirectory();
+          const root = await origin.getDirectoryHandle('lethe-dictionaries');
+          const packs = await root.getDirectoryHandle('packs');
+          const pack = await packs.getDirectoryHandle(version);
+          if (damage === 'manifest') {
+            await pack.removeEntry('manifest.json');
+          } else if (damage === 'signature') {
+            const handle = await pack.getFileHandle('manifest.sig');
+            const writable = await handle.createWritable();
+            await writable.write(new Uint8Array([0]));
+            await writable.close();
+          } else {
+            const manifestFile = await (await pack.getFileHandle('manifest.json')).getFile();
+            const manifest = JSON.parse(await manifestFile.text());
+            const shard = manifest.shards.find((item) => item.id === 'projects');
+            const shards = await root.getDirectoryHandle('shards');
+            const handle = await shards.getFileHandle(shard.sha256);
+            const writable = await handle.createWritable();
+            await writable.write(new Uint8Array([0]));
+            await writable.close();
+          }
+          return true;
+        }""",
+        damage,
+    )
+    status = _run(page, "window.client('/v2').status()")
+    assert status["ok"], status
     assert status["value"]["currentVersion"] == "2026.11.25.1"
     assert status["value"]["previousVersion"] is None
+    assert status["value"]["repaired"] is True
+    entities = _run(
+        page,
+        "window.client('/v2').loadEntities({tier:'all'})"
+        ".then(rows => rows.map(row => row.canonical))",
+    )
+    assert entities == {"ok": True, "value": ["Alpha Holdings", "Beta Person"]}
+
+
+def test_changed_v2_after_rollback_is_rejected_and_original_retained(page) -> None:
+    assert _run(page, "window.client('/v1').update()")["ok"]
+    assert _run(page, "window.client('/v2').update()")["ok"]
+    assert _run(page, "window.client('/v2').rollback()")["ok"]
+
+    conflict = _run(page, "window.client('/v2-conflict').update()")
+    assert conflict["ok"] is False
+    assert conflict["code"] == "VERSION_CONFLICT"
+    status = _run(page, "window.client('/v2').status()")
+    assert status["value"]["currentVersion"] == "2026.11.25.1"
+    assert status["value"]["previousVersion"] == "2026.11.25.2"
+
+    assert _run(page, "window.client('/v2').rollback()")["ok"]
+    entities = _run(
+        page,
+        "window.client('/v2').loadEntities({tier:'all'})"
+        ".then(rows => rows.map(row => row.canonical))",
+    )
+    assert entities == {
+        "ok": True,
+        "value": ["Alpha Holdings", "Beta Person", "Gamma Project"],
+    }
 
 
 def test_bad_signature_leaves_active_pack_untouched(page) -> None:

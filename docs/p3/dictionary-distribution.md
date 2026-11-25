@@ -46,8 +46,10 @@ Build and CI enforce:
 ## Version and update model
 
 `packVersion` is `YYYY.MM.DD.N`. A client accepts a newer signed version and
-rejects an older one unless the user explicitly calls rollback. Reusing the
-same version with different manifest bytes is a conflict, not an update.
+rejects an older one unless the user explicitly calls rollback. Reusing a
+version with different manifest bytes is a conflict when that version is the
+current OR the retained previous pack; both manifest digests live in the
+pointer.
 
 OPFS layout:
 
@@ -66,9 +68,13 @@ visible after every shard, the signed manifest and its read-back verification
 succeed.
 
 Activation uses two alternating small pointer files. The inactive slot is
-written last, after the new pack is complete. Readers select the highest valid
-pointer sequence, so a torn or corrupt newest slot falls back to the previous
-valid slot. This makes the switch atomic without relying on rename support.
+written last, after the new pack is complete. Before `status()`, `update()` or
+`loadEntities()` accepts a slot, it verifies the pointer's manifest digest,
+the detached signature and every referenced shard. A torn pointer or a pack
+with a missing/damaged manifest, signature or shard is skipped; the client
+writes a higher-sequence pointer that atomically promotes the previous
+complete slot. This makes activation and damage fallback atomic without
+relying on rename support.
 
 Rollback swaps `currentVersion` and `previousVersion` through the same pointer
 mechanism. Both packs remain on disk, allowing a roll-forward after rollback.

@@ -142,12 +142,20 @@ export async function verifySignedManifest(manifestBytes, signatureBytes, public
 
 function parsePointer(value, slot) {
   if (!value || typeof value !== "object") return null;
+  if (value.schemaVersion !== 1 && value.schemaVersion !== 2) return null;
   if (!Number.isSafeInteger(value.sequence) || value.sequence < 1) return null;
   if (!PACK_VERSION_RE.test(String(value.currentVersion || ""))) return null;
   if (value.previousVersion != null && !PACK_VERSION_RE.test(String(value.previousVersion))) {
     return null;
   }
   if (!SHA256_RE.test(String(value.currentManifestSha256 || ""))) return null;
+  if (
+    value.previousVersion != null &&
+    value.schemaVersion >= 2 &&
+    !SHA256_RE.test(String(value.previousManifestSha256 || ""))
+  ) {
+    return null;
+  }
   return { ...value, slot };
 }
 
@@ -159,6 +167,22 @@ async function readJsonFile(dir, name) {
   } catch (error) {
     if (error?.name === "NotFoundError" || error instanceof SyntaxError) return null;
     throw error;
+  }
+}
+
+async function readJsonFileState(dir, name) {
+  try {
+    const handle = await dir.getFileHandle(name);
+    const file = await handle.getFile();
+    try {
+      return { value: JSON.parse(await file.text()), damaged: false };
+    } catch (error) {
+      if (error instanceof SyntaxError) return { value: null, damaged: true };
+      throw error;
+    }
+  } catch (error) {
+    if (error?.name === "NotFoundError") return { value: null, damaged: false };
+    return { value: null, damaged: true };
   }
 }
 
@@ -289,23 +313,27 @@ export class DictionaryClient {
     return new Uint8Array(await response.arrayBuffer());
   }
 
-  async _active(root) {
+  async _candidates(root) {
     const candidates = [];
+    const damagedSlots = [];
     for (let slot = 0; slot < POINTER_SLOTS.length; slot += 1) {
-      const parsed = parsePointer(await readJsonFile(root, POINTER_SLOTS[slot]), slot);
+      const state = await readJsonFileState(root, POINTER_SLOTS[slot]);
+      const parsed = parsePointer(state.value, slot);
       if (parsed) candidates.push(parsed);
+      else if (state.damaged || state.value != null) damagedSlots.push(slot);
     }
     candidates.sort((left, right) => right.sequence - left.sequence);
-    return candidates[0] || null;
+    return { candidates, damagedSlots };
   }
 
-  async _writePointer(root, active, current, previous, manifestHash) {
+  async _writePointer(root, active, current, currentHash, previous, previousHash) {
     const pointer = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       sequence: (active?.sequence || 0) + 1,
       currentVersion: current,
+      currentManifestSha256: currentHash,
       previousVersion: previous || null,
-      currentManifestSha256: manifestHash,
+      previousManifestSha256: previous ? previousHash : null,
     };
     const slot = active?.slot === 0 ? 1 : 0;
     await writeBytesFile(root, POINTER_SLOTS[slot], new TextEncoder().encode(`${JSON.stringify(pointer)}\n`));
@@ -363,6 +391,66 @@ export class DictionaryClient {
     }
   }
 
+  async _validatePointer(root, pointer) {
+    const pack = await this._readPack(root, pointer.currentVersion);
+    if (pack.manifestHash !== pointer.currentManifestSha256) {
+      throw dictionaryError("PACK_MISMATCH", "Dictionary pointer manifest digest does not match.");
+    }
+    await this._verifyInstalledShards(root, pack.manifest);
+    return pack;
+  }
+
+  async _retainedHashes(root, pointer) {
+    const hashes = new Map([
+      [pointer.currentVersion, pointer.currentManifestSha256],
+    ]);
+    if (!pointer.previousVersion) return hashes;
+    if (pointer.previousManifestSha256) {
+      hashes.set(pointer.previousVersion, pointer.previousManifestSha256);
+      return hashes;
+    }
+    try {
+      const previous = await this._readPack(root, pointer.previousVersion);
+      hashes.set(pointer.previousVersion, previous.manifestHash);
+    } catch {
+      // A damaged retained manifest cannot be compared; callers reject an
+      // incoming manifest for that version rather than overwrite it.
+    }
+    return hashes;
+  }
+
+  async _selectActive(root) {
+    const { candidates, damagedSlots } = await this._candidates(root);
+    for (let index = 0; index < candidates.length; index += 1) {
+      const candidate = candidates[index];
+      try {
+        const pack = await this._validatePointer(root, candidate);
+        if (index === 0 && damagedSlots.length === 0) {
+          return { pointer: candidate, pack, repaired: false };
+        }
+
+        const previousHash = candidate.previousManifestSha256 || null;
+        const prior = index === 0 ? candidate : candidates[0];
+        const repaired = await this._writePointer(
+          root,
+          prior,
+          candidate.currentVersion,
+          candidate.currentManifestSha256,
+          previousHash ? candidate.previousVersion : null,
+          previousHash,
+        );
+        return {
+          pointer: { ...candidate, ...repaired, repaired: true },
+          pack,
+          repaired: true,
+        };
+      } catch {
+        // Try the other retained slot.
+      }
+    }
+    return null;
+  }
+
   async update() {
     return this._withLock(async () => {
       const root = await this._root();
@@ -377,9 +465,21 @@ export class DictionaryClient {
       }
       validateManifest(manifest, this.limits);
 
-      const active = await this._active(root);
+      const selected = await this._selectActive(root);
+      const active = selected?.pointer || null;
       const incomingHash = await sha256(manifestBytes);
       if (active) {
+        const retained = await this._retainedHashes(root, active);
+        const retainedHashes = [active.currentVersion, active.previousVersion];
+        if (
+          retainedHashes.includes(manifest.packVersion) &&
+          retained.get(manifest.packVersion) !== incomingHash
+        ) {
+          throw dictionaryError(
+            "VERSION_CONFLICT",
+            `Dictionary ${manifest.packVersion} is already retained with different signed content.`,
+          );
+        }
         const order = compareVersions(manifest.packVersion, active.currentVersion);
         if (order < 0 || (order === 0 && incomingHash !== active.currentManifestSha256)) {
           throw dictionaryError(
@@ -388,19 +488,13 @@ export class DictionaryClient {
           );
         }
         if (order === 0) {
-          try {
-            await this._readPack(root, active.currentVersion);
-            await this._verifyInstalledShards(root, manifest);
-            return {
-              action: "up-to-date",
-              currentVersion: active.currentVersion,
-              previousVersion: active.previousVersion,
-              downloadedShards: 0,
-              reusedShards: manifest.shards.length,
-            };
-          } catch {
-            // The signed manifest is already available; repair the active pack below.
-          }
+          return {
+            action: "up-to-date",
+            currentVersion: active.currentVersion,
+            previousVersion: active.previousVersion,
+            downloadedShards: 0,
+            reusedShards: manifest.shards.length,
+          };
         }
       }
 
@@ -417,15 +511,20 @@ export class DictionaryClient {
       await writeBytesFile(pack, "manifest.sig", signature);
       await this._readPack(root, manifest.packVersion);
 
-      const previous = active?.currentVersion === manifest.packVersion
+      const reinstall = active?.currentVersion === manifest.packVersion;
+      const previous = reinstall
         ? active.previousVersion
         : (active?.currentVersion || null);
+      const previousHash = reinstall
+        ? active.previousManifestSha256
+        : (previous ? active.currentManifestSha256 : null);
       const pointer = await this._writePointer(
         root,
         active,
         manifest.packVersion,
-        previous,
         incomingHash,
+        previous,
+        previousHash,
       );
       this._entityCache.clear();
       return {
@@ -439,20 +538,24 @@ export class DictionaryClient {
   }
 
   async status() {
-    const root = await this._root();
-    const active = await this._active(root);
-    if (!active) return { currentVersion: null, previousVersion: null };
-    return {
-      currentVersion: active.currentVersion,
-      previousVersion: active.previousVersion,
-      sequence: active.sequence,
-    };
+    return this._withLock(async () => {
+      const root = await this._root();
+      const selected = await this._selectActive(root);
+      if (!selected) return { currentVersion: null, previousVersion: null };
+      return {
+        currentVersion: selected.pointer.currentVersion,
+        previousVersion: selected.pointer.previousVersion,
+        sequence: selected.pointer.sequence,
+        repaired: selected.repaired,
+      };
+    });
   }
 
   async rollback() {
     return this._withLock(async () => {
       const root = await this._root();
-      const active = await this._active(root);
+      const selected = await this._selectActive(root);
+      const active = selected?.pointer;
       if (!active?.previousVersion) {
         throw dictionaryError("NO_ROLLBACK", "No previous dictionary pack is retained.");
       }
@@ -462,8 +565,9 @@ export class DictionaryClient {
         root,
         active,
         active.previousVersion,
-        active.currentVersion,
         target.manifestHash,
+        active.currentVersion,
+        active.currentManifestSha256,
       );
       this._entityCache.clear();
       return {
@@ -474,43 +578,42 @@ export class DictionaryClient {
   }
 
   async loadEntities(options = {}) {
-    const root = await this._root();
-    const active = await this._active(root);
-    if (!active) {
-      throw dictionaryError("NO_ACTIVE_PACK", "No preset dictionary is installed.");
-    }
-    const { manifest } = await this._readPack(root, active.currentVersion);
-    const shardsDir = await childDirectory(root, SHARDS_DIR);
-    const coreOnly = options.tier === "core";
-    const shards = manifest.shards.filter(
-      (shard) => !coreOnly || manifest.coreShards.includes(shard.id),
-    );
-    const entities = [];
-    const seen = new Set();
-    for (const shard of shards) {
-      let rows = this._entityCache.get(shard.sha256);
-      if (!rows) {
-        const packed = await readBytesFile(
-          shardsDir,
-          shard.sha256,
-        );
-        if (!packed) {
-          throw dictionaryError("SHARD_MISSING", `Dictionary shard ${shard.id} is missing.`);
-        }
-        if (packed.byteLength !== shard.bytes || (await sha256(packed)) !== shard.sha256) {
-          throw dictionaryError("SHARD_INVALID", `Dictionary shard ${shard.id} failed verification.`);
-        }
-        rows = parseEntities(await gunzip(packed), manifest);
-        this._entityCache.set(shard.sha256, rows);
+    return this._withLock(async () => {
+      const root = await this._root();
+      const selected = await this._selectActive(root);
+      if (!selected) {
+        throw dictionaryError("NO_ACTIVE_PACK", "No complete preset dictionary is installed.");
       }
-      for (const row of rows) {
-        const key = row.canonical.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        entities.push(row);
+      const manifest = selected.pack.manifest;
+      const shardsDir = await childDirectory(root, SHARDS_DIR);
+      const coreOnly = options.tier === "core";
+      const shards = manifest.shards.filter(
+        (shard) => !coreOnly || manifest.coreShards.includes(shard.id),
+      );
+      const entities = [];
+      const seen = new Set();
+      for (const shard of shards) {
+        let rows = this._entityCache.get(shard.sha256);
+        if (!rows) {
+          const packed = await readBytesFile(shardsDir, shard.sha256);
+          if (!packed) {
+            throw dictionaryError("SHARD_MISSING", `Dictionary shard ${shard.id} is missing.`);
+          }
+          if (packed.byteLength !== shard.bytes || (await sha256(packed)) !== shard.sha256) {
+            throw dictionaryError("SHARD_INVALID", `Dictionary shard ${shard.id} failed verification.`);
+          }
+          rows = parseEntities(await gunzip(packed), manifest);
+          this._entityCache.set(shard.sha256, rows);
+        }
+        for (const row of rows) {
+          const key = row.canonical.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          entities.push(row);
+        }
       }
-    }
-    return entities;
+      return entities;
+    });
   }
 }
 
