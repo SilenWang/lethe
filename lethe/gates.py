@@ -74,12 +74,34 @@ class GateFinding:
         return self.severity == "reject"
 
     def render(self) -> str:
-        """CI/UI line: gate id, part, numbers — never a bare ``assert failed``."""
+        """CI/UI line: gate id, part, numbers — never a bare ``assert failed``.
+
+        This is the diagnostic line, always English and always keyed by the
+        gate id; the UI localises ``message_key``/``values`` instead of showing
+        this text (see :meth:`as_dict`).
+        """
         where = f" part={self.part!r}" if self.part else ""
         numbers = ""
         if self.actual is not None and self.limit is not None:
             numbers = f" actual={self.actual} limit={self.limit}"
         return f"{self.gate} {self.severity.upper()}{where}{numbers}: {self.message_key}"
+
+    def as_dict(self) -> dict[str, object]:
+        """Structured form for the UI: a locale key plus its format values.
+
+        The worker ships this next to :meth:`render` so the browser can render
+        the rejection in the interface language while CI logs and error
+        messages keep the English diagnostic line.
+        """
+        return {
+            "gate": self.gate,
+            "severity": self.severity,
+            "message_key": self.message_key,
+            "values": dict(self.values),
+            "part": self.part,
+            "actual": self.actual,
+            "limit": self.limit,
+        }
 
 
 @dataclass

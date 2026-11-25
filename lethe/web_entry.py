@@ -16,7 +16,6 @@ from pathlib import Path
 from lethe import core, docx_engine, gates, postprocess, pptx_engine, xlsx_engine
 
 PROTOCOL = 1
-IMPLEMENTED_OPS = ("echo", "inspect", "redact", "restore", "finish")
 
 
 def _ok(**payload: object) -> str:
@@ -55,7 +54,13 @@ def _inspect(path: str, file_name: str) -> str:
             {
                 "gate": first.gate,
                 "part": first.part,
+                # `findings` is the English diagnostic line (CI logs, tests);
+                # `findings_detail` carries the locale key and its format
+                # values so the browser can render the rejection in the
+                # interface language instead of leaking English into a
+                # translated UI.
                 "findings": [finding.render() for finding in report.rejections()],
+                "findings_detail": [finding.as_dict() for finding in report.rejections()],
             },
         )
     try:

@@ -183,7 +183,9 @@ main { flex: 1; width: 100%; max-width: 1040px; margin: 0 auto; padding: 18px 22
 
 .src { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); }
 .src-dictionary { color: var(--accent); border-color: var(--accent); }
+.src-preset_rule { color: var(--ok); border-color: var(--ok); }
 .src-pattern { color: var(--gold); border-color: var(--gold); }
+.src-manual { color: var(--muted); border-color: var(--muted); }
 
 .card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--paper); }
 .result-line { font-size: 16px; font-weight: 600; margin: 0 0 4px; }

@@ -8,6 +8,8 @@ import { createDictionaryClient } from "../lib/dictionary-client.js";
 import { mergeDictionaryLayers } from "../lib/dictionary-merge.js";
 import { createI18n } from "./i18n.js";
 import {
+  DEGRADATION_CODE_KEYS,
+  DEGRADATION_KEYS,
   ENTITY_TYPES,
   RECYCLE_BYTES,
   gateLevel,
@@ -18,6 +20,7 @@ import {
   mimeFor,
   errorKey,
   replaceSuffix,
+  sourceKey,
 } from "./format.js";
 import * as store from "./store.js";
 
@@ -28,8 +31,7 @@ const state = {
   runtime: "initializing",
   busy: false,
   file: null,
-  fileLevel: "ok",
-  detection: null, // {items, bytes, hits, tokens, counts}
+  detection: null, // {items, bytes, hits, warnings}
   selected: new Set(),
   types: new Map(),
   dictByKey: new Map(),
@@ -253,12 +255,25 @@ function reportError(error) {
   const key = errorKey(code);
   const vars = { error: error?.message || "" };
   const parts = [t(key, vars)];
-  const findings = error?.detail?.findings;
-  if (Array.isArray(findings) && findings.length) parts.push(...findings);
+  parts.push(...gateFindings(error?.detail));
   if (code === "TOO_LARGE") {
     parts.push(t("gate.tip.split"), t("gate.tip.convert"), t("gate.tip.machine"));
   }
   toast(parts.join(" · "), code === "CANCELLED" ? "info" : "error", 0);
+}
+
+// A rejected file comes back with the English diagnostic line plus the locale
+// key and values for each finding. The UI shows the localised sentence and
+// only falls back to the diagnostic line when a newer worker did not send one.
+function gateFindings(detail) {
+  const findings = detail?.findings_detail;
+  if (Array.isArray(findings) && findings.length) {
+    return findings.map((finding) =>
+      finding?.message_key ? t(finding.message_key, finding.values || {}) : "",
+    ).filter(Boolean);
+  }
+  const raw = detail?.findings;
+  return Array.isArray(raw) && raw.length ? raw : [];
 }
 
 // ------------------------------------------------------------ upload panel
@@ -277,13 +292,14 @@ function pickFile(file) {
   state.file = file;
   state.detection = null;
   state.generated = null;
-  state.fileLevel = gate.level;
   state.selected = new Set();
+  // A new file has not been run yet: the previous file's degradation note must
+  // not survive, or the user reads it as a property of this one.
+  showWarnings([]);
   $("upload-file").hidden = false;
   $("upload-file").textContent = t("p1.upload.selected", { name: file.name, size: humanSize(file.size) });
   const note = $("upload-note");
-  const degradations = $("upload-degradations");
-  if (degradations) degradations.hidden = !isXlsx(file) && !isPptx(file);
+  renderDegradations(file);
   if (gate.level === "warn") {
     note.hidden = false;
     note.textContent = t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 }) +
@@ -304,11 +320,57 @@ function clearFile() {
   $("upload-file").hidden = true;
   $("upload-note").hidden = true;
   if ($("upload-degradations")) $("upload-degradations").hidden = true;
+  const list = $("degradation-list");
+  if (list) list.textContent = "";
+  showWarnings([]);
   $("upload-inspect").hidden = true;
   $("inspect-btn").disabled = true;
   $("detect-btn").disabled = true;
   $("clear-btn").disabled = true;
   $("upload-input").value = "";
+}
+
+// The known gaps of the *writer* for this format. A run's own degradation codes
+// (returned in `warnings`) are a subset of this list; showing it up front means
+// the user knows what will stay untouched before they start.
+function renderDegradations(file) {
+  const details = $("upload-degradations");
+  if (!details) return;
+  const list = $("degradation-list");
+  const keys = isXlsx(file) ? DEGRADATION_KEYS.xlsx : isPptx(file) ? DEGRADATION_KEYS.pptx : [];
+  details.hidden = keys.length === 0;
+  if (!list) return;
+  list.textContent = "";
+  for (const key of keys) {
+    const li = document.createElement("li");
+    li.dataset.i18n = key;
+    li.textContent = t(key);
+    list.appendChild(li);
+  }
+}
+
+// The codes the engine actually hit for this file, in the interface language.
+// A code this build does not know still means "the writer left something
+// untouched": drop the internal string, but keep the privacy warning by
+// emitting the generic note once.
+function degradationNotes(warnings) {
+  if (!Array.isArray(warnings)) return [];
+  const seen = new Set();
+  const keys = [];
+  let unknown = false;
+  for (const code of warnings) {
+    const key = DEGRADATION_CODE_KEYS[code];
+    if (!key) {
+      unknown = true;
+      continue;
+    }
+    if (seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  const notes = keys.map((key) => t(key));
+  if (unknown) notes.push(t("p1.degradations.unknown"));
+  return notes;
 }
 
 function bindDropzone(zone, input, onFile) {
@@ -359,6 +421,18 @@ async function inspectFile() {
   }
 }
 
+// `inspect` already reported the gate warnings through the upload note (the
+// 35 MB case); this line only carries the engine's per-run degradation codes,
+// which are internal English identifiers. Render each one through its locale
+// key so the note follows the interface language.
+function showWarnings(warnings) {
+  const node = $("upload-warnings");
+  if (!node) return;
+  const notes = degradationNotes(warnings);
+  node.hidden = notes.length === 0;
+  node.textContent = notes.join(" · ");
+}
+
 function entitiesForDetection() {
   const rows = [...state.dictByKey.values()];
   return rows.map((row) => ({ canonical: row.canonical, type: row.type, aliases: row.aliases || [] }));
@@ -377,11 +451,11 @@ async function detect() {
       items: result.items || [],
       bytes: result.bytes || null,
       hits: result.hits || 0,
-      tokens: result.tokens || [],
-      counts: result.counts || {},
+      warnings: result.warnings || [],
     };
     state.selected = new Set(state.detection.items.map((item) => item.canonical));
     state.types = new Map(state.detection.items.map((item) => [item.canonical, item.type]));
+    showWarnings(state.detection.warnings);
     renderReview();
     unlock("review");
     showPanel("review");
@@ -435,7 +509,7 @@ function renderReview() {
     const cellSource = document.createElement("td");
     const badge = document.createElement("span");
     badge.className = `src src-${item.source}`;
-    badge.textContent = t(`p1.source.${item.source}`);
+    badge.textContent = t(sourceKey(item.source));
     cellSource.appendChild(badge);
     tr.appendChild(cellSource);
 
@@ -729,6 +803,11 @@ async function boot() {
   $("lang-select").addEventListener("change", async (event) => {
     await state.i18n.setLang(event.target.value);
     onStatus({ state: state.runtime });
+    // Text built in JS (badges, degradation list, worker warning codes) is not
+    // covered by the data-i18n pass, so re-render it in the new language.
+    if (state.file) renderDegradations(state.file);
+    if (state.detection) showWarnings(state.detection.warnings);
+    if (!$("upload-inspect").hidden && state.file) await inspectFile();
     renderReview();
     renderGenerate();
     refreshStorageLine().catch(() => {});
