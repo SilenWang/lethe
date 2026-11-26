@@ -174,13 +174,55 @@ def _normalise_entity(row: Any, location: str) -> dict[str, Any]:
     }
 
 
+class _DuplicateKeyError(ValueError):
+    """A YAML mapping repeats a key; ``safe_load`` would silently keep the last."""
+
+    def __init__(self, key: str, node: Any) -> None:
+        super().__init__(key)
+        self.key = key
+        self.line = node.start_mark.line + 1
+        self.column = node.start_mark.column + 1
+
+
+class _StrictLoader(yaml.SafeLoader):
+    """SafeLoader that rejects duplicate mapping keys instead of dropping one.
+
+    A repeated ``canonical`` or ``tier`` in an edited glossary is almost always
+    a mistake, and silently keeping the last value would make the built pack
+    disagree with what the editor sees.
+    """
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> Any:
+        self.flatten_mapping(node)
+        seen: set[str] = set()
+        for key_node, _value_node in node.value:
+            if not isinstance(key_node, yaml.ScalarNode):
+                continue
+            key = str(key_node.value)
+            if key in seen:
+                raise _DuplicateKeyError(key, key_node)
+            seen.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
 def _load_entities(path: Path) -> list[dict[str, Any]]:
     try:
-        source = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except OSError as exc:
         raise DictionaryError(f"cannot read glossary source {path}: {exc}") from exc
     try:
-        document = yaml.safe_load(source)
+        source = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise DictionaryError(
+            f"{path}: glossary source must be UTF-8; byte 0x{raw[exc.start]:02x} "
+            f"at offset {exc.start} is not valid UTF-8 (re-save the file as UTF-8)"
+        ) from exc
+    try:
+        document = yaml.load(source, Loader=_StrictLoader)
+    except _DuplicateKeyError as exc:
+        raise DictionaryError(
+            f"{path}: duplicate key {exc.key!r} at line {exc.line}, column {exc.column}"
+        ) from exc
     except yaml.YAMLError as exc:
         mark = getattr(exc, "problem_mark", None)
         location = ""
@@ -353,12 +395,54 @@ def _load_manifest_and_signature(out: Path) -> tuple[dict[str, Any], bytes, byte
     return manifest, manifest_bytes, signature
 
 
+def verify_source_matches_pack(
+    source: Path = DEFAULT_SOURCE,
+    out: Path = DEFAULT_OUT,
+) -> None:
+    """Fail when the checked-in YAML glossary no longer matches the signed pack.
+
+    Editing ``dictionary/entities.yaml`` without rerunning
+    ``pixi run dictionary-build`` would ship a pack that disagrees with the
+    reviewed source, so the source is rebuilt in memory and compared byte for
+    byte with what the repository already contains.
+    """
+    entities = _load_entities(source)
+    manifest, _, _ = _load_manifest_and_signature(out)
+    created_at = manifest.get("createdAt")
+    if not isinstance(created_at, str) or not created_at:
+        raise DictionaryError("manifest has no createdAt timestamp")
+    rebuilt, payloads = _manifest_from_entities(
+        entities, manifest["packVersion"], created_at
+    )
+    if rebuilt != manifest:
+        raise DictionaryError(
+            f"{source} does not match the signed pack in {out}; run "
+            "`pixi run dictionary-build` to rebuild it"
+        )
+    for relative, payload in payloads.items():
+        path = out / relative
+        try:
+            built = path.read_bytes()
+        except OSError as exc:
+            raise DictionaryError(f"cannot read shard {relative}: {exc}") from exc
+        if built != payload:
+            raise DictionaryError(
+                f"shard {relative} does not match {source}; run "
+                "`pixi run dictionary-build` to rebuild it"
+            )
+
+
 def verify_dictionary(
     out: Path = DEFAULT_OUT,
     public_key_path: Path = DEFAULT_PUBLIC_KEY,
     config_path: Path = CONFIG,
+    source: Path | None = None,
 ) -> None:
-    """Verify the signed manifest, every shard and the shipped trust anchor."""
+    """Verify the signed manifest, every shard and the shipped trust anchor.
+
+    Passing ``source`` additionally proves the editable YAML glossary still
+    rebuilds to exactly the checked-in pack.
+    """
     public_key = _load_public_key(public_key_path)
     manifest, manifest_bytes, signature = _load_manifest_and_signature(out)
     try:
@@ -387,6 +471,8 @@ def verify_dictionary(
         for row in rows:
             if row.get("source") != "preset":
                 raise DictionaryError(f"shard {shard['id']} contains non-preset data")
+    if source is not None:
+        verify_source_matches_pack(source, out)
 
 
 def build_dictionary(
@@ -421,7 +507,7 @@ def build_dictionary(
         )
     )
     _write_config_public_key(_public_raw(public_key), config_path)
-    verify_dictionary(out, public_key_path, config_path)
+    verify_dictionary(out, public_key_path, config_path, source=source)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -437,8 +523,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.verify_only:
-            verify_dictionary(args.out, args.public_key)
-            print("dictionary-check: signature, sizes and shard hashes OK")
+            verify_dictionary(args.out, args.public_key, CONFIG, source=args.source)
+            print(
+                "dictionary-check: source, signature, sizes and shard hashes OK"
+            )
             return 0
         if not args.signing_key:
             parser.error("--signing-key is required unless --verify-only is used")

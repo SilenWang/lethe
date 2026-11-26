@@ -260,8 +260,9 @@ into the browser once via Settings → Migrate old server-side data and then arc
 place.
 
 The contributor-editable preset dictionary lives in `dictionary/entities.yaml`;
-see `dictionary/README.md` for its schema, validation rules and signed-pack
-rebuild steps.
+see `dictionary/README.md` for its schema, encoding, validation rules and the
+signed-pack rebuild steps. `pixi run dictionary-check` rejects an edited YAML
+that was not rebuilt into the signed pack.
 
 ## Limitations
 

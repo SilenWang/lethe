@@ -236,6 +236,107 @@ def test_invalid_entity_reports_its_index(tmp_path: Path) -> None:
         build_dictionary._load_entities(source)
 
 
+def _write(path: Path, text: str, encoding: str = "utf-8") -> Path:
+    path.write_bytes(text.encode(encoding))
+    return path
+
+
+def test_duplicate_yaml_key_is_rejected_with_its_position(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    canonical: Omega\n"
+        "    type: PERSON\n",
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"duplicate key 'canonical' at line 4, column \d+",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_duplicate_top_level_key_is_rejected(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        "entities:\n"
+        "  - canonical: Beta\n"
+        "    type: PERSON\n",
+    )
+    with pytest.raises(build_dictionary.DictionaryError, match="duplicate key 'entities'"):
+        build_dictionary._load_entities(source)
+
+
+def test_utf8_bom_is_tolerated(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "\ufeffschemaVersion: 1\nentities:\n  - canonical: Alpha\n    type: PERSON\n",
+    )
+    assert build_dictionary._load_entities(source)[0]["canonical"] == "Alpha"
+
+
+def test_non_utf8_source_reports_the_offending_byte(tmp_path: Path) -> None:
+    source = tmp_path / "entities.yaml"
+    source.write_bytes(
+        "schemaVersion: 1\nentities:\n  - canonical: 张三\n    type: PERSON\n".encode("gbk")
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"must be UTF-8; byte 0x[0-9a-f]{2} at offset \d+",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_verify_rejects_a_source_edited_without_rebuilding(
+    tmp_path: Path, signing_keys: tuple[Path, Path, Path]
+) -> None:
+    out, keys = _build(tmp_path, signing_keys)
+    source = tmp_path / "entities.yaml"
+    build_dictionary.verify_dictionary(out, keys[1], keys[2], source=source)
+
+    _source(
+        source,
+        [
+            *SOURCE_ROWS,
+            {
+                "canonical": "Gamma Project",
+                "shard": "projects",
+                "tier": "full",
+                "type": "PROJECT",
+            },
+        ],
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"does not match the signed pack .*run .*dictionary-build",
+    ):
+        build_dictionary.verify_dictionary(out, keys[1], keys[2], source=source)
+
+
+def test_verify_rejects_an_invalid_source_before_the_pack(
+    tmp_path: Path, signing_keys: tuple[Path, Path, Path]
+) -> None:
+    out, keys = _build(tmp_path, signing_keys)
+    _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\nentities:\n  - canonical: Alpha\n    canonical: Beta\n"
+        "    type: PERSON\n",
+    )
+    with pytest.raises(build_dictionary.DictionaryError, match="duplicate key"):
+        build_dictionary.verify_dictionary(
+            out, keys[1], keys[2], source=tmp_path / "entities.yaml"
+        )
+
+
+def test_shipped_pack_matches_the_editable_source() -> None:
+    build_dictionary.verify_source_matches_pack()
+
+
 def test_tampered_shard_is_rejected(
     tmp_path: Path, signing_keys: tuple[Path, Path, Path]
 ) -> None:

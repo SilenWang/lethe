@@ -166,11 +166,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-only", action="store_true")
     args = parser.parse_args(argv)
 
-    from tools.build_dictionary import DictionaryError, verify_dictionary
+    from tools.build_dictionary import (
+        DEFAULT_SOURCE,
+        DictionaryError,
+        verify_dictionary,
+    )
 
     problems = check_sources() + check_versions() + check_runtime_config()
     try:
-        verify_dictionary()
+        verify_dictionary(source=DEFAULT_SOURCE)
     except DictionaryError as exc:
         problems.append(f"dictionary: {exc}")
     if problems:

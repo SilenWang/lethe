@@ -26,11 +26,13 @@ first curated production dictionary is published, provision the release private
 key in the repository's secret store, rotate the public trust anchor in the same
 reviewed change, and rebuild the signed artifact.
 
-The YAML source uses schema version 1 and a single `entities` list. Each entry
-requires `canonical` and `type`; `aliases`, `shard` and `tier` are optional.
-The loader rejects malformed YAML, missing or unknown fields, invalid shard ids
-or tiers, duplicate canonical values, and empty source files. See
-`dictionary/README.md` for the editing workflow and
+The YAML source uses schema version 1 and a single `entities` list. It must be
+UTF-8 (a BOM is tolerated). Each entry requires `canonical` and `type`;
+`aliases`, `shard` and `tier` are optional. The loader rejects non-UTF-8 input
+with the offending byte and offset, malformed YAML with line and column,
+duplicate mapping keys (YAML would otherwise silently keep the last value),
+unknown fields, invalid shard ids or tiers, duplicate canonical values, and
+empty source files. See `dictionary/README.md` for the editing workflow and
 `dictionary/entities.example.yaml` for a minimal synthetic example. The
 checked-in bootstrap values are synthetic and must not be replaced in this
 public repository with real customer or counterparty data.
