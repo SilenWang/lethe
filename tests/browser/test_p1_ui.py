@@ -78,17 +78,24 @@ def page(built: Path):
         browser.close()
 
 
-def test_shell_has_four_panels_and_switches_language(page) -> None:
-    assert page.locator(".step").count() == 4
+def test_shell_has_three_free_tabs_and_switches_language(page) -> None:
+    assert page.locator(".step").count() == 3
+    assert page.locator(".step:disabled").count() == 0
     assert page.locator("h1").inner_text() == "Lethe"
     page.select_option("#lang-select", "zh")
     page.wait_for_function(
-        "document.querySelector('.step[data-panel=\"upload\"]').innerText.includes('上传')"
+        "document.querySelector('.step[data-panel=\"deidentify\"]').innerText.includes('脱敏')"
     )
-    assert page.locator(".step[data-panel='upload']").inner_text().strip().endswith("上传")
+    assert page.locator(".step[data-panel='deidentify']").inner_text().strip() == "脱敏"
+    page.click(".step[data-panel='dictionary']")
+    page.wait_for_selector("#panel-dictionary:not([hidden])")
+    page.click(".step[data-panel='reidentify']")
+    page.wait_for_selector("#panel-reidentify:not([hidden])")
+    page.click(".step[data-panel='deidentify']")
+    page.wait_for_selector("#panel-deidentify:not([hidden])")
     page.select_option("#lang-select", "en")
     page.wait_for_function(
-        "document.querySelector('.step[data-panel=\"upload\"]').innerText.includes('Upload')"
+        "document.querySelector('.step[data-panel=\"deidentify\"]').innerText.includes('De-identify')"
     )
 
 
@@ -130,13 +137,16 @@ def test_docx_roundtrip_review_generate_restore_and_cache_privacy(
 
     page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
     page.click("#detect-btn")
-    page.wait_for_selector("#panel-review:not([hidden])")
+    page.wait_for_selector("#review-card:not([hidden])")
+    page.wait_for_selector("#panel-deidentify:not([hidden])")
+    assert page.locator("#document-preview mark", has_text="John Smith").count() >= 1
     rows = page.locator("#review-rows tr")
     assert rows.count() >= 1
     assert "John Smith" in page.locator("#review-rows").inner_text()
 
     page.click("#generate-btn")
-    page.wait_for_selector("#panel-generate:not([hidden])")
+    page.wait_for_selector("#generate-card:not([hidden])")
+    page.wait_for_selector("#panel-deidentify:not([hidden])")
     summary = page.locator("#generate-summary").inner_text()
     assert any(char.isdigit() for char in summary)
     job = page.locator("#generate-job").inner_text()
@@ -150,12 +160,17 @@ def test_docx_roundtrip_review_generate_restore_and_cache_privacy(
     assert redacted.stat().st_size > 0
     assert redacted.read_bytes()[:2] == b"PK"
 
-    # Restore panel: the saved job supplies the token map; the downloaded
-    # de-identified file is the input.
-    page.click("#goto-restore-btn")
-    page.wait_for_selector("#panel-restore:not([hidden])")
-    page.wait_for_function("document.querySelectorAll('#restore-job option').length > 1")
-    page.select_option("#restore-job", index=1)
+    # The saved history and its token map must still be usable after a reload.
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.click(".step[data-panel='reidentify']")
+    page.wait_for_selector("#panel-reidentify:not([hidden])")
+    page.wait_for_function("document.querySelectorAll('#history-rows tr').length > 0")
+    page.locator("#history-rows input[type=radio]").first.check()
+    page.wait_for_function("document.querySelectorAll('#job-dict-rows tr').length > 0")
     page.set_input_files("#restore-input", str(redacted))
     page.wait_for_function("!document.querySelector('#restore-btn').disabled")
     page.click("#restore-btn")
@@ -211,10 +226,10 @@ def test_xlsx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
     page.click("#upload-degradations summary")
     assert "pivot" in page.locator("#upload-degradations").inner_text().lower()
     page.click("#detect-btn")
-    page.wait_for_selector("#panel-review:not([hidden])")
+    page.wait_for_selector("#review-card:not([hidden])")
     assert "John Smith" in page.locator("#review-rows").inner_text()
     page.click("#generate-btn")
-    page.wait_for_selector("#panel-generate:not([hidden])")
+    page.wait_for_selector("#generate-card:not([hidden])")
 
     with page.expect_download() as redacted_info:
         page.click("#download-btn")
@@ -224,9 +239,10 @@ def test_xlsx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
     assert redacted.read_bytes()[:2] == b"PK"
 
     page.click("#goto-restore-btn")
-    page.wait_for_selector("#panel-restore:not([hidden])")
-    page.wait_for_function("document.querySelectorAll('#restore-job option').length > 1")
-    page.select_option("#restore-job", index=1)
+    page.wait_for_selector("#panel-reidentify:not([hidden])")
+    page.wait_for_function("document.querySelectorAll('#history-rows tr').length > 0")
+    page.locator("#history-rows input[type=radio]").first.check()
+    page.wait_for_function("document.querySelectorAll('#job-dict-rows tr').length > 0")
     page.set_input_files("#restore-input", str(redacted))
     page.wait_for_function("!document.querySelector('#restore-btn').disabled")
     page.click("#restore-btn")
@@ -264,10 +280,10 @@ def test_pptx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
     page.click("#upload-degradations summary")
     assert "smartart" in page.locator("#upload-degradations").inner_text().lower()
     page.click("#detect-btn")
-    page.wait_for_selector("#panel-review:not([hidden])")
+    page.wait_for_selector("#review-card:not([hidden])")
     assert "Alice Chen" in page.locator("#review-rows").inner_text()
     page.click("#generate-btn")
-    page.wait_for_selector("#panel-generate:not([hidden])")
+    page.wait_for_selector("#generate-card:not([hidden])")
 
     with page.expect_download() as redacted_info:
         page.click("#download-btn")
@@ -277,9 +293,10 @@ def test_pptx_roundtrip_and_degradation_list(page, built: Path, tmp_path: Path) 
     assert redacted.read_bytes()[:2] == b"PK"
 
     page.click("#goto-restore-btn")
-    page.wait_for_selector("#panel-restore:not([hidden])")
-    page.wait_for_function("document.querySelectorAll('#restore-job option').length > 1")
-    page.select_option("#restore-job", index=1)
+    page.wait_for_selector("#panel-reidentify:not([hidden])")
+    page.wait_for_function("document.querySelectorAll('#history-rows tr').length > 0")
+    page.locator("#history-rows input[type=radio]").first.check()
+    page.wait_for_function("document.querySelectorAll('#job-dict-rows tr').length > 0")
     page.set_input_files("#restore-input", str(redacted))
     page.wait_for_function("!document.querySelector('#restore-btn').disabled")
     page.click("#restore-btn")
@@ -315,7 +332,7 @@ def test_run_warnings_are_cleared_when_the_file_changes(page, built: Path) -> No
 
     page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
     page.click("#detect-btn")
-    page.wait_for_selector("#panel-review:not([hidden])")
+    page.wait_for_selector("#review-card:not([hidden])")
     page.wait_for_function(
         "() => { const node = document.querySelector('#upload-warnings');"
         " return node.hidden === false && node.textContent.trim().length > 0; }"
@@ -374,7 +391,7 @@ def test_unknown_degradation_code_shows_the_generic_note(page, built: Path) -> N
     )
     page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
     page.click("#detect-btn")
-    page.wait_for_selector("#panel-review:not([hidden])")
+    page.wait_for_selector("#review-card:not([hidden])")
     page.wait_for_function(
         "() => { const node = document.querySelector('#upload-warnings');"
         " return node.hidden === false && node.textContent.trim().length > 0; }"
@@ -385,3 +402,73 @@ def test_unknown_degradation_code_shows_the_generic_note(page, built: Path) -> N
     assert "xlsx.new_untouched_content" not in note
     # one generic note regardless of how many unknown codes arrive
     assert lowered.count("left untouched") == 1
+
+
+def test_tabs_keep_independent_state_and_dictionary_switch_survives_reload(
+    page, built: Path
+) -> None:
+    """Every page can be used in any order; a disabled default stays off.
+
+    John Smith is in the signed preset pack, so disabling it proves the page
+    can override a preset for matching without copying or deleting that preset
+    row. The manual-gap field can then opt the same term back in for one run.
+    """
+    page.evaluate(
+        "window.lethStore.mergeEntities([{canonical:'Task Added Person',"
+        "type:'PERSON',aliases:['TAP']}])"
+    )
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.select_option("#lang-select", "en")
+    page.wait_for_function("document.documentElement.lang === 'en'")
+
+    page.click(".step[data-panel='dictionary']")
+    page.wait_for_selector("#panel-dictionary:not([hidden])")
+    page.wait_for_function("document.querySelectorAll('#dict-rows tr').length > 0")
+    body = page.locator("#dict-rows").inner_text()
+    assert "Server preset" in body
+    assert "User" in body
+    page.fill("#dict-search", "John Smith")
+    page.wait_for_function(
+        "document.querySelectorAll('#dict-rows tr').length === 1"
+    )
+    john = page.locator("#dict-rows tr", has_text="John Smith")
+    assert john.locator("input[type=checkbox]").is_checked()
+    john.locator("input[type=checkbox]").uncheck()
+
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.select_option("#lang-select", "en")
+    page.wait_for_function("document.documentElement.lang === 'en'")
+    page.click(".step[data-panel='dictionary']")
+    page.fill("#dict-search", "John Smith")
+    page.wait_for_function(
+        "document.querySelectorAll('#dict-rows tr').length === 1"
+    )
+    assert not page.locator("#dict-rows input[type=checkbox]").is_checked()
+
+    page.click(".step[data-panel='deidentify']")
+    page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
+    page.click("#detect-btn")
+    page.wait_for_selector("#review-card:not([hidden])")
+    assert "John Smith" not in page.locator("#review-rows").inner_text()
+
+    page.fill("#manual-entity", "John Smith")
+    page.select_option("#manual-type", "PERSON")
+    page.click("#manual-add-btn")
+    page.wait_for_function(
+        "document.querySelector('#review-rows').innerText.includes('John Smith')"
+    )
+    assert page.locator("#review-rows").inner_text().count("John Smith") == 1
+
+    rows_before = page.locator("#review-rows tr").count()
+    page.click(".step[data-panel='dictionary']")
+    page.click(".step[data-panel='deidentify']")
+    page.wait_for_selector("#review-card:not([hidden])")
+    assert page.locator("#review-rows tr").count() == rows_before

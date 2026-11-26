@@ -164,6 +164,8 @@ def test_inspect_runs_gates_then_both_runtimes(page) -> None:
     assert result["parts"] > 10
     assert result["paragraphs"] > 0
     assert result["status"] == "ok"
+    assert "John Smith" in result["previewText"]
+    assert result["previewTruncated"] is False
 
 
 def test_bad_package_is_parse_failed(page) -> None:

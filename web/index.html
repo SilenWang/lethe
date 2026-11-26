@@ -40,22 +40,23 @@
     </div>
 
     <nav class="steps" role="tablist" aria-label="Workflow">
-      <button role="tab" type="button" data-panel="upload" aria-selected="true" class="step is-active">
-        <span class="step-no">1</span><span data-i18n="p1.step.upload"></span>
+      <button id="tab-deidentify" role="tab" type="button" data-panel="deidentify" aria-selected="true"
+              aria-controls="panel-deidentify" class="step is-active">
+        <span data-i18n="p1.page.deidentify"></span>
       </button>
-      <button role="tab" type="button" data-panel="review" aria-selected="false" class="step" disabled>
-        <span class="step-no">2</span><span data-i18n="p1.step.review"></span>
+      <button id="tab-reidentify" role="tab" type="button" data-panel="reidentify" aria-selected="false"
+              aria-controls="panel-reidentify" class="step">
+        <span data-i18n="p1.page.reidentify"></span>
       </button>
-      <button role="tab" type="button" data-panel="generate" aria-selected="false" class="step" disabled>
-        <span class="step-no">3</span><span data-i18n="p1.step.generate"></span>
-      </button>
-      <button role="tab" type="button" data-panel="restore" aria-selected="false" class="step">
-        <span class="step-no">4</span><span data-i18n="p1.step.restore"></span>
+      <button id="tab-dictionary" role="tab" type="button" data-panel="dictionary" aria-selected="false"
+              aria-controls="panel-dictionary" class="step">
+        <span data-i18n="p1.page.dictionary"></span>
       </button>
     </nav>
 
     <main>
-      <section id="panel-upload" class="panel" role="tabpanel">
+      <section id="panel-deidentify" class="panel" role="tabpanel"
+               aria-labelledby="tab-deidentify">
         <h2 data-i18n="p1.upload.title"></h2>
         <p class="hint" data-i18n="p1.upload.hint"></p>
         <div id="upload-drop" class="dropzone" tabindex="0" role="button">
@@ -67,8 +68,6 @@
         <p id="upload-note" class="note" hidden></p>
         <details id="upload-degradations" class="note" hidden>
           <summary data-i18n="p1.degradations.title"></summary>
-          <!-- Filled per file by app.js from DEGRADATION_KEYS, so the list only
-               shows the gaps that apply to the picked format. -->
           <ul id="degradation-list"></ul>
         </details>
         <p id="upload-inspect" class="meta" hidden></p>
@@ -78,48 +77,61 @@
           <button id="detect-btn" type="button" class="btn btn-primary" disabled data-i18n="p1.upload.continue"></button>
           <button id="clear-btn" type="button" class="btn btn-ghost" disabled data-i18n="p1.upload.clear"></button>
         </div>
-      </section>
 
-      <section id="panel-review" class="panel" role="tabpanel" hidden>
-        <h2 data-i18n="p1.review.title"></h2>
-        <p class="hint" data-i18n="p1.review.hint"></p>
-        <div class="review-tools">
-          <span id="review-count" class="meta"></span>
-          <button id="select-all-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.check_all"></button>
-          <button id="select-none-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.uncheck_all"></button>
+        <div class="manual-row">
+          <label for="manual-entity" data-i18n="p1.manual.label"></label>
+          <input id="manual-entity" type="text" data-i18n-placeholder="p1.manual.placeholder" />
+          <select id="manual-type" aria-label="Type"></select>
+          <button id="manual-add-btn" type="button" class="btn" disabled data-i18n="p1.manual.add"></button>
         </div>
-        <div class="table-wrap">
-          <table class="review-table">
-            <thead>
-              <tr>
-                <th scope="col"></th>
-                <th scope="col" data-i18n="p1.review.value"></th>
-                <th scope="col" data-i18n="p1.review.type"></th>
-                <th scope="col" data-i18n="p1.review.source"></th>
-                <th scope="col" data-i18n="p1.review.count"></th>
-                <th scope="col" data-i18n="p1.review.token"></th>
-              </tr>
-            </thead>
-            <tbody id="review-rows"></tbody>
-          </table>
-        </div>
-        <p id="review-empty" class="note" hidden data-i18n="p1.review.empty"></p>
-        <div class="actions">
-          <button id="rescan-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.rescan"></button>
-          <button id="generate-btn" type="button" class="btn btn-primary" data-i18n="p1.review.generate"></button>
-        </div>
-      </section>
 
-      <section id="panel-generate" class="panel" role="tabpanel" hidden>
-        <h2 data-i18n="p1.generate.title"></h2>
-        <div id="generate-card" class="card">
+        <div id="preview-card" class="card preview-card" hidden>
+          <div class="section-head">
+            <h3 data-i18n="p1.preview.title"></h3>
+            <span id="preview-note" class="meta"></span>
+          </div>
+          <pre id="document-preview" tabindex="0"></pre>
+        </div>
+
+        <div id="review-card" class="card review-card" hidden>
+          <h3 data-i18n="p1.review.title"></h3>
+          <p class="hint" data-i18n="p1.review.hint"></p>
+          <div class="review-tools">
+            <span id="review-count" class="meta"></span>
+            <button id="select-all-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.check_all"></button>
+            <button id="select-none-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.uncheck_all"></button>
+          </div>
+          <div class="table-wrap">
+            <table class="review-table">
+              <thead>
+                <tr>
+                  <th scope="col"></th>
+                  <th scope="col" data-i18n="p1.review.value"></th>
+                  <th scope="col" data-i18n="p1.review.type"></th>
+                  <th scope="col" data-i18n="p1.review.source"></th>
+                  <th scope="col" data-i18n="p1.review.count"></th>
+                  <th scope="col" data-i18n="p1.review.token"></th>
+                </tr>
+              </thead>
+              <tbody id="review-rows"></tbody>
+            </table>
+          </div>
+          <p id="review-empty" class="note" hidden data-i18n="p1.review.empty"></p>
+          <div class="actions">
+            <label class="check">
+              <input id="save-names" type="checkbox" checked />
+              <span data-i18n="p1.review.save_names"></span>
+            </label>
+            <button id="rescan-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.rescan"></button>
+            <button id="generate-btn" type="button" class="btn btn-primary" data-i18n="p1.review.generate"></button>
+          </div>
+        </div>
+
+        <div id="generate-card" class="card" hidden>
+          <h3 data-i18n="p1.generate.title"></h3>
           <p id="generate-summary" class="result-line"></p>
           <p id="generate-job" class="meta"></p>
           <p id="generate-saved" class="meta"></p>
-          <label id="generate-dict-label" class="check">
-            <input id="generate-dict" type="checkbox" />
-            <span id="generate-dict-text"></span>
-          </label>
           <div class="actions">
             <button id="download-btn" type="button" class="btn btn-primary" data-i18n="p1.generate.download"></button>
             <button id="goto-restore-btn" type="button" class="btn" data-i18n="p1.generate.to_restore"></button>
@@ -128,14 +140,51 @@
         </div>
       </section>
 
-      <section id="panel-restore" class="panel" role="tabpanel" hidden>
+      <section id="panel-reidentify" class="panel" role="tabpanel"
+               aria-labelledby="tab-reidentify" hidden>
         <h2 data-i18n="p1.restore.title"></h2>
         <p class="hint" data-i18n="p1.restore.hint"></p>
-        <div class="field">
-          <label for="restore-job" data-i18n="p1.restore.job"></label>
-          <select id="restore-job"></select>
+
+        <div class="section-head">
+          <h3 data-i18n="p1.history.title"></h3>
+          <button id="history-refresh" type="button" class="btn btn-ghost" data-i18n="p1.history.refresh"></button>
         </div>
         <p id="restore-no-jobs" class="note" hidden data-i18n="p1.restore.no_jobs"></p>
+        <div class="table-wrap">
+          <table class="review-table history-table">
+            <thead>
+              <tr>
+                <th scope="col"></th>
+                <th scope="col" data-i18n="p1.history.when"></th>
+                <th scope="col" data-i18n="p1.history.files"></th>
+                <th scope="col" data-i18n="p1.history.replacements"></th>
+                <th scope="col" data-i18n="p1.generate.job"></th>
+              </tr>
+            </thead>
+            <tbody id="history-rows"></tbody>
+          </table>
+        </div>
+
+        <div class="card history-card">
+          <div class="section-head">
+            <h3 data-i18n="p1.history.dictionary"></h3>
+            <button id="job-dict-load" type="button" class="btn btn-ghost" data-i18n="p1.history.load_dictionary"></button>
+          </div>
+          <p id="selected-job" class="meta" data-i18n="p1.history.none"></p>
+          <div class="table-wrap">
+            <table class="review-table">
+              <thead>
+                <tr>
+                  <th scope="col" data-i18n="p1.review.token"></th>
+                  <th scope="col" data-i18n="p1.history.real_value"></th>
+                </tr>
+              </thead>
+              <tbody id="job-dict-rows"></tbody>
+            </table>
+          </div>
+          <p id="job-dict-note" class="note" hidden></p>
+        </div>
+
         <div class="field">
           <label for="restore-passphrase" data-i18n="p1.restore.passphrase"></label>
           <input id="restore-passphrase" type="password" autocomplete="off" />
@@ -146,11 +195,42 @@
         <input id="restore-input" type="file" accept=".docx,.xlsx,.pptx" hidden />
         <p id="restore-file" class="file-line" hidden></p>
         <div class="actions">
-          <button id="restore-btn" type="button" class="btn btn-primary" data-i18n="p1.restore.run"></button>
+          <button id="restore-btn" type="button" class="btn btn-primary" disabled data-i18n="p1.restore.run"></button>
         </div>
         <div id="restore-result" class="card" hidden>
           <p id="restore-summary" class="result-line"></p>
           <button id="restore-download" type="button" class="btn btn-primary" data-i18n="p1.restore.download"></button>
+        </div>
+      </section>
+
+      <section id="panel-dictionary" class="panel" role="tabpanel"
+               aria-labelledby="tab-dictionary" hidden>
+        <h2 data-i18n="p1.dictionary.title"></h2>
+        <p class="hint" data-i18n="p1.dictionary.hint"></p>
+        <div class="dictionary-tools">
+          <input id="dict-search" type="search" data-i18n-placeholder="p1.dictionary.search" />
+          <span id="dict-count" class="meta"></span>
+          <button id="dict-refresh" type="button" class="btn btn-ghost" data-i18n="p1.dictionary.refresh"></button>
+        </div>
+        <div class="manual-row">
+          <label for="dict-name" data-i18n="p1.dictionary.term"></label>
+          <input id="dict-name" type="text" />
+          <select id="dict-type" aria-label="Type"></select>
+          <button id="dict-add" type="button" class="btn btn-primary" data-i18n="p1.manual.add"></button>
+        </div>
+        <div class="table-wrap">
+          <table class="review-table">
+            <thead>
+              <tr>
+                <th scope="col" data-i18n="p1.dictionary.enabled"></th>
+                <th scope="col" data-i18n="p1.review.value"></th>
+                <th scope="col" data-i18n="p1.review.type"></th>
+                <th scope="col" data-i18n="p1.dictionary.source"></th>
+                <th scope="col" data-i18n="p1.dictionary.aliases"></th>
+              </tr>
+            </thead>
+            <tbody id="dict-rows"></tbody>
+          </table>
         </div>
       </section>
     </main>

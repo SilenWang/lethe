@@ -1,8 +1,6 @@
-// P1 UI: upload → dictionary detection → review → redact → restore.
-//
-// All document work happens in the single frozen worker behind the bridge
-// (docs/p1/worker-interface.md). This module only owns presentation, the
-// review selection (sent to the worker as `options.entities`) and IndexedDB.
+// Three independent PWA pages: de-identify, re-identify and entity dictionary.
+// Document work stays in the frozen worker; this module owns presentation and
+// the browser-only history/dictionary layer.
 import { createBridge } from "../lib/pyodide_bridge.js";
 import { createDictionaryClient } from "../lib/dictionary-client.js";
 import { mergeDictionaryLayers } from "../lib/dictionary-merge.js";
@@ -12,13 +10,13 @@ import {
   DEGRADATION_KEYS,
   ENTITY_TYPES,
   RECYCLE_BYTES,
+  errorKey,
   gateLevel,
   humanSize,
   isPptx,
   isSupported,
   isXlsx,
   mimeFor,
-  errorKey,
   replaceSuffix,
   sourceKey,
 } from "./format.js";
@@ -31,14 +29,21 @@ const state = {
   runtime: "initializing",
   busy: false,
   file: null,
-  detection: null, // {items, bytes, hits, warnings}
+  inspection: null,
+  detection: null,
   selected: new Set(),
   types: new Map(),
+  manualEntities: [],
+  customTypesList: [],
+  dictRows: [],
   dictByKey: new Map(),
+  disabledEntities: new Set(),
   generated: null,
   restoreFile: null,
   restored: null,
   jobs: [],
+  selectedJobId: "",
+  jobMapping: null,
   storageOk: false,
   installEvent: null,
   dictionary: null,
@@ -50,8 +55,6 @@ const t = (key, vars) => state.i18n.t(key, vars);
 
 function toast(message, kind = "info", ms = 7000) {
   const el = $("toast");
-  // Never let a background notice (offline ready, rebuild hint) cover an
-  // error the user needs to read.
   if (kind !== "error" && !el.hidden && el.classList.contains("toast-error")) return;
   el.textContent = message;
   el.className = `toast toast-${kind}`;
@@ -73,40 +76,39 @@ function showPanel(name) {
     tab.classList.toggle("is-active", active);
     tab.setAttribute("aria-selected", String(active));
   }
-  if (name === "restore") loadJobs().catch(() => {});
-}
-
-function unlock(panel) {
-  const tab = document.querySelector(`.step[data-panel="${panel}"]`);
-  if (tab) tab.disabled = false;
+  if (name === "reidentify") loadJobs().catch(() => {});
+  if (name === "dictionary") refreshDict().catch(() => {});
 }
 
 function setRunning(running) {
   state.busy = running;
   $("progress").hidden = !running;
   $("cancel-btn").hidden = !running;
-  for (const id of ["inspect-btn", "detect-btn", "rescan-btn", "generate-btn", "restore-btn"]) {
-    const btn = $(id);
-    if (btn) btn.disabled = running;
+  for (const id of [
+    "inspect-btn", "detect-btn", "rescan-btn", "generate-btn", "restore-btn",
+    "manual-add-btn", "dict-add", "job-dict-load",
+  ]) {
+    const button = $(id);
+    if (button) button.disabled = running;
   }
   if (running) {
     $("progress-bar").removeAttribute("value");
   } else {
     $("cancel-btn").hidden = true;
+    updateFileButtons();
+    updateRestoreButton();
   }
 }
 
 function setPhase(phase) {
-  if (!phase) return;
-  $("progress-label").textContent = t(`p1.progress.${phase}`);
+  if (phase) $("progress-label").textContent = t(`p1.progress.${phase}`);
 }
 
 function onStatus(event) {
   state.runtime = event.state;
   const badge = $("runtime-badge");
   badge.className = "badge";
-  const retry = $("runtime-retry");
-  if (retry) retry.hidden = event.state !== "failed";
+  $("runtime-retry").hidden = event.state !== "failed";
   if (event.state === "ready") {
     badge.classList.add("badge-ok");
     badge.textContent = t("p1.runtime.ready");
@@ -127,84 +129,63 @@ function onStatus(event) {
     badge.textContent = t("p1.runtime.failed");
     if (event.reason) toast(t("p1.error.INIT_FAILED", { error: event.reason }), "error", 0);
   }
+  updateFileButtons();
 }
 
 // ---------------------------------------------------------- eager preload
 
-function preloadText(key, vars = {}) {
-  return t(key, vars);
-}
-
-function showPreload(done, total, path = "") {
+function showPreload(done, total) {
   const panel = $("preload-panel");
   const bar = $("preload-bar");
   const text = $("preload-text");
-  const retry = $("preload-retry");
   if (!panel || !bar || !text) return;
   panel.hidden = false;
-  if (retry) retry.hidden = true;
+  $("preload-retry").hidden = true;
   bar.max = Math.max(total || 1, 1);
   bar.value = done || 0;
-  text.textContent = path
-    ? preloadText("p1.preload.progress", { done: done || 0, total: total || 0 })
-    : preloadText("p1.preload.starting");
+  text.textContent = total
+    ? t("p1.preload.progress", { done: done || 0, total })
+    : t("p1.preload.starting");
 }
 
 function failPreload(message) {
-  const panel = $("preload-panel");
-  const text = $("preload-text");
-  const retry = $("preload-retry");
-  if (panel) panel.hidden = false;
-  if (text) text.textContent = preloadText("p1.preload.failed", { error: message });
-  if (retry) retry.hidden = false;
+  $("preload-panel").hidden = false;
+  $("preload-text").textContent = t("p1.preload.failed", { error: message });
+  $("preload-retry").hidden = false;
 }
 
 async function preloadRuntime() {
   if (!("serviceWorker" in navigator)) return;
-  const registration = await navigator.serviceWorker.register("./sw.js", {
-    type: "module",
-  });
+  const registration = await navigator.serviceWorker.register("./sw.js", { type: "module" });
   await navigator.serviceWorker.ready;
-  if (!navigator.onLine) return; // offline cold start: the cache is the source
+  if (!navigator.onLine) return;
   const active = registration.active || registration.waiting || registration.installing;
   if (!active) throw new Error("service worker has no active worker");
   showPreload(0, 0);
   return new Promise((resolve, reject) => {
     let settled = false;
-    const cleanup = () => {
-      navigator.serviceWorker.removeEventListener("message", onMessage);
-      clearTimeout(timer);
-    };
     const finish = (error) => {
       if (settled) return;
       settled = true;
-      cleanup();
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+      clearTimeout(timer);
       if (error) {
         failPreload(error.message || String(error));
         reject(error);
-      } else {
-        const panel = $("preload-panel");
-        const text = $("preload-text");
-        if (text) text.textContent = preloadText("p1.preload.done");
-        setTimeout(() => { if (panel) panel.hidden = true; }, 1500);
-        toast(t("p1.offline.ready"), "ok", 5000);
-        resolve();
+        return;
       }
+      $("preload-text").textContent = t("p1.preload.done");
+      setTimeout(() => { $("preload-panel").hidden = true; }, 1500);
+      toast(t("p1.offline.ready"), "ok", 5000);
+      resolve();
     };
     const onMessage = (event) => {
       const data = event.data || {};
-      if (data.type === "precache-progress") {
-        showPreload(data.done, data.total, data.path);
-      } else if (data.type === "precache-done") {
-        finish();
-      } else if (data.type === "precache-error") {
-        finish(new Error(data.message || "precache failed"));
-      }
+      if (data.type === "precache-progress") showPreload(data.done, data.total);
+      else if (data.type === "precache-done") finish();
+      else if (data.type === "precache-error") finish(new Error(data.message || "precache failed"));
     };
-    const timer = setTimeout(
-      () => finish(new Error("runtime preload timed out")),
-      10 * 60 * 1000,
-    );
+    const timer = setTimeout(() => finish(new Error("runtime preload timed out")), 10 * 60 * 1000);
     navigator.serviceWorker.addEventListener("message", onMessage);
     active.postMessage({ type: "PRECACHE" });
   });
@@ -217,19 +198,14 @@ async function installPresetDictionary() {
 
 // ------------------------------------------------------------- worker runs
 
-async function fileBytes(file) {
-  return new Uint8Array(await file.arrayBuffer());
-}
-
 async function runOp({ op, file, options = {} }) {
   if (state.busy) throw Object.assign(new Error("busy"), { code: "BUSY" });
   setRunning(true);
   setPhase("init");
   try {
-    const bytes = await fileBytes(file);
-    const result = await state.bridge.run({
+    return await state.bridge.run({
       op,
-      bytes,
+      bytes: new Uint8Array(await file.arrayBuffer()),
       fileName: file.name,
       options,
       onProgress: ({ phase, done, total }) => {
@@ -243,7 +219,6 @@ async function runOp({ op, file, options = {} }) {
         }
       },
     });
-    return result;
   } finally {
     setRunning(false);
     $("progress-bar").removeAttribute("value");
@@ -252,9 +227,7 @@ async function runOp({ op, file, options = {} }) {
 
 function reportError(error) {
   const code = error?.code || "INTERNAL";
-  const key = errorKey(code);
-  const vars = { error: error?.message || "" };
-  const parts = [t(key, vars)];
+  const parts = [t(errorKey(code), { error: error?.message || "" })];
   parts.push(...gateFindings(error?.detail));
   if (code === "TOO_LARGE") {
     parts.push(t("gate.tip.split"), t("gate.tip.convert"), t("gate.tip.machine"));
@@ -262,9 +235,6 @@ function reportError(error) {
   toast(parts.join(" · "), code === "CANCELLED" ? "info" : "error", 0);
 }
 
-// A rejected file comes back with the English diagnostic line plus the locale
-// key and values for each finding. The UI shows the localised sentence and
-// only falls back to the diagnostic line when a newer worker did not send one.
 function gateFindings(detail) {
   const findings = detail?.findings_detail;
   if (Array.isArray(findings) && findings.length) {
@@ -273,90 +243,92 @@ function gateFindings(detail) {
     ).filter(Boolean);
   }
   const raw = detail?.findings;
-  return Array.isArray(raw) && raw.length ? raw : [];
+  return Array.isArray(raw) ? raw : [];
 }
 
-// ------------------------------------------------------------ upload panel
+// -------------------------------------------------------- de-identify page
+
+function updateFileButtons() {
+  const hasFile = !!state.file;
+  const ready = !!state.bridge && state.runtime === "ready" && !state.busy;
+  $("inspect-btn").disabled = !hasFile || !ready;
+  $("detect-btn").disabled = !hasFile || !ready;
+  $("clear-btn").disabled = !hasFile;
+  $("manual-add-btn").disabled = !hasFile || !ready;
+}
 
 function pickFile(file) {
-  if (!isSupported(file)) {
-    toast(t("p1.upload.wrong_type"), "error");
-    return;
-  }
+  if (!isSupported(file)) return toast(t("p1.upload.wrong_type"), "error");
   const gate = gateLevel(file.size);
   if (gate.level === "reject") {
     clearFile();
-    toast(`${t("gate.file_reject", { size_mb: gate.size, max_mb: 50 })}`, "error", 0);
-    return;
+    return toast(t("gate.file_reject", { size_mb: gate.size, max_mb: 50 }), "error", 0);
   }
-  state.file = file;
-  state.detection = null;
-  state.generated = null;
-  state.selected = new Set();
-  // A new file has not been run yet: the previous file's degradation note must
-  // not survive, or the user reads it as a property of this one.
+  Object.assign(state, {
+    file,
+    inspection: null,
+    detection: null,
+    generated: null,
+    selected: new Set(),
+    types: new Map(),
+    manualEntities: [],
+  });
   showWarnings([]);
   $("upload-file").hidden = false;
   $("upload-file").textContent = t("p1.upload.selected", { name: file.name, size: humanSize(file.size) });
-  const note = $("upload-note");
-  renderDegradations(file);
+  $("upload-note").hidden = gate.level !== "warn";
   if (gate.level === "warn") {
-    note.hidden = false;
-    note.textContent = t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 }) +
+    $("upload-note").textContent = t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 }) +
       " " + t("p1.upload.large_note");
-  } else {
-    note.hidden = true;
   }
   $("upload-inspect").hidden = true;
-  $("inspect-btn").disabled = false;
-  $("detect-btn").disabled = false;
-  $("clear-btn").disabled = false;
+  $("preview-card").hidden = true;
+  $("review-card").hidden = true;
+  $("generate-card").hidden = true;
+  renderDegradations(file);
+  updateFileButtons();
 }
 
 function clearFile() {
-  state.file = null;
-  state.detection = null;
-  state.generated = null;
+  Object.assign(state, {
+    file: null,
+    inspection: null,
+    detection: null,
+    generated: null,
+    manualEntities: [],
+  });
   $("upload-file").hidden = true;
   $("upload-note").hidden = true;
-  if ($("upload-degradations")) $("upload-degradations").hidden = true;
-  const list = $("degradation-list");
-  if (list) list.textContent = "";
-  showWarnings([]);
+  $("upload-degradations").hidden = true;
+  $("degradation-list").textContent = "";
   $("upload-inspect").hidden = true;
-  $("inspect-btn").disabled = true;
-  $("detect-btn").disabled = true;
-  $("clear-btn").disabled = true;
+  $("preview-card").hidden = true;
+  $("review-card").hidden = true;
+  $("generate-card").hidden = true;
+  $("document-preview").textContent = "";
+  $("manual-entity").value = "";
   $("upload-input").value = "";
+  showWarnings([]);
+  updateFileButtons();
 }
 
-// The known gaps of the *writer* for this format. A run's own degradation codes
-// (returned in `warnings`) are a subset of this list; showing it up front means
-// the user knows what will stay untouched before they start.
 function renderDegradations(file) {
   const details = $("upload-degradations");
-  if (!details) return;
-  const list = $("degradation-list");
   const keys = isXlsx(file) ? DEGRADATION_KEYS.xlsx : isPptx(file) ? DEGRADATION_KEYS.pptx : [];
   details.hidden = keys.length === 0;
-  if (!list) return;
+  const list = $("degradation-list");
   list.textContent = "";
   for (const key of keys) {
     const li = document.createElement("li");
-    li.dataset.i18n = key;
     li.textContent = t(key);
     list.appendChild(li);
   }
 }
 
-// The codes the engine actually hit for this file, in the interface language.
-// A code this build does not know still means "the writer left something
-// untouched": drop the internal string, but keep the privacy warning by
-// emitting the generic note once.
 function degradationNotes(warnings) {
   if (!Array.isArray(warnings)) return [];
   const seen = new Set();
-  const keys = [];
+  const notes = [];
   let unknown = false;
   for (const code of warnings) {
     const key = DEGRADATION_CODE_KEYS[code];
@@ -366,20 +338,24 @@ function degradationNotes(warnings) {
     }
     if (seen.has(key)) continue;
     seen.add(key);
-    keys.push(key);
+    notes.push(t(key));
   }
-  const notes = keys.map((key) => t(key));
   if (unknown) notes.push(t("p1.degradations.unknown"));
   return notes;
+}
+
+function showWarnings(warnings) {
+  const notes = degradationNotes(warnings);
+  $("upload-warnings").hidden = notes.length === 0;
+  $("upload-warnings").textContent = notes.join(" · ");
 }
 
 function bindDropzone(zone, input, onFile) {
   zone.addEventListener("click", () => input.click());
   zone.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      input.click();
-    }
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    input.click();
   });
   for (const type of ["dragenter", "dragover"]) {
     zone.addEventListener(type, (event) => {
@@ -403,68 +379,131 @@ function bindDropzone(zone, input, onFile) {
   });
 }
 
+function showInspection(result) {
+  const partsKey = isXlsx(state.file)
+    ? "p1.upload.parts_xlsx"
+    : isPptx(state.file)
+      ? "p1.upload.parts_pptx"
+      : "p1.upload.parts";
+  $("upload-inspect").hidden = false;
+  $("upload-inspect").textContent = `${t("p1.upload.checked")} ` +
+    t(partsKey, { parts: result.parts, paragraphs: result.paragraphs || 0 });
+}
+
 async function inspectFile() {
   if (!state.file) return toast(t("p1.upload.need_file"), "error");
   try {
-    const result = await runOp({ op: "inspect", file: state.file });
-    $("upload-inspect").hidden = false;
-    const partsKey = isXlsx(state.file)
-      ? "p1.upload.parts_xlsx"
-      : isPptx(state.file)
-        ? "p1.upload.parts_pptx"
-        : "p1.upload.parts";
-    $("upload-inspect").textContent =
-      `${t("p1.upload.checked")} ` +
-      t(partsKey, { parts: result.parts, paragraphs: result.paragraphs });
+    state.inspection = await runOp({ op: "inspect", file: state.file });
+    showInspection(state.inspection);
+    renderPreview(state.inspection.previewText || "", []);
   } catch (error) {
     reportError(error);
   }
 }
 
-// `inspect` already reported the gate warnings through the upload note (the
-// 35 MB case); this line only carries the engine's per-run degradation codes,
-// which are internal English identifiers. Render each one through its locale
-// key so the note follows the interface language.
-function showWarnings(warnings) {
-  const node = $("upload-warnings");
-  if (!node) return;
-  const notes = degradationNotes(warnings);
-  node.hidden = notes.length === 0;
-  node.textContent = notes.join(" · ");
+function entitiesForDetection() {
+  const rows = new Map();
+  for (const row of state.dictRows) {
+    const key = String(row.canonical).toLowerCase();
+    if (!state.disabledEntities.has(key)) rows.set(key, row);
+  }
+  for (const row of state.manualEntities) rows.set(row.canonical.toLowerCase(), row);
+  return [...rows.values()].map((row) => ({
+    canonical: row.canonical,
+    type: row.type,
+    aliases: row.aliases || [],
+  }));
 }
 
-function entitiesForDetection() {
-  const rows = [...state.dictByKey.values()];
-  return rows.map((row) => ({ canonical: row.canonical, type: row.type, aliases: row.aliases || [] }));
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function renderPreview(text, items) {
+  const card = $("preview-card");
+  const output = $("document-preview");
+  if (!text) {
+    card.hidden = false;
+    output.textContent = t("p1.preview.empty");
+    $("preview-note").textContent = "";
+    return;
+  }
+  card.hidden = false;
+  const surfaces = [];
+  for (const item of items) {
+    for (const surface of item.surfaces || [item.canonical]) {
+      if (surface) surfaces.push(String(surface));
+    }
+  }
+  surfaces.sort((a, b) => b.length - a.length);
+  if (!surfaces.length) {
+    output.textContent = text;
+  } else {
+    const pattern = new RegExp(surfaces.map((value) =>
+      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi");
+    let html = "";
+    let at = 0;
+    for (const match of text.matchAll(pattern)) {
+      html += escapeHtml(text.slice(at, match.index));
+      html += `<mark>${escapeHtml(match[0])}</mark>`;
+      at = match.index + match[0].length;
+    }
+    output.innerHTML = html + escapeHtml(text.slice(at));
+  }
+  $("preview-note").textContent = state.detection?.previewTruncated || state.inspection?.previewTruncated
+    ? t("p1.preview.note")
+    : "";
 }
 
 async function detect() {
   if (!state.file) return toast(t("p1.upload.need_file"), "error");
   try {
-    await runOp({ op: "inspect", file: state.file });
+    const inspection = await runOp({ op: "inspect", file: state.file });
+    state.inspection = inspection;
+    showInspection(inspection);
     const result = await runOp({
       op: "redact",
       file: state.file,
       options: { entities: entitiesForDetection() },
     });
+    const manual = new Set(state.manualEntities.map((row) => row.canonical.toLowerCase()));
+    const items = (result.items || []).map((item) =>
+      manual.has(item.canonical.toLowerCase()) ? { ...item, source: "manual" } : item);
     state.detection = {
-      items: result.items || [],
+      items,
       bytes: result.bytes || null,
       hits: result.hits || 0,
       warnings: result.warnings || [],
+      previewText: inspection.previewText || "",
+      previewTruncated: !!inspection.previewTruncated,
     };
-    state.selected = new Set(state.detection.items.map((item) => item.canonical));
-    state.types = new Map(state.detection.items.map((item) => [item.canonical, item.type]));
-    showWarnings(state.detection.warnings);
+    state.selected = new Set(items.map((item) => item.canonical));
+    state.types = new Map(items.map((item) => [item.canonical, item.type]));
+    showWarnings(result.warnings || []);
+    renderPreview(state.detection.previewText, items);
     renderReview();
-    unlock("review");
-    showPanel("review");
+    $("review-card").hidden = false;
+    toast(t("p1.review.selected", { count: state.selected.size, total: items.length }), "info", 3000);
   } catch (error) {
     reportError(error);
   }
 }
 
-// ------------------------------------------------------------ review panel
+function addManualEntity() {
+  const value = $("manual-entity").value.trim();
+  if (!value) return;
+  const type = $("manual-type").value || "PERSON";
+  const key = value.toLowerCase();
+  if (!state.manualEntities.some((row) => row.canonical.toLowerCase() === key)) {
+    state.manualEntities.push({ canonical: value, type, aliases: [], source: "manual" });
+  }
+  $("manual-entity").value = "";
+  detect().catch(reportError);
+}
 
 function renderReview() {
   const rows = $("review-rows");
@@ -473,7 +512,7 @@ function renderReview() {
   $("review-empty").hidden = items.length > 0;
   for (const item of items) {
     const tr = document.createElement("tr");
-    const cellCheck = document.createElement("td");
+    const checkCell = document.createElement("td");
     const check = document.createElement("input");
     check.type = "checkbox";
     check.className = "row-check";
@@ -484,43 +523,43 @@ function renderReview() {
       else state.selected.delete(item.canonical);
       renderReviewCount();
     });
-    cellCheck.appendChild(check);
-    tr.appendChild(cellCheck);
+    checkCell.appendChild(check);
+    tr.appendChild(checkCell);
 
-    const cellValue = document.createElement("td");
-    cellValue.className = "cell-value";
-    cellValue.textContent = item.canonical;
-    tr.appendChild(cellValue);
+    const value = document.createElement("td");
+    value.className = "cell-value";
+    value.textContent = item.canonical;
+    tr.appendChild(value);
 
-    const cellType = document.createElement("td");
-    const select = document.createElement("select");
-    select.className = "row-type";
-    for (const type of [...ENTITY_TYPES, ...state.customTypesList]) {
+    const typeCell = document.createElement("td");
+    const type = document.createElement("select");
+    type.className = "row-type";
+    for (const name of [...new Set([...ENTITY_TYPES, ...state.customTypesList])]) {
       const option = document.createElement("option");
-      option.value = type;
-      option.textContent = type;
-      select.appendChild(option);
+      option.value = name;
+      option.textContent = name;
+      type.appendChild(option);
     }
-    select.value = state.types.get(item.canonical) || item.type;
-    select.addEventListener("change", () => state.types.set(item.canonical, select.value));
-    cellType.appendChild(select);
-    tr.appendChild(cellType);
+    type.value = state.types.get(item.canonical) || item.type;
+    type.addEventListener("change", () => state.types.set(item.canonical, type.value));
+    typeCell.appendChild(type);
+    tr.appendChild(typeCell);
 
-    const cellSource = document.createElement("td");
+    const source = document.createElement("td");
     const badge = document.createElement("span");
     badge.className = `src src-${item.source}`;
     badge.textContent = t(sourceKey(item.source));
-    cellSource.appendChild(badge);
-    tr.appendChild(cellSource);
+    source.appendChild(badge);
+    tr.appendChild(source);
 
-    const cellCount = document.createElement("td");
-    cellCount.textContent = String(item.count);
-    tr.appendChild(cellCount);
+    const count = document.createElement("td");
+    count.textContent = String(item.count);
+    tr.appendChild(count);
 
-    const cellToken = document.createElement("td");
-    cellToken.className = "cell-token";
-    cellToken.textContent = item.token || "—";
-    tr.appendChild(cellToken);
+    const token = document.createElement("td");
+    token.className = "cell-token";
+    token.textContent = item.token || "—";
+    tr.appendChild(token);
     rows.appendChild(tr);
   }
   renderReviewCount();
@@ -531,21 +570,31 @@ function renderReviewCount() {
   $("review-count").textContent = t("p1.review.selected", { count: state.selected.size, total });
 }
 
-// ---------------------------------------------------------- generate panel
+async function saveSelectedNames(items) {
+  const rows = items
+    .filter((item) => item.source !== "pattern")
+    .filter((item) => state.dictByKey.get(item.canonical.toLowerCase())?.source !== "preset")
+    .map((item) => ({
+      canonical: item.canonical,
+      type: state.types.get(item.canonical) || item.type,
+      aliases: state.dictByKey.get(item.canonical.toLowerCase())?.aliases || [],
+    }));
+  if (!rows.length) return;
+  await store.mergeUserEntities(rows);
+  await refreshDict();
+  await refreshStorageLine();
+}
 
 async function generate() {
   const all = state.detection?.items || [];
   const chosen = all.filter((item) => state.selected.has(item.canonical));
   if (!chosen.length) return toast(t("p1.review.none_selected"), "error");
   const typeChanged = all.some((item) => state.types.get(item.canonical) !== item.type);
-  const entities = chosen.map((item) => {
-    const known = state.dictByKey.get(item.canonical.toLowerCase());
-    return {
-      canonical: item.canonical,
-      type: state.types.get(item.canonical) || item.type,
-      aliases: known?.aliases || [],
-    };
-  });
+  const entities = chosen.map((item) => ({
+    canonical: item.canonical,
+    type: state.types.get(item.canonical) || item.type,
+    aliases: state.dictByKey.get(item.canonical.toLowerCase())?.aliases || [],
+  }));
   try {
     let result;
     if (!typeChanged && chosen.length === all.length && state.detection.bytes) {
@@ -555,9 +604,7 @@ async function generate() {
     }
     const items = result.items || [];
     const mapping = {};
-    for (const item of items) {
-      if (item.token) mapping[item.token] = item.canonical;
-    }
+    for (const item of items) if (item.token) mapping[item.token] = item.canonical;
     const jobId = `job-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-` +
       Math.random().toString(36).slice(2, 6);
     state.generated = {
@@ -568,9 +615,10 @@ async function generate() {
       checked: new Set(chosen.map((item) => item.canonical)),
     };
     renderGenerate();
-    unlock("generate");
-    showPanel("generate");
+    $("generate-card").hidden = false;
     await persistJob(jobId, mapping);
+    if ($("save-names").checked) await saveSelectedNames(chosen);
+    $("generate-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     reportError(error);
   }
@@ -581,6 +629,7 @@ async function persistJob(jobId, mapping) {
   try {
     await store.saveJob({
       jobId,
+      createdAt: new Date().toISOString(),
       mapping,
       sourceFiles: [state.file?.name || "document.docx"],
       replacements: state.generated?.hits || 0,
@@ -602,24 +651,11 @@ function renderGenerate() {
     tokens: out.tokens,
   });
   $("generate-job").textContent = `${t("p1.generate.job")}: ${out.jobId}`;
-  const names = [...out.checked].filter((name) => {
-    const item = state.detection?.items?.find((row) => row.canonical === name);
-    const known = state.dictByKey.get(String(name).toLowerCase());
-    return item && item.source !== "pattern" && known?.source !== "preset";
-  });
-  $("generate-dict-label").hidden = names.length === 0;
-  $("generate-dict").checked = false;
-  $("generate-dict-text").textContent = t("p1.generate.add_dict", { count: names.length });
-  if (out.bytes?.byteLength > RECYCLE_BYTES) {
-    toast(t("p1.upload.large_note"), "info", 0);
-  }
+  if (out.bytes?.byteLength > RECYCLE_BYTES) toast(t("p1.upload.large_note"), "info", 0);
 }
 
 function download(bytes, name) {
-  const blob = new Blob([bytes], {
-    type: mimeFor(name),
-  });
-  const url = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(new Blob([bytes], { type: mimeFor(name) }));
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
@@ -629,32 +665,103 @@ function download(bytes, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-// ----------------------------------------------------------- restore panel
+// --------------------------------------------------------- re-identify page
 
 async function loadJobs() {
   state.jobs = await store.listJobs();
-  const select = $("restore-job");
-  const previous = select.value;
-  select.textContent = "";
-  const placeholder = document.createElement("option");
-  placeholder.value = "";
-  placeholder.textContent = "—";
-  select.appendChild(placeholder);
-  for (const job of state.jobs) {
-    const option = document.createElement("option");
-    option.value = job.jobId;
-    const files = (job.sourceFiles || []).join(", ");
-    option.textContent = `${job.jobId}${files ? ` · ${files}` : ""}`;
-    select.appendChild(option);
+  if (state.selectedJobId && !state.jobs.some((job) => job.jobId === state.selectedJobId)) {
+    state.selectedJobId = "";
+    state.jobMapping = null;
   }
-  // A refresh (e.g. the second loadJobs when the restore panel opens) must not
-  // silently drop the job the user already picked.
-  if (previous && state.jobs.some((job) => job.jobId === previous)) {
-    select.value = previous;
-  }
+  renderHistory();
   $("restore-no-jobs").hidden = state.jobs.length > 0;
-  $("restore-btn").disabled = !select.value || !state.restoreFile;
   refreshStorageLine();
+}
+
+function renderHistory() {
+  const body = $("history-rows");
+  body.textContent = "";
+  for (const job of state.jobs) {
+    const tr = document.createElement("tr");
+    tr.classList.toggle("is-selected", job.jobId === state.selectedJobId);
+    const selectCell = document.createElement("td");
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "history-job";
+    radio.value = job.jobId;
+    radio.checked = job.jobId === state.selectedJobId;
+    radio.setAttribute("aria-label", job.jobId);
+    radio.addEventListener("change", () => selectJob(job));
+    selectCell.appendChild(radio);
+    tr.appendChild(selectCell);
+    for (const value of [
+      (job.createdAt || "").replace("T", " ").slice(0, 16) || "—",
+      (job.sourceFiles || []).join(", ") || "—",
+      String(job.replacements || 0),
+      job.jobId,
+    ]) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  renderSelectedJob();
+  updateRestoreButton();
+}
+
+function renderSelectedJob() {
+  $("selected-job").textContent = state.selectedJobId
+    ? t("p1.history.selected", { job: state.selectedJobId })
+    : t("p1.history.none");
+}
+
+async function selectJob(job) {
+  state.selectedJobId = job.jobId;
+  state.jobMapping = null;
+  $("job-dict-rows").textContent = "";
+  renderHistory();
+  if (job.passphraseProtected && !$("restore-passphrase").value) {
+    showJobDictionaryNote(t("p1.history.passphrase_required"));
+    return;
+  }
+  await loadHistoryDictionary();
+}
+
+function showJobDictionaryNote(message) {
+  const note = $("job-dict-note");
+  note.hidden = !message;
+  note.textContent = message || "";
+}
+
+async function loadHistoryDictionary() {
+  const job = state.jobs.find((row) => row.jobId === state.selectedJobId);
+  if (!job) return;
+  try {
+    state.jobMapping = await store.getMapping(job.jobId, $("restore-passphrase").value);
+    const body = $("job-dict-rows");
+    body.textContent = "";
+    const entries = Object.entries(state.jobMapping || {}).sort(([a], [b]) => a.localeCompare(b));
+    for (const [token, real] of entries) {
+      const tr = document.createElement("tr");
+      for (const value of [token, real]) {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      }
+      body.appendChild(tr);
+    }
+    showJobDictionaryNote(entries.length ? "" : t("p1.history.no_dictionary"));
+  } catch (error) {
+    state.jobMapping = null;
+    $("job-dict-rows").textContent = "";
+    showJobDictionaryNote(String(error?.message || error));
+  }
+}
+
+function updateRestoreButton() {
+  const button = $("restore-btn");
+  if (button) button.disabled = state.busy || !state.selectedJobId || !state.restoreFile;
 }
 
 function pickRestoreFile(file) {
@@ -671,15 +778,14 @@ function pickRestoreFile(file) {
     name: file.name,
     size: humanSize(file.size),
   });
-  $("restore-btn").disabled = !$("restore-job").value;
+  updateRestoreButton();
 }
 
 async function restore() {
-  const jobId = $("restore-job").value;
-  if (!jobId) return toast(t("p1.restore.need_job"), "error");
+  if (!state.selectedJobId) return toast(t("p1.restore.need_job"), "error");
   if (!state.restoreFile) return toast(t("p1.restore.need_file"), "error");
   try {
-    const tokenMap = await store.getMapping(jobId, $("restore-passphrase").value);
+    const tokenMap = await store.getMapping(state.selectedJobId, $("restore-passphrase").value);
     const result = await runOp({
       op: "restore",
       file: state.restoreFile,
@@ -698,10 +804,14 @@ async function restore() {
   }
 }
 
-// ---------------------------------------------------------------- storage
+// ---------------------------------------------------------- dictionary page
 
 async function refreshDict() {
-  const userRows = await store.getUserEntities();
+  const [userRows, tokenTypes] = await Promise.all([
+    store.getUserEntities(),
+    store.getUserTokenTypes(),
+  ]);
+  state.customTypesList = tokenTypes;
   let presetRows = [];
   if (state.dictionary) {
     try {
@@ -710,19 +820,93 @@ async function refreshDict() {
       console.warn("Preset dictionary is unavailable:", error);
     }
   }
-  const rows = mergeDictionaryLayers(userRows, presetRows);
-  state.dictByKey = new Map(rows.map((row) => [String(row.canonical).toLowerCase(), row]));
+  state.dictRows = mergeDictionaryLayers(userRows, presetRows);
+  state.dictByKey = new Map(state.dictRows.map((row) => [row.canonical.toLowerCase(), row]));
+  state.disabledEntities = store.getDisabledEntities();
+  renderDictionary();
+  renderReview();
+}
+
+function renderDictionary() {
+  const needle = $("dict-search").value.trim().toLowerCase();
+  const rows = state.dictRows.filter((row) => {
+    if (!needle) return true;
+    return [row.canonical, row.type, ...(row.aliases || [])]
+      .some((value) => String(value || "").toLowerCase().includes(needle));
+  });
+  rows.sort((a, b) => {
+    if (a.source !== b.source) return a.source === "preset" ? -1 : 1;
+    return a.canonical.localeCompare(b.canonical);
+  });
+  const body = $("dict-rows");
+  body.textContent = "";
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const enabled = !state.disabledEntities.has(row.canonical.toLowerCase());
+    tr.classList.toggle("dict-row-disabled", !enabled);
+    const enabledCell = document.createElement("td");
+    const check = document.createElement("input");
+    check.type = "checkbox";
+    check.checked = enabled;
+    check.setAttribute("aria-label", row.canonical);
+    check.addEventListener("change", () => {
+      state.disabledEntities = store.setEntityDefault(row.canonical, check.checked);
+      tr.classList.toggle("dict-row-disabled", !check.checked);
+    });
+    enabledCell.appendChild(check);
+    tr.appendChild(enabledCell);
+    const aliases = (row.aliases || []).join(", ");
+    for (const value of [
+      row.canonical,
+      row.type,
+      row.source === "preset" ? t("p1.dictionary.preset") : t("p1.dictionary.user"),
+      aliases || "—",
+    ]) {
+      const td = document.createElement("td");
+      td.textContent = value;
+      if (value === aliases && aliases) td.className = "dict-aliases";
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+  $("dict-count").textContent = t("p1.dictionary.count", { count: rows.length });
+}
+
+async function addDictionaryTerm() {
+  const name = $("dict-name").value.trim();
+  if (!name) return toast(t("p1.dictionary.need_name"), "error");
+  try {
+    await store.mergeUserEntities([{ canonical: name, type: $("dict-type").value, aliases: [] }]);
+    $("dict-name").value = "";
+    await refreshDict();
+    await refreshStorageLine();
+    toast(t("p1.dictionary.saved", { name }), "ok");
+  } catch (error) {
+    toast(String(error?.message || error), "error", 0);
+  }
 }
 
 async function refreshStorageLine() {
-  const line = $("storage-line");
   if (!store.storeAvailable()) {
-    line.textContent = t("p1.storage.unavailable");
+    $("storage-line").textContent = t("p1.storage.unavailable");
     return;
   }
-  const entities = await store.getUserEntities();
-  const jobs = await store.listJobs();
-  line.textContent = t("p1.storage.line", { entities: entities.length, jobs: jobs.length });
+  const [entities, jobs] = await Promise.all([store.getUserEntities(), store.listJobs()]);
+  $("storage-line").textContent = t("p1.storage.line", { entities: entities.length, jobs: jobs.length });
+}
+
+function fillTypeSelects() {
+  const types = [...new Set([...ENTITY_TYPES, ...state.customTypesList])];
+  for (const id of ["manual-type", "dict-type"]) {
+    const select = $(id);
+    select.textContent = "";
+    for (const type of types) {
+      const option = document.createElement("option");
+      option.value = type;
+      option.textContent = type;
+      select.appendChild(option);
+    }
+  }
 }
 
 // ------------------------------------------------------------------ wiring
@@ -730,25 +914,22 @@ async function refreshStorageLine() {
 async function boot() {
   state.i18n = await createI18n();
   state.i18n.apply();
-  state.customTypesList = await store.getUserTokenTypes();
   const init = await store.initStore();
   state.storageOk = !!init.ok;
+  state.customTypesList = await store.getUserTokenTypes();
+  state.disabledEntities = store.getDisabledEntities();
+  fillTypeSelects();
   if (!state.storageOk && init.error) toast(t("p1.storage.unavailable"), "info");
 
+  for (const tab of document.querySelectorAll(".step")) {
+    tab.addEventListener("click", () => showPanel(tab.dataset.panel));
+  }
   bindDropzone($("upload-drop"), $("upload-input"), pickFile);
   bindDropzone($("restore-drop"), $("restore-input"), pickRestoreFile);
   $("inspect-btn").addEventListener("click", inspectFile);
   $("detect-btn").addEventListener("click", detect);
   $("clear-btn").addEventListener("click", clearFile);
-  $("preload-retry").addEventListener("click", () => {
-    preloadRuntime().catch((error) => failPreload(error?.message || String(error)));
-  });
-  $("runtime-retry").addEventListener("click", () => {
-    if (!state.bridge) return;
-    state.bridge.restart().catch((error) => {
-      toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
-    });
-  });
+  $("manual-add-btn").addEventListener("click", addManualEntity);
   $("rescan-btn").addEventListener("click", detect);
   $("generate-btn").addEventListener("click", generate);
   $("select-all-btn").addEventListener("click", () => {
@@ -760,60 +941,48 @@ async function boot() {
     renderReview();
   });
   $("download-btn").addEventListener("click", () => {
-    if (!state.generated) return;
-    download(state.generated.bytes, replaceSuffix(state.file?.name, "-redacted"));
+    if (state.generated) download(state.generated.bytes, replaceSuffix(state.file?.name, "-redacted"));
   });
-  $("goto-restore-btn").addEventListener("click", () => showPanel("restore"));
+  $("goto-restore-btn").addEventListener("click", () => showPanel("reidentify"));
   $("restart-btn").addEventListener("click", () => {
     clearFile();
     state.selected = new Set();
     state.types = new Map();
-    showPanel("upload");
   });
-  $("restore-job").addEventListener("change", () => {
-    $("restore-btn").disabled = !$("restore-job").value || !state.restoreFile;
-  });
+  $("history-refresh").addEventListener("click", () => loadJobs());
+  $("job-dict-load").addEventListener("click", loadHistoryDictionary);
   $("restore-btn").addEventListener("click", restore);
   $("restore-download").addEventListener("click", () => {
     if (state.restored) download(state.restored.bytes, state.restored.name);
   });
+  $("dict-search").addEventListener("input", renderDictionary);
+  $("dict-refresh").addEventListener("click", refreshDict);
+  $("dict-add").addEventListener("click", addDictionaryTerm);
   $("cancel-btn").addEventListener("click", () => {
     state.bridge.cancel();
     toast(t("p1.cancelled"), "info");
   });
-  $("generate-dict").addEventListener("change", async (event) => {
-    if (!event.target.checked) return;
-    const rows = [...(state.generated?.checked || [])]
-      .map((name) => state.detection?.items?.find((item) => item.canonical === name))
-      .filter((item) => {
-        if (!item || item.source === "pattern") return false;
-        const known = state.dictByKey.get(String(item.canonical).toLowerCase());
-        return known?.source !== "preset";
-      })
-      .map((item) => ({ canonical: item.canonical, type: state.types.get(item.canonical) || item.type, aliases: [] }));
-    try {
-      const added = await store.mergeUserEntities(rows);
-      await refreshDict();
-      await refreshStorageLine();
-      toast(t("p1.generate.added", { count: added }), "ok");
-    } catch (error) {
-      toast(String(error?.message || error), "error", 0);
-    }
+  $("preload-retry").addEventListener("click", () => {
+    preloadRuntime().catch((error) => failPreload(error?.message || String(error)));
+  });
+  $("runtime-retry").addEventListener("click", () => {
+    state.bridge?.restart().catch((error) => {
+      toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
+    });
   });
   $("lang-select").addEventListener("change", async (event) => {
     await state.i18n.setLang(event.target.value);
     onStatus({ state: state.runtime });
-    // Text built in JS (badges, degradation list, worker warning codes) is not
-    // covered by the data-i18n pass, so re-render it in the new language.
     if (state.file) renderDegradations(state.file);
-    if (state.detection) showWarnings(state.detection.warnings);
-    if (!$("upload-inspect").hidden && state.file) await inspectFile();
+    if (state.detection) {
+      showWarnings(state.detection.warnings);
+      renderPreview(state.detection.previewText, state.detection.items);
+    }
     renderReview();
     renderGenerate();
+    renderHistory();
+    renderDictionary();
     refreshStorageLine().catch(() => {});
-    if (state.restored) {
-      $("restore-summary").textContent = t("p1.restore.ready", { count: state.restored.hits });
-    }
   });
 
   window.addEventListener("beforeinstallprompt", (event) => {
@@ -834,24 +1003,17 @@ async function boot() {
   try {
     await installPresetDictionary();
   } catch (error) {
-    // Detection still works from the user layer while a signed preset update
-    // cannot be installed. The follow-on dictionary UI PR owns the visible
-    // error/retry surface; never fall back to an unverified pack.
     console.warn("Preset dictionary is unavailable:", error);
   }
   await refreshDict();
+  await loadJobs();
   refreshStorageLine().catch(() => {});
-  state.bridge = createBridge({
-    workerUrl: "./worker/pyodide_worker.js",
-    onStatus,
-  });
+  state.bridge = createBridge({ workerUrl: "./worker/pyodide_worker.js", onStatus });
   state.bridge.ready.catch((error) => {
     toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
   });
-
   window.addEventListener("online", hideToast);
+  updateFileButtons();
 }
 
-boot().catch((error) => {
-  toast(String(error?.message || error), "error", 0);
-});
+boot().catch((error) => toast(String(error?.message || error), "error", 0));
