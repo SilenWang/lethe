@@ -111,6 +111,11 @@ def test_file_gates_warn_at_35mb_and_reject_over_50mb(page, built: Path, tmp_pat
     reject = tmp_path / "reject.docx"
     with reject.open("wb") as handle:
         handle.truncate(51 * 1024 * 1024)
+    # A refused pick is skipped, it does not evict what the task already holds,
+    # so clear the task first: the over-limit file is then refused and nothing
+    # is left to run.
+    page.click("#clear-btn")
+    page.wait_for_function("document.querySelector('#detect-btn').disabled === true")
     page.set_input_files("#upload-input", str(reject))
     page.wait_for_function(
         "document.querySelector('#toast').innerText.includes('50')"
@@ -435,22 +440,26 @@ def test_run_warnings_are_cleared_when_the_file_changes(page, built: Path) -> No
     )
     assert "formula" in page.locator("#upload-warnings").text_content().lower()
 
-    # Switching the file must drop the previous run's warning at once.
+    # A task can hold several files. The note follows the file being viewed, so
+    # adding a second file and switching to it must drop the first file's
+    # warning at once — otherwise the new file appears to carry a gap it never
+    # triggered.
     page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
+    page.locator(".task-file-name", has_text="docx-001.docx").click()
     page.wait_for_function(
         "() => { const node = document.querySelector('#upload-warnings');"
         " return node.hidden === true && node.textContent.trim() === ''; }"
     )
     assert page.locator("#upload-warnings").text_content().strip() == ""
 
-    # Clearing the picker must leave nothing behind either. Detection moved to
-    # the review panel, so the upload panel and its buttons are hidden — drive
-    # them through the DOM, which runs the same handlers a click would.
-    page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
-    page.evaluate("document.getElementById('detect-btn').click()")
+    # Switching back restores that file's own warning…
+    page.locator(".task-file-name", has_text="xlsx-001.xlsx").click()
     page.wait_for_function(
         "() => document.querySelector('#upload-warnings').hidden === false"
     )
+    # …and clearing the task must leave nothing behind either. Detection moved
+    # to the review panel, so the upload panel and its buttons are hidden —
+    # drive them through the DOM, which runs the same handlers a click would.
     page.evaluate("document.getElementById('clear-btn').click()")
     page.wait_for_function(
         "() => { const node = document.querySelector('#upload-warnings');"

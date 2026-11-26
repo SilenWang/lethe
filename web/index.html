@@ -64,8 +64,10 @@
           <p data-i18n="p1.upload.drop"></p>
           <p class="hint" data-i18n="p1.upload.formats"></p>
         </div>
-        <input id="upload-input" type="file" accept=".docx,.xlsx,.pptx" hidden />
+        <input id="upload-input" type="file" accept=".docx,.xlsx,.pptx" multiple hidden />
         <p id="upload-file" class="file-line" hidden></p>
+        <div id="task-files" class="task-files" hidden></div>
+        <p id="task-summary" class="meta" hidden></p>
         <p id="upload-note" class="note" hidden></p>
         <details id="upload-degradations" class="note" hidden>
           <summary data-i18n="p1.degradations.title"></summary>
@@ -79,24 +81,39 @@
           <button id="clear-btn" type="button" class="btn btn-ghost" disabled data-i18n="p1.upload.clear"></button>
         </div>
 
-        <div class="manual-row">
-          <label for="manual-entity" data-i18n="p1.manual.label"></label>
-          <input id="manual-entity" type="text" data-i18n-placeholder="p1.manual.placeholder" />
-          <select id="manual-type" data-i18n-aria-label="p1.review.type"></select>
-          <button id="manual-add-btn" type="button" class="btn" disabled data-i18n="p1.manual.add"></button>
+        <div id="dictionary-block" class="card dictionary-block">
+          <div class="section-head">
+            <h3 data-i18n="p1.dictionary.preselected"></h3>
+            <span id="preset-count" class="meta"></span>
+          </div>
+          <p class="hint" data-i18n="p1.dictionary.preselected_hint"></p>
+          <div class="manual-row">
+            <label for="manual-entity" data-i18n="p1.manual.label"></label>
+            <input id="manual-entity" type="text" data-i18n-placeholder="p1.manual.placeholder" />
+            <select id="manual-type" data-i18n-aria-label="p1.review.type"></select>
+            <button id="manual-add-btn" type="button" class="btn" disabled data-i18n="p1.manual.add"></button>
+            <button id="open-dictionary-btn" type="button" class="btn btn-ghost" data-i18n="p1.dictionary.open"></button>
+          </div>
         </div>
 
         <div id="preview-card" class="card preview-card" hidden>
           <div class="section-head">
             <h3 data-i18n="p1.preview.title"></h3>
-            <span id="preview-note" class="meta"></span>
+            <div class="file-switcher">
+              <select id="preview-file" data-i18n-aria-label="p1.preview.file_label"></select>
+              <span id="preview-note" class="meta"></span>
+            </div>
           </div>
           <pre id="document-preview" tabindex="0"></pre>
         </div>
 
         <div id="review-card" class="card review-card" hidden>
-          <h3 data-i18n="p1.review.title"></h3>
+          <div class="section-head">
+            <h3 data-i18n="p1.review.title"></h3>
+            <span id="review-file" class="meta"></span>
+          </div>
           <p class="hint" data-i18n="p1.review.hint"></p>
+          <p id="review-task-note" class="note" hidden></p>
           <div class="review-tools">
             <span id="review-count" class="meta"></span>
             <button id="select-all-btn" type="button" class="btn btn-ghost" data-i18n="p1.review.check_all"></button>
@@ -133,6 +150,10 @@
           <p id="generate-summary" class="result-line"></p>
           <p id="generate-job" class="meta"></p>
           <p id="generate-saved" class="meta"></p>
+          <div class="file-switcher">
+            <select id="result-file" data-i18n-aria-label="p1.generate.file_label"></select>
+            <span id="result-file-status" class="meta"></span>
+          </div>
           <div class="actions">
             <button id="download-btn" type="button" class="btn btn-primary" data-i18n="p1.generate.download"></button>
             <button id="goto-restore-btn" type="button" class="btn" data-i18n="p1.generate.to_restore"></button>
@@ -184,6 +205,18 @@
             </table>
           </div>
           <p id="job-dict-note" class="note" hidden></p>
+        </div>
+
+        <div id="history-files-card" class="card history-card" hidden>
+          <div class="section-head">
+            <h3 data-i18n="p1.history.files_title"></h3>
+            <div class="file-switcher">
+              <select id="history-file" data-i18n-aria-label="p1.history.file_label"></select>
+              <button id="history-download" type="button" class="btn btn-ghost" data-i18n="p1.history.download_file"></button>
+            </div>
+          </div>
+          <p id="history-file-status" class="meta"></p>
+          <pre id="history-preview" class="history-preview"></pre>
         </div>
 
         <div class="field">

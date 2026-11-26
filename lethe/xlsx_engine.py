@@ -714,9 +714,12 @@ def redact(
     entities: list[core.Entity],
     *,
     edit_cells: set[str] | None = None,
+    token_overrides: dict[str, str] | None = None,
 ) -> XlsxResult:
     """Detect across cells + text parts, assign stable tokens, write the package."""
-    items = core.assign_tokens(core.detect(_detection_text(raw), entities))
+    items = core.apply_token_overrides(
+        core.assign_tokens(core.detect(_detection_text(raw), entities)), token_overrides
+    )
     replace, token_to_real = core.build_fast_replacer(items)
     payload = [
         {

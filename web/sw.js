@@ -45,6 +45,7 @@ var SHELL_PATHS = [
   '/ui/i18n.js',
   '/ui/format.js',
   '/ui/store.js',
+  '/ui/task-model.js',
   '/ui/favicon.svg',
   '/static/icons/icon-192.png',
   '/static/icons/icon-512.png',

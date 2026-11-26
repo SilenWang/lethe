@@ -251,6 +251,40 @@ def assign_tokens(items: list[Item]) -> list[Item]:
     return items
 
 
+def apply_token_overrides(
+    items: list[Item], overrides: dict[str, str] | None = None
+) -> list[Item]:
+    """Apply task-wide tokens after per-file detection.
+
+    A multi-file task detects each file separately but needs one mapping for
+    the whole task. The caller assigns tokens across the union of files, then
+    gives every worker run the same type+canonical lookup.
+
+    The key is "TYPE|canonical". An exact hit wins, then a case-folded one, so
+    a caller that folded the value with JavaScript's ``toLowerCase`` (which is
+    not Unicode case folding: "Straße" stays "straße" instead of "strasse")
+    still lands on the token its interface showed the user.
+    """
+    if not overrides:
+        return items
+    exact = {str(key): str(token) for key, token in overrides.items() if token}
+    folded: dict[str, str] = {}
+    for key, token in exact.items():
+        raw_type, _, raw_canonical = key.partition("|")
+        folded.setdefault(f"{raw_type.upper()}|{raw_canonical.casefold()}", token)
+    for item in items:
+        if not item.include:
+            continue
+        token = (
+            exact.get(f"{item.type.upper()}|{item.canonical}")
+            or folded.get(f"{item.type.upper()}|{item.canonical.casefold()}")
+            or ""
+        )
+        if token:
+            item.token = token
+    return items
+
+
 def build_replacer(items: list[Item]):
     """
     Build a single function that redacts text using all included items.

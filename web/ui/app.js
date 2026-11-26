@@ -1,6 +1,11 @@
 // Three independent PWA pages: de-identify, re-identify and entity dictionary.
 // Document work stays in the frozen worker; this module owns presentation and
 // the browser-only history/dictionary layer.
+//
+// One de-identify task owns several files. The worker still processes exactly
+// one file per call, so the task loop lives here: detect every file, allocate
+// one token per real value across the batch, then write each file with the
+// shared overrides. `task-model.js` holds the pure allocation rules.
 import { createBridge } from "../lib/pyodide_bridge.js";
 import { createDictionaryClient } from "../lib/dictionary-client.js";
 import { mergeDictionaryLayers } from "../lib/dictionary-merge.js";
@@ -21,6 +26,16 @@ import {
   sourceKey,
 } from "./format.js";
 import * as store from "./store.js";
+import {
+  assignTaskTokens as allocateTaskTokens,
+  buildJobFiles,
+  fileIdentity,
+  normaliseJobFiles,
+  partitionPicks,
+  taskSummary,
+  tokenKey,
+  writableEntries,
+} from "./task-model.js";
 
 const $ = (id) => document.getElementById(id);
 const state = {
@@ -32,23 +47,28 @@ const state = {
   preload: null,
   gate: null,
   busy: false,
-  file: null,
-  inspection: null,
-  detection: null,
+  files: [],
+  activeFileIndex: 0,
+  taskFileSeq: 0,
+  // Selection and type overrides are task-wide: one real value must be handled
+  // the same way in every file, or the shared token would mean two things.
   selected: new Set(),
   types: new Map(),
+  generated: null,
   manualEntities: [],
   customTypesList: [],
   dictRows: [],
   dictByKey: new Map(),
   disabledEntities: new Set(),
-  generated: null,
   generatedSaved: null,
   restoreFile: null,
   restored: null,
   restoreSummary: null,
   jobs: [],
   selectedJobId: "",
+  jobFiles: [],
+  jobFileIndex: 0,
+  jobOutputIds: new Set(),
   jobMapping: null,
   jobDictNote: null,
   jobDictRequest: 0,
@@ -59,6 +79,17 @@ const state = {
 };
 
 const t = (key, vars) => state.i18n.t(key, vars);
+
+const FILE_STATUS_KEYS = Object.freeze({
+  pending: "p1.files.pending",
+  ready: "p1.files.ready",
+  generated: "p1.files.generated",
+  failed: "p1.files.failed",
+});
+
+function activeFile() {
+  return state.files[state.activeFileIndex] || null;
+}
 
 // ---------------------------------------------------------------- chrome
 
@@ -151,6 +182,17 @@ function setRunning(running) {
 function setPhase(phase) {
   state.phase = phase || "";
   if (phase) $("progress-label").textContent = t(`p1.progress.${phase}`);
+}
+
+function setTaskProgress(index, total, name) {
+  const bar = $("progress-bar");
+  bar.max = Math.max(total, 1);
+  bar.value = index;
+  $("progress-label").textContent = t("p1.progress.file", {
+    index: Math.min(index + 1, total),
+    total,
+    name,
+  });
 }
 
 function onStatus(event, notify = true) {
@@ -364,58 +406,79 @@ function gateFindings(detail) {
 // -------------------------------------------------------- de-identify page
 
 function updateFileButtons() {
-  const hasFile = !!state.file;
+  const hasFiles = state.files.length > 0;
   const ready = !!state.bridge && state.runtime === "ready" && !state.busy;
-  $("inspect-btn").disabled = !hasFile || !ready;
-  $("detect-btn").disabled = !hasFile || !ready;
-  $("clear-btn").disabled = !hasFile;
-  $("manual-add-btn").disabled = !hasFile || !ready;
+  $("inspect-btn").disabled = !hasFiles || !ready;
+  $("detect-btn").disabled = !hasFiles || !ready;
+  $("clear-btn").disabled = !hasFiles;
+  $("manual-add-btn").disabled = !hasFiles || !ready;
 }
 
-function pickFile(file) {
+function makeTaskFile(file, gate) {
+  state.taskFileSeq += 1;
+  return {
+    id: `task-file-${state.taskFileSeq}`,
+    file,
+    inspection: null,
+    detection: null,
+    output: null,
+    status: "pending",
+    error: "",
+    warnings: [],
+    large: gate.level === "warn",
+  };
+}
+
+function pickFiles(fileList) {
   if (state.busy) {
     $("upload-input").value = "";
     return toastKey("p1.error.BUSY", null, "info");
   }
-  if (!isSupported(file)) return toastKey("p1.upload.wrong_type", null, "error");
-  const gate = gateLevel(file.size);
-  if (gate.level === "reject") {
-    clearFile();
-    return toastKey("gate.file_reject", { size_mb: gate.size, max_mb: 50 }, "error", 0);
-  }
-  Object.assign(state, {
-    file,
-    inspection: null,
-    detection: null,
-    generated: null,
-    generatedSaved: null,
-    selected: new Set(),
-    types: new Map(),
-    manualEntities: [],
-    gate,
+  const incoming = [...(fileList || [])];
+  if (!incoming.length) return;
+  const { accepted, rejected, unsupported } = partitionPicks(incoming, {
+    existing: state.files.map((entry) => entry.file),
+    isSupported,
+    gateLevel,
   });
-  showWarnings([]);
-  renderUploadFile();
-  $("upload-inspect").hidden = true;
-  $("preview-card").hidden = true;
-  $("review-card").hidden = true;
-  $("generate-card").hidden = true;
-  renderDegradations(file);
-  updateFileButtons();
+  if (!accepted.length) {
+    $("upload-input").value = "";
+    if (rejected) {
+      return toastKey("gate.file_reject", { size_mb: 50, max_mb: 50 }, "error", 0);
+    }
+    if (unsupported) return toastKey("p1.upload.wrong_type", null, "error");
+    return toastKey("p1.upload.no_new_files", null, "info");
+  }
+  state.generated = null;
+  state.files.push(...accepted.map(({ file, gate }) => makeTaskFile(file, gate)));
+  state.activeFileIndex = state.files.length - accepted.length;
+  if (rejected) toastKey("p1.upload.some_rejected", { count: rejected }, "info", 0);
+  else if (unsupported) {
+    toastKey("p1.upload.some_unsupported", { count: unsupported }, "info", 0);
+  }
+  renderTask();
 }
 
-function clearFile() {
+function removeTaskFile(id) {
   if (state.busy) return;
-  Object.assign(state, {
-    file: null,
-    inspection: null,
-    detection: null,
-    generated: null,
-    generatedSaved: null,
-    manualEntities: [],
-    gate: null,
-  });
+  const index = state.files.findIndex((entry) => entry.id === id);
+  if (index < 0) return;
+  state.files.splice(index, 1);
+  state.activeFileIndex = Math.min(state.activeFileIndex, Math.max(0, state.files.length - 1));
+  state.generated = null;
+  renderTask();
+}
+
+function clearTask() {
+  if (state.busy) return;
+  state.files = [];
+  state.activeFileIndex = 0;
+  state.manualEntities = [];
+  state.generated = null;
+  state.selected = new Set();
+  state.types = new Map();
   $("upload-file").hidden = true;
+  $("task-files").hidden = true;
   $("upload-note").hidden = true;
   $("upload-degradations").hidden = true;
   $("degradation-list").textContent = "";
@@ -427,25 +490,131 @@ function clearFile() {
   $("manual-entity").value = "";
   $("upload-input").value = "";
   showWarnings([]);
+  renderTaskFileList();
+  renderTaskSummary();
   updateFileButtons();
 }
 
-// The picked file's line and its over-35-MB notice are repainted on a language
-// switch, so both are derived from `state.file` / `state.gate` rather than
-// written once and left in the previous language.
-function renderUploadFile() {
-  const file = state.file;
-  if (!file) return;
-  $("upload-file").hidden = false;
-  $("upload-file").textContent = t("p1.upload.selected", {
-    name: file.name,
-    size: humanSize(file.size),
+function renderTaskFileList() {
+  const host = $("task-files");
+  host.textContent = "";
+  host.hidden = state.files.length === 0;
+  for (const [index, entry] of state.files.entries()) {
+    const chip = document.createElement("span");
+    chip.className = `task-file${index === state.activeFileIndex ? " is-active" : ""}`;
+    if (entry.status === "failed") chip.classList.add("is-failed");
+    const label = document.createElement("button");
+    label.type = "button";
+    label.className = "task-file-name";
+    label.textContent = entry.file.name;
+    label.addEventListener("click", () => selectTaskFile(index));
+    chip.appendChild(label);
+    const badge = document.createElement("span");
+    badge.className = "task-file-state";
+    badge.textContent = t(FILE_STATUS_KEYS[entry.status] || "p1.files.pending");
+    if (entry.status === "failed" && entry.error) badge.title = entry.error;
+    chip.appendChild(badge);
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "task-file-remove";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", t("p1.files.remove", { name: entry.file.name }));
+    remove.addEventListener("click", () => removeTaskFile(entry.id));
+    chip.appendChild(remove);
+    host.appendChild(chip);
+  }
+}
+
+function renderTaskSummary() {
+  const node = $("task-summary");
+  if (!node) return;
+  if (state.files.length <= 1) {
+    node.textContent = "";
+    node.hidden = true;
+    return;
+  }
+  const counts = taskSummary(state.files);
+  node.hidden = false;
+  node.textContent = t("p1.files.summary", {
+    files: counts.files,
+    pending: counts.pending,
+    failed: counts.failed,
   });
-  const gate = state.gate;
-  $("upload-note").hidden = gate?.level !== "warn";
-  if (gate?.level === "warn") {
-    $("upload-note").textContent =
-      `${t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 })} ${t("p1.upload.large_note")}`;
+}
+
+function selectTaskFile(index) {
+  if (!state.files.length) {
+    state.activeFileIndex = 0;
+  } else {
+    state.activeFileIndex = Math.max(0, Math.min(Number(index) || 0, state.files.length - 1));
+  }
+  renderTask();
+}
+
+function renderTask() {
+  const entry = activeFile();
+  renderTaskFileList();
+  renderTaskSummary();
+  if (!entry) {
+    clearTask();
+    return;
+  }
+  $("upload-file").hidden = false;
+  $("upload-file").textContent = t("p1.upload.selected_count", {
+    count: state.files.length,
+    name: entry.file.name,
+    size: humanSize(entry.file.size),
+  });
+  // The large-file note names the file that actually crossed the warn line, so
+  // switching to a small file never shows another file's warning.
+  const largeEntry = state.files.find((row) => row.large);
+  $("upload-note").hidden = !largeEntry;
+  if (largeEntry) {
+    const gate = gateLevel(largeEntry.file.size);
+    $("upload-note").textContent = t("gate.file_warn", {
+      size_mb: gate.size,
+      warn_mb: 35,
+    }) + " " + t("p1.upload.large_note");
+  }
+  renderDegradations(entry.file);
+  showWarnings(entry.detection?.warnings || entry.warnings || []);
+  if (entry.error) {
+    $("upload-inspect").hidden = false;
+    $("upload-inspect").textContent = t("p1.files.failed_reason", { error: entry.error });
+  } else if (entry.inspection) {
+    renderInspection(entry.file, entry.inspection);
+  } else {
+    $("upload-inspect").hidden = true;
+  }
+  renderPreview();
+  renderReview();
+  $("review-card").hidden = !entry.detection;
+  renderGenerate();
+  updateFileButtons();
+  updateFileSwitchers();
+}
+
+function updateFileSwitchers() {
+  for (const [id, handler] of [
+    ["preview-file", (index) => selectTaskFile(index)],
+    ["result-file", (index) => {
+      state.activeFileIndex = Math.max(0, Math.min(index, state.files.length - 1));
+      renderTask();
+    }],
+  ]) {
+    const select = $(id);
+    if (!select) continue;
+    const previous = Number(select.value);
+    select.textContent = "";
+    for (const [index, entry] of state.files.entries()) {
+      const option = document.createElement("option");
+      option.value = String(index);
+      option.textContent = entry.file.name;
+      select.appendChild(option);
+    }
+    select.value = String(Math.min(state.activeFileIndex, Math.max(0, state.files.length - 1)));
+    if (previous !== Number(select.value)) select.dataset.synced = "true";
+    select.onchange = () => handler(Number(select.value));
   }
 }
 
@@ -487,7 +656,7 @@ function showWarnings(warnings) {
   $("upload-warnings").textContent = notes.join(" · ");
 }
 
-function bindDropzone(zone, input, onFile) {
+function bindDropzone(zone, input, onFiles, { multiple = false } = {}) {
   zone.addEventListener("click", () => input.click());
   zone.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -507,24 +676,20 @@ function bindDropzone(zone, input, onFile) {
     });
   }
   zone.addEventListener("drop", (event) => {
-    const file = event.dataTransfer?.files?.[0];
-    if (file) onFile(file);
+    const files = [...(event.dataTransfer?.files || [])];
+    if (!files.length) return;
+    onFiles(multiple ? files : files.slice(0, 1));
   });
   input.addEventListener("change", () => {
-    const file = input.files?.[0];
-    if (file) onFile(file);
+    const files = [...(input.files || [])];
+    if (files.length) onFiles(multiple ? files : files.slice(0, 1));
   });
-}
-
-function showInspection(result, file) {
-  state.inspection = result;
-  renderInspection(file);
 }
 
 // The "package checked" line is part of the visible upload state, so it is
-// rebuilt from `state.inspection` when the interface language changes.
-function renderInspection(file = state.file) {
-  const result = state.inspection;
+// rebuilt from the active file's own inspection on a language switch rather
+// than written once and left in the previous language.
+function renderInspection(file = activeFile()?.file, result = activeFile()?.inspection) {
   const line = $("upload-inspect");
   if (!result || !file) {
     line.hidden = true;
@@ -542,15 +707,14 @@ function renderInspection(file = state.file) {
   })}`;
 }
 
-async function inspectFile() {
-  const sourceFile = state.file;
-  if (!sourceFile) return toastKey("p1.upload.need_file", null, "error");
+async function inspectActive() {
+  const entry = activeFile();
+  if (!entry) return toastKey("p1.upload.need_file", null, "error");
   try {
-    const inspection = await runOp({ op: "inspect", file: sourceFile });
-    if (sourceFile !== state.file) return;
-    state.inspection = inspection;
-    showInspection(inspection, sourceFile);
-    renderPreview(inspection.previewText || "", []);
+    const inspection = await runOp({ op: "inspect", file: entry.file });
+    if (entry !== activeFile()) return;
+    entry.inspection = inspection;
+    renderTask();
   } catch (error) {
     reportError(error);
   }
@@ -578,9 +742,17 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function renderPreview(text, items) {
+// `text`/`truncated` default to the active file so a language switch can redraw
+// the panel without threading arguments through every caller.
+function renderPreview(text, items, truncated) {
+  const entry = activeFile();
   const card = $("preview-card");
   const output = $("document-preview");
+  if (text === undefined) {
+    text = entry?.detection?.previewText || entry?.inspection?.previewText || "";
+    items = entry?.detection?.items || [];
+    truncated = entry?.detection?.previewTruncated || entry?.inspection?.previewTruncated;
+  }
   if (!text) {
     card.hidden = false;
     output.textContent = t("p1.preview.empty");
@@ -589,7 +761,7 @@ function renderPreview(text, items) {
   }
   card.hidden = false;
   const surfaces = [];
-  for (const item of items) {
+  for (const item of items || []) {
     for (const surface of item.surfaces || [item.canonical]) {
       if (surface) surfaces.push(String(surface));
     }
@@ -609,44 +781,95 @@ function renderPreview(text, items) {
     }
     output.innerHTML = html + escapeHtml(text.slice(at));
   }
-  $("preview-note").textContent = state.detection?.previewTruncated || state.inspection?.previewTruncated
-    ? t("p1.preview.note")
-    : "";
+  $("preview-note").textContent = truncated ? t("p1.preview.note") : "";
 }
 
-async function detect() {
-  const sourceFile = state.file;
-  if (!sourceFile) return toastKey("p1.upload.need_file", null, "error");
+/**
+ * Detect every file in the task, then allocate one token per real value across
+ * the batch. A file that fails is recorded with its error and skipped; the
+ * rest still get a detection, which is what makes "some files failed" a
+ * usable outcome rather than an all-or-nothing abort.
+ */
+async function detectTask() {
+  if (!state.files.length) return toastKey("p1.upload.need_file", null, "error");
+  const entities = entitiesForDetection();
+  const target = [...state.files];
   try {
     await runBusy(async () => {
-      const inspection = await runWorker({ op: "inspect", file: sourceFile });
-      showInspection(inspection, sourceFile);
-      const result = await runWorker({
-        op: "redact",
-        file: sourceFile,
-        options: { entities: entitiesForDetection() },
-      });
-      if (sourceFile !== state.file) return;
-      const manual = new Set(state.manualEntities.map((row) => row.canonical.toLowerCase()));
-      const items = (result.items || []).map((item) =>
-        manual.has(item.canonical.toLowerCase()) ? { ...item, source: "manual" } : item);
-      state.detection = {
-        file: sourceFile,
-        items,
-        bytes: result.bytes || null,
-        hits: result.hits || 0,
-        warnings: result.warnings || [],
-        previewText: inspection.previewText || "",
-        previewTruncated: !!inspection.previewTruncated,
-      };
-      state.selected = new Set(items.map((item) => item.canonical));
-      state.types = new Map(items.map((item) => [item.canonical, item.type]));
-      showWarnings(result.warnings || []);
-      state.inspection = inspection;
-      renderPreview(state.detection.previewText, items);
-      renderReview();
-      $("review-card").hidden = false;
-      toastKey("p1.review.selected", { count: state.selected.size, total: items.length }, "info", 3000);
+      let ok = 0;
+      for (const [index, entry] of target.entries()) {
+        setTaskProgress(index, target.length, entry.file.name);
+        entry.detection = null;
+        entry.detectedTokens = null;
+        entry.output = null;
+        entry.error = "";
+        entry.warnings = [];
+        entry.status = "pending";
+        try {
+          const inspection = await runWorker({ op: "inspect", file: entry.file });
+          const result = await runWorker({
+            op: "redact",
+            file: entry.file,
+            options: { entities },
+          });
+          const items = (result.items || []).map((item) => ({
+            ...item,
+            include: item.include !== false,
+          }));
+          entry.inspection = inspection;
+          entry.detection = {
+            items,
+            bytes: result.bytes || null,
+            hits: result.hits || 0,
+            warnings: result.warnings || [],
+            previewText: inspection.previewText || "",
+            previewTruncated: !!inspection.previewTruncated,
+          };
+          // The numbering these bytes actually carry. Task-wide tokens replace
+          // it on every item below, so this is the only record of what was
+          // written and the sole way to tell a reusable detection from one
+          // that must be rewritten with the shared mapping.
+          entry.detectedTokens = Object.fromEntries(
+            items.filter((item) => item.token).map((item) => [item.canonical, item.token]),
+          );
+          entry.warnings = result.warnings || [];
+          entry.status = "ready";
+          ok += 1;
+        } catch (error) {
+          entry.status = "failed";
+          entry.error = error?.message || String(error);
+          if (state.files.length === 1) reportError(error);
+        }
+      }
+      // One mapping for the whole batch, applied to every file's items.
+      state.selected = new Set();
+      state.types = new Map();
+      for (const entry of state.files) {
+        for (const item of entry.detection?.items || []) {
+          state.selected.add(item.canonical);
+          state.types.set(item.canonical, item.type);
+        }
+      }
+      allocateTaskTokens(state.files);
+      state.generated = null;
+      state.activeFileIndex = Math.min(state.activeFileIndex, Math.max(0, state.files.length - 1));
+      renderTask();
+      if (!ok) {
+        toastKey("p1.detect.all_failed", { files: target.length }, "error", 0);
+        return;
+      }
+      const failed = target.length - ok;
+      if (failed) {
+        toastKey("p1.detect.partial", { failed, files: target.length }, "info", 0);
+      }
+      else {
+        toastKey(
+          "p1.review.selected",
+          { count: state.selected.size, total: state.selected.size },
+          "info",
+          3000,
+        );
+      }
     });
   } catch (error) {
     reportError(error);
@@ -662,14 +885,40 @@ function addManualEntity() {
     state.manualEntities.push({ canonical: value, type, aliases: [], source: "manual" });
   }
   $("manual-entity").value = "";
-  detect().catch(reportError);
+  // Re-detecting the whole batch keeps the tokens consistent after a new term.
+  detectTask().catch(reportError);
+}
+
+/** The task-wide entities to hand the worker, honouring the ticked rows. */
+function chosenEntities() {
+  const rows = new Map();
+  for (const entry of state.files) {
+    for (const item of entry.detection?.items || []) {
+      if (!state.selected.has(item.canonical)) continue;
+      const type = state.types.get(item.canonical) || item.type;
+      const key = `${String(type).toUpperCase()}|${item.canonical.toLowerCase()}`;
+      if (rows.has(key)) continue;
+      rows.set(key, {
+        canonical: item.canonical,
+        type,
+        aliases: state.dictByKey.get(item.canonical.toLowerCase())?.aliases || [],
+      });
+    }
+  }
+  return [...rows.values()];
 }
 
 function renderReview() {
   const rows = $("review-rows");
   rows.textContent = "";
-  const items = state.detection?.items || [];
+  const entry = activeFile();
+  const items = entry?.detection?.items || [];
   $("review-empty").hidden = items.length > 0;
+  if ($("review-file")) {
+    $("review-file").textContent = entry
+      ? t("p1.review.file", { name: entry.file.name, files: state.files.length })
+      : "";
+  }
   for (const item of items) {
     const tr = document.createElement("tr");
     const checkCell = document.createElement("td");
@@ -681,7 +930,7 @@ function renderReview() {
     check.addEventListener("change", () => {
       if (check.checked) state.selected.add(item.canonical);
       else state.selected.delete(item.canonical);
-      renderReviewCount();
+      renderTask();
     });
     checkCell.appendChild(check);
     tr.appendChild(checkCell);
@@ -701,7 +950,11 @@ function renderReview() {
       type.appendChild(option);
     }
     type.value = state.types.get(item.canonical) || item.type;
-    type.addEventListener("change", () => state.types.set(item.canonical, type.value));
+    type.addEventListener("change", () => {
+      state.types.set(item.canonical, type.value);
+      allocateTaskTokens(state.files);
+      renderTask();
+    });
     typeCell.appendChild(type);
     tr.appendChild(typeCell);
 
@@ -726,8 +979,16 @@ function renderReview() {
 }
 
 function renderReviewCount() {
-  const total = state.detection?.items?.length || 0;
-  $("review-count").textContent = t("p1.review.selected", { count: state.selected.size, total });
+  const total = (activeFile()?.detection?.items || []).length;
+  const chosen = (activeFile()?.detection?.items || [])
+    .filter((item) => state.selected.has(item.canonical)).length;
+  $("review-count").textContent = t("p1.review.selected", { count: chosen, total });
+  if ($("review-task-note")) {
+    $("review-task-note").hidden = state.files.length <= 1;
+    $("review-task-note").textContent = state.files.length > 1
+      ? t("p1.review.task_hint", { files: state.files.length })
+      : "";
+  }
 }
 
 async function saveSelectedNames(items) {
@@ -745,64 +1006,144 @@ async function saveSelectedNames(items) {
   await refreshStorageLine();
 }
 
-async function generate() {
-  const detection = state.detection;
-  const sourceFile = detection?.file;
-  const all = state.detection?.items || [];
-  if (!sourceFile) return toastKey("p1.upload.need_file", null, "error");
-  const chosen = all.filter((item) => state.selected.has(item.canonical));
-  if (!chosen.length) return toastKey("p1.review.none_selected", null, "error");
-  const typeChanged = all.some((item) => state.types.get(item.canonical) !== item.type);
-  const entities = chosen.map((item) => ({
-    canonical: item.canonical,
-    type: state.types.get(item.canonical) || item.type,
-    aliases: state.dictByKey.get(item.canonical.toLowerCase())?.aliases || [],
-  }));
+/**
+ * True when the bytes from detection can be delivered unchanged.
+ *
+ * Detection writes each file with its own per-file numbering, because the
+ * task-wide allocation only exists once every file has been detected. Those
+ * bytes are therefore only reusable when that numbering already matches the
+ * task-wide one — the single-file case, or a batch whose files happened to
+ * detect in the same order. Otherwise the file is rewritten with the shared
+ * overrides, because shipping per-file tokens under a task-wide mapping would
+ * make re-identification restore the wrong value.
+ *
+ * `detectedTokens` holds the numbering those bytes actually carry; `item.token`
+ * has already been overwritten with the task-wide token by then.
+ */
+function detectionIsCurrent(entry, overrides) {
+  if (!entry.detection?.bytes) return false;
+  const items = entry.detection.items || [];
+  if (!items.length) return false;
+  return items.every((item) => {
+    if (item.include === false) return true;
+    if (!state.selected.has(item.canonical)) return false;
+    if ((state.types.get(item.canonical) || item.type) !== item.type) return false;
+    // No record of what these bytes carry means no safe reuse: fall back to
+    // rewriting rather than trusting `item.token`, which is already the
+    // task-wide token and would agree with itself by construction.
+    const written = entry.detectedTokens?.[item.canonical];
+    return !!written && written === overrides[tokenKey(item.type, item.canonical)];
+  });
+}
+
+/**
+ * Write every writable file with the shared token overrides, then store one
+ * job for the task. Each file keeps its own output bytes, hits and name, so
+ * switching files never mixes previews, matches or counts.
+ */
+async function generateTask() {
+  const entries = writableEntries(state.files);
+  if (!entries.length) return toastKey("p1.upload.need_file", null, "error");
+  const entities = chosenEntities();
+  if (!entities.length) return toastKey("p1.review.none_selected", null, "error");
+  const { overrides, allocations } = allocateTaskTokens(state.files);
+  const jobId = `job-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-` +
+    Math.random().toString(36).slice(2, 6);
   try {
-    let result;
-    if (!typeChanged && chosen.length === all.length && state.detection.bytes) {
-      result = state.detection;
-    } else {
-      result = await runOp({ op: "redact", file: sourceFile, options: { entities } });
-    }
-    const items = result.items || [];
+    await runBusy(async () => {
+      for (const [index, entry] of entries.entries()) {
+        setTaskProgress(index, entries.length, entry.file.name);
+        if (detectionIsCurrent(entry, overrides)) {
+          entry.output = {
+            name: replaceSuffix(entry.file.name, "-redacted"),
+            bytes: entry.detection.bytes,
+            hits: entry.detection.hits || 0,
+            reused: true,
+          };
+        } else {
+          const result = await runWorker({
+            op: "redact",
+            file: entry.file,
+            options: { entities, token_overrides: overrides },
+          });
+          entry.output = {
+            name: replaceSuffix(entry.file.name, "-redacted"),
+            bytes: result.bytes,
+            hits: result.hits || 0,
+            reused: false,
+          };
+          entry.detection = {
+            ...(entry.detection || {}),
+            items: result.items || entry.detection?.items || [],
+            bytes: result.bytes || null,
+            hits: result.hits || 0,
+            warnings: result.warnings || entry.detection?.warnings || [],
+          };
+          // These bytes now carry the task-wide numbering, so that is what a
+          // later reuse check must compare against.
+          entry.detectedTokens = Object.fromEntries(
+            (result.items || []).filter((item) => item.token)
+              .map((item) => [item.canonical, item.token]),
+          );
+        }
+        entry.status = "generated";
+      }
+      state.generated = {
+        jobId,
+        files: entries.length,
+        hits: entries.reduce((total, entry) => total + (entry.output?.hits || 0), 0),
+        // One token per distinct entity, not per override key: the same entity
+        // spelled two ways in two files shares one token and two keys.
+        tokens: allocations.filter((row) => state.selected.has(row.canonical)).length,
+      };
+      renderTask();
+      $("generate-card").hidden = false;
+    });
     const mapping = {};
-    for (const item of items) if (item.token) mapping[item.token] = item.canonical;
-    const jobId = `job-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-` +
-      Math.random().toString(36).slice(2, 6);
-    state.generated = {
-      bytes: result.bytes,
-      hits: result.hits || 0,
-      tokens: items.filter((item) => item.token).length,
-      jobId,
-      name: replaceSuffix(sourceFile.name, "-redacted"),
-      checked: new Set(chosen.map((item) => item.canonical)),
-    };
-    renderGenerate();
-    if (result.bytes?.byteLength > RECYCLE_BYTES) {
-      toastKey("p1.upload.large_note", null, "info", 0);
+    for (const entry of entries) {
+      for (const item of entry.detection?.items || []) {
+        if (item.token && state.selected.has(item.canonical)) mapping[item.token] = item.canonical;
+      }
     }
-    $("generate-card").hidden = false;
-    await persistJob(jobId, mapping, sourceFile);
-    if ($("save-names").checked) await saveSelectedNames(chosen);
+    await persistJob(jobId, mapping);
+    if ($("save-names").checked) await saveSelectedNames(entities);
     $("generate-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     reportError(error);
   }
 }
 
-async function persistJob(jobId, mapping, sourceFile) {
+async function persistJob(jobId, mapping) {
+  const node = $("generate-saved");
+  const entries = writableEntries(state.files);
   try {
     await store.saveJob({
       jobId,
       createdAt: new Date().toISOString(),
       mapping,
-      sourceFiles: [sourceFile.name],
+      sourceFiles: entries.map((entry) => entry.file.name),
+      files: buildJobFiles(state.files),
       replacements: state.generated?.hits || 0,
       passphrase: "",
     });
     state.storageOk = true;
     state.generatedSaved = { key: "p1.generate.saved", vars: null };
+    node.textContent = t("p1.generate.saved");
+    try {
+      await store.saveOutput({
+        jobId,
+        createdAt: new Date().toISOString(),
+        files: entries
+          .filter((entry) => entry.output?.bytes)
+          .map((entry) => ({
+            name: entry.output.name,
+            type: mimeFor(entry.output.name),
+            b64: bytesToBase64(entry.output.bytes),
+          })),
+      });
+    } catch (error) {
+      console.warn("Result files were not kept in this browser:", error);
+    }
     await loadJobs();
   } catch (error) {
     state.generatedSaved = storeErrorSpec(error, "p1.generate.unsaved");
@@ -819,15 +1160,38 @@ function paintGeneratedSaved() {
   node.textContent = spec ? t(spec.key, spec.vars) : "";
 }
 
+function bytesToBase64(bytes) {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let index = 0; index < view.length; index += chunk) {
+    binary += String.fromCharCode(...view.subarray(index, index + chunk));
+  }
+  return btoa(binary);
+}
+
 function renderGenerate() {
   const out = state.generated;
-  if (!out) return;
+  if (!out) {
+    $("generate-card").hidden = true;
+    return;
+  }
+  $("generate-card").hidden = false;
   $("generate-summary").textContent = t("p1.generate.ready", {
     count: out.hits,
     tokens: out.tokens,
+    files: out.files,
   });
   $("generate-job").textContent = `${t("p1.generate.job")}: ${out.jobId}`;
-  paintGeneratedSaved();
+  const entry = activeFile();
+  const status = $("result-file-status");
+  if (status) {
+    status.textContent = entry?.output
+      ? t("p1.generate.file_status", { name: entry.file.name, count: entry.output.hits })
+      : t("p1.files.pending");
+  }
+  const download = $("download-btn");
+  if (download) download.disabled = !entry?.output?.bytes;
 }
 
 function download(bytes, name) {
@@ -841,6 +1205,27 @@ function download(bytes, name) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+async function downloadActiveResult() {
+  const entry = activeFile();
+  if (!entry?.output?.bytes) return toastKey("p1.generate.no_result", null, "error");
+  download(entry.output.bytes, entry.output.name);
+}
+
+async function downloadActiveResultAgain() {
+  const jobId = state.selectedJobId;
+  const file = state.jobFiles[state.jobFileIndex];
+  if (!file) return toastKey("p1.history.no_file", null, "error");
+  if (file.status === "failed") return toastKey("p1.history.no_output", null, "error");
+  try {
+    // A multi-file job stores one result per file, so ask for that file's
+    // result by name. A legacy job stored the task's single output under the
+    // original name and has no per-file record, so pass no name and take it.
+    await store.downloadOutput(jobId, file.output || "");
+  } catch (error) {
+    toastBuild(() => storeErrorText(error, "p1.history.no_output"), "error", 0);
+  }
+}
+
 // --------------------------------------------------------- re-identify page
 
 async function loadJobs() {
@@ -850,6 +1235,8 @@ async function loadJobs() {
     state.restoreRequest += 1;
     state.selectedJobId = "";
     state.jobMapping = null;
+    state.jobFiles = [];
+    state.jobFileIndex = 0;
     state.restored = null;
     $("restore-result").hidden = true;
   }
@@ -862,6 +1249,7 @@ function renderHistory() {
   const body = $("history-rows");
   body.textContent = "";
   for (const job of state.jobs) {
+    const files = normaliseJobFiles(job);
     const tr = document.createElement("tr");
     tr.classList.toggle("is-selected", job.jobId === state.selectedJobId);
     const selectCell = document.createElement("td");
@@ -874,9 +1262,12 @@ function renderHistory() {
     radio.addEventListener("change", () => selectJob(job));
     selectCell.appendChild(radio);
     tr.appendChild(selectCell);
+    const names = files.length <= 1
+      ? (files[0]?.name || "—")
+      : t("p1.history.file_count", { count: files.length, name: files[0]?.name || "" });
     for (const value of [
       (job.createdAt || "").replace("T", " ").slice(0, 16) || "—",
-      (job.sourceFiles || []).join(", ") || "—",
+      names,
       String(job.replacements || 0),
       job.jobId,
     ]) {
@@ -888,6 +1279,7 @@ function renderHistory() {
   }
   renderSelectedJob();
   updateRestoreButton();
+  updateRestoreFileCard();
 }
 
 function renderSelectedJob() {
@@ -896,11 +1288,73 @@ function renderSelectedJob() {
     : t("p1.history.none");
 }
 
+function updateRestoreFileCard() {
+  const card = $("history-files-card");
+  if (!card) return;
+  card.hidden = !state.selectedJobId || state.jobFiles.length === 0;
+  const select = $("history-file");
+  if (!select) return;
+  select.textContent = "";
+  for (const [index, file] of state.jobFiles.entries()) {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = file.name;
+    select.appendChild(option);
+  }
+  state.jobFileIndex = Math.min(state.jobFileIndex, Math.max(0, state.jobFiles.length - 1));
+  select.value = String(state.jobFileIndex);
+  select.onchange = () => {
+    state.jobFileIndex = Number(select.value) || 0;
+    renderHistoryFile();
+  };
+  renderHistoryFile();
+}
+
+function renderHistoryFile() {
+  const file = state.jobFiles[state.jobFileIndex];
+  const status = $("history-file-status");
+  const preview = $("history-preview");
+  const download = $("history-download");
+  if (!file) {
+    if (status) status.textContent = "";
+    if (preview) preview.textContent = "";
+    if (download) download.disabled = true;
+    return;
+  }
+  if (preview) preview.textContent = "";
+  if (status) {
+    const notes = [file.name];
+    if (typeof file.hits === "number") {
+      notes.push(t("p1.history.file_hits", { count: file.hits }));
+    } else {
+      notes.push(t("p1.history.legacy_hits"));
+    }
+    if (file.status === "failed") notes.push(t("p1.files.failed"));
+    status.textContent = notes.join(" · ");
+  }
+  if (preview) {
+    // The readable record for this file. Result bytes live in IndexedDB and
+    // previewing them would mean re-parsing a stored document, so the panel
+    // reports what happened to the file and the download button fetches the
+    // result itself.
+    const lines = [t("p1.history.file_status", { status: FILE_STATUS_KEYS[file.status] ? t(FILE_STATUS_KEYS[file.status]) : file.status })];
+    if (file.output) lines.push(t("p1.history.file_output", { name: file.output }));
+    if (file.error) lines.push(t("p1.files.failed_reason", { error: file.error }));
+    preview.textContent = lines.join("\n");
+  }
+  if (download) {
+    download.disabled = !state.jobOutputIds?.has(state.selectedJobId) || file.status === "failed";
+    download.title = download.disabled ? t("p1.history.no_output") : "";
+  }
+}
+
 async function selectJob(job) {
   state.jobDictRequest += 1;
   state.restoreRequest += 1;
   state.selectedJobId = job.jobId;
   state.jobMapping = null;
+  state.jobFiles = normaliseJobFiles(job);
+  state.jobFileIndex = 0;
   state.restored = null;
   state.restoreSummary = null;
   state.jobDictNote = null;
@@ -912,6 +1366,19 @@ async function selectJob(job) {
     return;
   }
   await loadHistoryDictionary(job.jobId);
+  await loadJobOutputs(job.jobId);
+}
+
+async function loadJobOutputs(jobId) {
+  if (!store.storeAvailable()) return;
+  try {
+    const stats = await store.outputStats();
+    state.jobOutputIds = new Set(stats.jobIds || []);
+  } catch {
+    state.jobOutputIds = new Set();
+  }
+  if (jobId !== state.selectedJobId) return;
+  renderHistoryFile();
 }
 
 // The note under the job dictionary is kept as a key + values so a language
@@ -1089,6 +1556,10 @@ function renderDictionary() {
     body.appendChild(tr);
   }
   $("dict-count").textContent = t("p1.dictionary.count", { count: rows.length });
+  if ($("preset-count")) {
+    const preset = state.dictRows.filter((row) => row.source === "preset").length;
+    $("preset-count").textContent = t("p1.dictionary.preset_count", { count: preset });
+  }
 }
 
 async function addDictionaryTerm() {
@@ -1142,18 +1613,15 @@ function repaint() {
   else $("runtime-badge").textContent = t("p1.runtime.initializing");
   if (state.phase) $("progress-label").textContent = t(`p1.progress.${state.phase}`);
   if (state.preload) paintPreload();
-  if (state.file) {
-    renderUploadFile();
-    renderDegradations(state.file);
-    renderInspection(state.file);
+  // Everything on the upload/preview/review/generate panes belongs to one file,
+  // so a language switch redraws them from the file that is active right now —
+  // the one the user is looking at — and never from another file in the task.
+  if (activeFile()) {
+    renderTask();
+  } else {
+    renderTaskFileList();
+    renderTaskSummary();
   }
-  if (state.detection) {
-    showWarnings(state.detection.warnings);
-    renderPreview(state.detection.previewText, state.detection.items);
-  } else if (state.inspection) {
-    renderPreview(state.inspection.previewText || "", []);
-  }
-  if (state.detection) renderReview();
   renderGenerate();
   renderHistory();
   paintJobDictionaryNote();
@@ -1176,33 +1644,38 @@ async function boot() {
   for (const tab of document.querySelectorAll(".step")) {
     tab.addEventListener("click", () => showPanel(tab.dataset.panel));
   }
-  bindDropzone($("upload-drop"), $("upload-input"), pickFile);
-  bindDropzone($("restore-drop"), $("restore-input"), pickRestoreFile);
-  $("inspect-btn").addEventListener("click", inspectFile);
-  $("detect-btn").addEventListener("click", detect);
-  $("clear-btn").addEventListener("click", clearFile);
+  bindDropzone($("upload-drop"), $("upload-input"), pickFiles, { multiple: true });
+  bindDropzone($("restore-drop"), $("restore-input"), (files) => pickRestoreFile(files[0]));
+  $("inspect-btn").addEventListener("click", inspectActive);
+  $("detect-btn").addEventListener("click", detectTask);
+  $("clear-btn").addEventListener("click", clearTask);
   $("manual-add-btn").addEventListener("click", addManualEntity);
-  $("rescan-btn").addEventListener("click", detect);
-  $("generate-btn").addEventListener("click", generate);
+  $("open-dictionary-btn").addEventListener("click", () => showPanel("dictionary"));
+  $("rescan-btn").addEventListener("click", detectTask);
+  $("generate-btn").addEventListener("click", generateTask);
   $("select-all-btn").addEventListener("click", () => {
-    state.selected = new Set((state.detection?.items || []).map((item) => item.canonical));
-    renderReview();
+    // Selection is task-wide, so these act on every file in the batch — ticking
+    // them must not leave the other files' matches unselected and silently
+    // unredacted.
+    for (const entry of state.files) {
+      for (const item of entry.detection?.items || []) state.selected.add(item.canonical);
+    }
+    renderTask();
   });
   $("select-none-btn").addEventListener("click", () => {
-    state.selected = new Set();
-    renderReview();
+    for (const entry of state.files) {
+      for (const item of entry.detection?.items || []) state.selected.delete(item.canonical);
+    }
+    renderTask();
   });
-  $("download-btn").addEventListener("click", () => {
-    if (state.generated) download(state.generated.bytes, state.generated.name);
-  });
+  $("download-btn").addEventListener("click", downloadActiveResult);
   $("goto-restore-btn").addEventListener("click", () => showPanel("reidentify"));
   $("restart-btn").addEventListener("click", () => {
-    clearFile();
-    state.selected = new Set();
-    state.types = new Map();
+    clearTask();
   });
   $("history-refresh").addEventListener("click", () => loadJobs());
   $("job-dict-load").addEventListener("click", () => loadHistoryDictionary());
+  $("history-download").addEventListener("click", downloadActiveResultAgain);
   $("restore-btn").addEventListener("click", restore);
   $("restore-download").addEventListener("click", () => {
     const restored = state.restored;
