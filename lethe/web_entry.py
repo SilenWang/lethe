@@ -16,6 +16,7 @@ from pathlib import Path
 from lethe import core, docx_engine, gates, postprocess, pptx_engine, xlsx_engine
 
 PROTOCOL = 1
+PREVIEW_MAX_CHARS = 250_000
 
 
 def _ok(**payload: object) -> str:
@@ -68,11 +69,24 @@ def _inspect(path: str, file_name: str) -> str:
             parts = [name for name in archive.namelist() if not name.endswith("/")]
     except zipfile.BadZipFile as exc:
         return _err("PARSE_FAILED", str(exc), {"file": file_name})
+    raw = Path(path).read_bytes()
+    lower = file_name.lower()
+    if lower.endswith(".pptx"):
+        text_parts = pptx_engine.extract_all_text_parts(raw)
+    elif lower.endswith(".xlsx"):
+        text_parts = xlsx_engine.extract_all_text_parts(raw)
+    else:
+        text_parts = docx_engine.extract_all_text_parts(raw)
+    preview = "\n\n".join(
+        f"[{name}]\n{text}" for name, text in text_parts.items() if text.strip()
+    )
     return _ok(
         protocol=PROTOCOL,
         parts=len(parts),
         status=report.status,
         warnings=[finding.render() for finding in report.warnings()],
+        preview_text=preview[:PREVIEW_MAX_CHARS],
+        preview_truncated=len(preview) > PREVIEW_MAX_CHARS,
     )
 
 

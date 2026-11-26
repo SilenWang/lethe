@@ -42,6 +42,9 @@ export async function createI18n() {
     for (const node of root.querySelectorAll("[data-i18n]")) {
       node.textContent = t(node.dataset.i18n);
     }
+    for (const node of root.querySelectorAll("[data-i18n-placeholder]")) {
+      node.placeholder = t(node.dataset.i18nPlaceholder);
+    }
     document.documentElement.lang = lang;
     const select = document.getElementById("lang-select");
     if (select) select.value = lang;

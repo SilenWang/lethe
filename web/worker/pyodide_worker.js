@@ -142,6 +142,8 @@ except OSError:
       paragraphs: 0,
       status: gated.status,
       warnings: gated.warnings,
+      previewText: gated.preview_text || "",
+      previewTruncated: !!gated.preview_truncated,
       docxWasm: docxWasmReady,
       heapBytes: heapBytes(),
     };
@@ -168,6 +170,8 @@ except OSError:
     paragraphs,
     status: gated.status,
     warnings: gated.warnings,
+    previewText: gated.preview_text || "",
+    previewTruncated: !!gated.preview_truncated,
     docxWasm: true,
     heapBytes: heapBytes(),
   };

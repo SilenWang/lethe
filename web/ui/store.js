@@ -59,3 +59,28 @@ export async function listJobs() {
     return [];
   }
 }
+
+const DISABLED_ENTITIES_KEY = "lethe.disabled-entities.v1";
+
+export function getDisabledEntities() {
+  try {
+    const rows = JSON.parse(localStorage.getItem(DISABLED_ENTITIES_KEY) || "[]");
+    return new Set(Array.isArray(rows) ? rows.map((row) => String(row).toLowerCase()) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function setEntityDefault(canonical, enabled) {
+  const key = String(canonical || "").trim().toLowerCase();
+  if (!key) return getDisabledEntities();
+  const disabled = getDisabledEntities();
+  if (enabled) disabled.delete(key);
+  else disabled.add(key);
+  try {
+    localStorage.setItem(DISABLED_ENTITIES_KEY, JSON.stringify([...disabled].sort()));
+  } catch {
+    // The switch still applies for this session even when storage is blocked.
+  }
+  return disabled;
+}
