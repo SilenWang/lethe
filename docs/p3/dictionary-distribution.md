@@ -6,7 +6,7 @@ user-owned IndexedDB layer and its read-time merge are documented in
 
 ## Release artifact
 
-`pixi run dictionary-build` reads `dictionary/entities.jsonl` and writes:
+`pixi run dictionary-build` reads `dictionary/entities.yaml` and writes:
 
 ```text
 web/dictionary/
@@ -25,6 +25,22 @@ The checked-in bootstrap pack verifies the distribution contract. Before the
 first curated production dictionary is published, provision the release private
 key in the repository's secret store, rotate the public trust anchor in the same
 reviewed change, and rebuild the signed artifact.
+
+The YAML source uses schema version 1 and a single `entities` list. Each entry
+requires `canonical` and `type`; `aliases`, `shard` and `tier` are optional.
+The loader rejects malformed YAML, missing or unknown fields, invalid shard ids
+or tiers, duplicate canonical values, and empty source files. See
+`dictionary/README.md` for the editing workflow and
+`dictionary/entities.example.yaml` for a minimal synthetic example. The
+checked-in bootstrap values are synthetic and must not be replaced in this
+public repository with real customer or counterparty data.
+
+The former source was UTF-8 JSONL with one plain-text JSON object per line; it
+was not base64-encoded or encrypted. To migrate another `entities.jsonl`, map
+each line one-to-one into `entities`, convert its `aliases` JSON array to a
+YAML list, and retain the existing `canonical`, `type`, `shard` and `tier`
+values. The shipped pack does not change format: it remains signed gzip JSONL
+shards.
 
 The manifest names each shard, its versioned download path, gzip byte length,
 SHA-256 and entity count. Shards are JSONL containing only

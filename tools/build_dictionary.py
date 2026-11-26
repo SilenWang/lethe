@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -31,17 +32,19 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_SOURCE = REPO / "dictionary" / "entities.jsonl"
+DEFAULT_SOURCE = REPO / "dictionary" / "entities.yaml"
 DEFAULT_OUT = REPO / "web" / "dictionary"
 DEFAULT_PUBLIC_KEY = REPO / "dictionary" / "public-key.pem"
 CONFIG = REPO / "web" / "lib" / "dictionary-config.js"
 
 MANIFEST_SCHEMA = "lethe-dictionary-manifest"
 MANIFEST_SCHEMA_VERSION = 1
+SOURCE_SCHEMA_VERSION = 1
 VERSION_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}\.\d+$")
 SHARD_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 CORE_LIMIT = 150 * 1024
 TOTAL_LIMIT = 8 * 1024 * 1024
+ENTITY_KEYS = {"canonical", "type", "aliases", "shard", "tier"}
 
 
 class DictionaryError(ValueError):
@@ -120,31 +123,48 @@ def _write_config_public_key(raw: bytes, config_path: Path = CONFIG) -> None:
     config_path.write_text(source, encoding="utf-8")
 
 
-def _normalise_entity(row: Any, line_no: int) -> dict[str, Any]:
+def _normalise_entity(row: Any, location: str) -> dict[str, Any]:
     if not isinstance(row, dict):
-        raise DictionaryError(f"line {line_no}: expected a JSON object")
-    canonical = str(row.get("canonical") or "").strip()
+        raise DictionaryError(f"{location}: expected a YAML mapping")
+    unknown = sorted(str(field) for field in set(row) - ENTITY_KEYS)
+    if unknown:
+        raise DictionaryError(f"{location}: unknown field(s): {', '.join(unknown)}")
+    canonical_value = row.get("canonical")
+    if not isinstance(canonical_value, str):
+        raise DictionaryError(f"{location}: canonical must be a non-empty string")
+    canonical = canonical_value.strip()
     if not canonical:
-        raise DictionaryError(f"line {line_no}: canonical is required")
-    entity_type = str(row.get("type") or "").strip().upper()
+        raise DictionaryError(f"{location}: canonical must be a non-empty string")
+    type_value = row.get("type")
+    if not isinstance(type_value, str):
+        raise DictionaryError(f"{location}: type must be a non-empty string")
+    entity_type = type_value.strip().upper()
     if not entity_type:
-        raise DictionaryError(f"line {line_no}: type is required")
+        raise DictionaryError(f"{location}: type must be a non-empty string")
     aliases = row.get("aliases") or []
     if not isinstance(aliases, list):
-        raise DictionaryError(f"line {line_no}: aliases must be an array")
+        raise DictionaryError(f"{location}: aliases must be a list")
     clean_aliases: list[str] = []
     seen = {canonical.casefold()}
     for alias in aliases:
-        value = str(alias).strip()
+        if not isinstance(alias, str):
+            raise DictionaryError(f"{location}: aliases must contain only strings")
+        value = alias.strip()
         if value and value.casefold() not in seen:
             clean_aliases.append(value)
             seen.add(value.casefold())
-    shard = str(row.get("shard") or "full").strip()
+    shard_value = row.get("shard", "full")
+    if not isinstance(shard_value, str):
+        raise DictionaryError(f"{location}: shard must be a string")
+    shard = shard_value.strip()
     if not SHARD_RE.fullmatch(shard):
-        raise DictionaryError(f"line {line_no}: invalid shard id {shard!r}")
-    tier = str(row.get("tier") or "full").strip()
+        raise DictionaryError(f"{location}: invalid shard id {shard!r}")
+    tier_value = row.get("tier", "full")
+    if not isinstance(tier_value, str):
+        raise DictionaryError(f"{location}: tier must be core or full")
+    tier = tier_value.strip()
     if tier not in {"core", "full"}:
-        raise DictionaryError(f"line {line_no}: tier must be core or full")
+        raise DictionaryError(f"{location}: tier must be core or full")
     return {
         "canonical": canonical,
         "type": entity_type,
@@ -156,26 +176,44 @@ def _normalise_entity(row: Any, line_no: int) -> dict[str, Any]:
 
 def _load_entities(path: Path) -> list[dict[str, Any]]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        source = path.read_text(encoding="utf-8")
     except OSError as exc:
-        raise DictionaryError(f"cannot read source {path}: {exc}") from exc
+        raise DictionaryError(f"cannot read glossary source {path}: {exc}") from exc
+    try:
+        document = yaml.safe_load(source)
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        location = ""
+        if mark is not None:
+            location = f" at line {mark.line + 1}, column {mark.column + 1}"
+        problem = getattr(exc, "problem", None) or str(exc)
+        raise DictionaryError(f"invalid YAML in {path}{location}: {problem}") from exc
+    if not isinstance(document, dict):
+        raise DictionaryError(f"{path}: top level must be a YAML mapping")
+    unknown = sorted(str(field) for field in set(document) - {"schemaVersion", "entities"})
+    if unknown:
+        raise DictionaryError(f"{path}: unknown top-level field(s): {', '.join(unknown)}")
+    version = document.get("schemaVersion")
+    if type(version) is not int or version != SOURCE_SCHEMA_VERSION:
+        raise DictionaryError(
+            f"{path}: schemaVersion must be {SOURCE_SCHEMA_VERSION}"
+        )
+    raw_entities = document.get("entities")
+    if not isinstance(raw_entities, list):
+        raise DictionaryError(f"{path}: entities must be a list")
+    if not raw_entities:
+        raise DictionaryError(f"{path}: entities must contain at least one entry")
     entities: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for line_no, line in enumerate(lines, 1):
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        try:
-            raw = json.loads(line)
-        except ValueError as exc:
-            raise DictionaryError(f"line {line_no}: invalid JSON: {exc}") from exc
-        row = _normalise_entity(raw, line_no)
+    for index, raw in enumerate(raw_entities):
+        row = _normalise_entity(raw, f"{path}: entities[{index}]")
         key = row["canonical"].casefold()
         if key in seen:
-            raise DictionaryError(f"line {line_no}: duplicate canonical {row['canonical']!r}")
+            raise DictionaryError(
+                f"{path}: entities[{index}]: duplicate canonical {row['canonical']!r}"
+            )
         seen.add(key)
         entities.append(row)
-    if not entities:
-        raise DictionaryError(f"source {path} contains no entities")
     return entities
 
 

@@ -1,0 +1,46 @@
+# Editable source for the signed preset dictionary. See README.md in this
+# directory before adding production values.
+schemaVersion: 1
+entities:
+  - canonical: Acme Capital Partners
+    type: COUNTERPARTY
+    aliases:
+      - ACP
+    shard: counterparties
+    tier: core
+  - canonical: Meridian Holdings Pte Ltd
+    type: COUNTERPARTY
+    aliases:
+      - Meridian
+    shard: counterparties
+    tier: full
+  - canonical: Riverstone Energy
+    type: COUNTERPARTY
+    aliases:
+      - Riverstone
+    shard: counterparties
+    tier: full
+  - canonical: John Smith
+    type: PERSON
+    shard: people
+    tier: core
+  - canonical: Jane Doe
+    type: PERSON
+    aliases:
+      - J. Smith
+    shard: people
+    tier: full
+  - canonical: Alice Chen
+    type: PERSON
+    shard: people
+    tier: full
+  - canonical: 张宏伟
+    type: PERSON
+    shard: people-zh
+    tier: full
+  - canonical: 上海华信资本管理有限公司
+    type: COUNTERPARTY
+    aliases:
+      - 华信资本
+    shard: counterparties-zh
+    tier: full
