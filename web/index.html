@@ -6,9 +6,10 @@
     <meta name="theme-color" content="#6a4690" />
     <meta
       name="description"
+      data-i18n-content="p1.meta.description"
       content="Local, reversible document de-identification. Documents are processed in this browser and never uploaded."
     />
-    <title>Lethe — Document De-identifier</title>
+    <title data-i18n="p1.doc_title">Lethe — Document De-identifier</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" type="image/svg+xml" href="./ui/favicon.svg" />
     <link rel="stylesheet" href="./ui/app.css" />
@@ -23,7 +24,7 @@
         <span id="runtime-badge" class="badge badge-wait" data-i18n="p1.runtime.initializing"></span>
         <label class="lang-picker">
           <span data-i18n="p1.lang"></span>
-          <select id="lang-select" aria-label="Language">
+          <select id="lang-select" data-i18n-aria-label="p1.lang">
             <option value="en">English</option>
             <option value="zh">中文</option>
           </select>
@@ -39,7 +40,7 @@
       <button id="runtime-retry" type="button" class="btn btn-ghost" hidden data-i18n="p1.runtime.retry"></button>
     </div>
 
-    <nav class="steps" role="tablist" aria-label="Workflow">
+    <nav class="steps" role="tablist" data-i18n-aria-label="p1.workflow">
       <button id="tab-deidentify" role="tab" type="button" data-panel="deidentify" aria-selected="true"
               aria-controls="panel-deidentify" class="step is-active">
         <span data-i18n="p1.page.deidentify"></span>
@@ -81,7 +82,7 @@
         <div class="manual-row">
           <label for="manual-entity" data-i18n="p1.manual.label"></label>
           <input id="manual-entity" type="text" data-i18n-placeholder="p1.manual.placeholder" />
-          <select id="manual-type" aria-label="Type"></select>
+          <select id="manual-type" data-i18n-aria-label="p1.review.type"></select>
           <button id="manual-add-btn" type="button" class="btn" disabled data-i18n="p1.manual.add"></button>
         </div>
 
@@ -215,7 +216,7 @@
         <div class="manual-row">
           <label for="dict-name" data-i18n="p1.dictionary.term"></label>
           <input id="dict-name" type="text" />
-          <select id="dict-type" aria-label="Type"></select>
+          <select id="dict-type" data-i18n-aria-label="p1.review.type"></select>
           <button id="dict-add" type="button" class="btn btn-primary" data-i18n="p1.manual.add"></button>
         </div>
         <div class="table-wrap">

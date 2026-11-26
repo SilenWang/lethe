@@ -38,12 +38,27 @@ export async function createI18n() {
     );
   }
 
+  // Attributes carry user-visible copy too: the tab title, the meta
+  // description, and the accessible names of the language picker, the tablist
+  // and the type selects. Each one is declared with its own data attribute so
+  // a language switch rewrites it in place instead of leaving English behind.
+  const ATTRIBUTES = [
+    ["data-i18n-aria-label", "aria-label"],
+    ["data-i18n-title", "title"],
+    ["data-i18n-content", "content"],
+  ];
+
   function apply(root = document) {
     for (const node of root.querySelectorAll("[data-i18n]")) {
       node.textContent = t(node.dataset.i18n);
     }
     for (const node of root.querySelectorAll("[data-i18n-placeholder]")) {
       node.placeholder = t(node.dataset.i18nPlaceholder);
+    }
+    for (const [dataAttribute, attribute] of ATTRIBUTES) {
+      for (const node of root.querySelectorAll(`[${dataAttribute}]`)) {
+        node.setAttribute(attribute, t(node.getAttribute(dataAttribute)));
+      }
     }
     document.documentElement.lang = lang;
     const select = document.getElementById("lang-select");

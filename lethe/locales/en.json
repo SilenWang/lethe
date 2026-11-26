@@ -441,5 +441,15 @@
   "p1.storage.line": "{entities} entit(ies) · {jobs} job(s) stored in this browser",
   "p1.storage.unavailable": "Browser storage is unavailable — you can still process a file, but the reversal key will not be saved.",
   "p1.offline.ready": "Offline ready — the app shell and runtimes are cached on this machine.",
-  "p1.privacy": "Documents, tokens and results never leave this browser."
+  "p1.privacy": "Documents, tokens and results never leave this browser.",
+  "p1.doc_title": "Lethe — Document De-identifier",
+  "p1.meta.description": "Local, reversible document de-identification. Documents are processed in this browser and never uploaded.",
+  "p1.workflow": "Workflow",
+  "p1.restore.failed": "Could not restore this document: {error}",
+  "p1.restore.wrong_passphrase": "Wrong passphrase, or this conversion's reversal key is corrupted.",
+  "p1.restore.result_gone": "This result file is no longer stored in this browser (it was cleared, or it passed the retention limit).",
+  "p1.history.job_missing": "That conversion is no longer in this browser.",
+  "p1.history.not_protected": "This conversion is not passphrase-protected; leave the passphrase blank.",
+  "p1.history.cant_load": "Could not load this conversion's dictionary: {error}",
+  "p1.dictionary.cant_save": "Could not save the term in this browser: {error}"
 }
