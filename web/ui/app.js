@@ -45,6 +45,7 @@ const state = {
   selectedJobId: "",
   jobMapping: null,
   jobDictRequest: 0,
+  restoreRequest: 0,
   storageOk: false,
   installEvent: null,
   dictionary: null,
@@ -701,8 +702,11 @@ async function loadJobs() {
   state.jobs = await store.listJobs();
   if (state.selectedJobId && !state.jobs.some((job) => job.jobId === state.selectedJobId)) {
     state.jobDictRequest += 1;
+    state.restoreRequest += 1;
     state.selectedJobId = "";
     state.jobMapping = null;
+    state.restored = null;
+    $("restore-result").hidden = true;
   }
   renderHistory();
   $("restore-no-jobs").hidden = state.jobs.length > 0;
@@ -749,8 +753,11 @@ function renderSelectedJob() {
 
 async function selectJob(job) {
   state.jobDictRequest += 1;
+  state.restoreRequest += 1;
   state.selectedJobId = job.jobId;
   state.jobMapping = null;
+  state.restored = null;
+  $("restore-result").hidden = true;
   $("job-dict-rows").textContent = "";
   renderHistory();
   if (job.passphraseProtected && !$("restore-passphrase").value) {
@@ -811,6 +818,7 @@ function pickRestoreFile(file) {
     return toast(t("gate.file_reject", { size_mb: gate.size, max_mb: 50 }), "error", 0);
   }
   state.restoreFile = file;
+  state.restoreRequest += 1;
   state.restored = null;
   $("restore-result").hidden = true;
   $("restore-file").hidden = false;
@@ -822,23 +830,34 @@ function pickRestoreFile(file) {
 }
 
 async function restore() {
-  if (!state.selectedJobId) return toast(t("p1.restore.need_job"), "error");
-  if (!state.restoreFile) return toast(t("p1.restore.need_file"), "error");
+  const jobId = state.selectedJobId;
+  const file = state.restoreFile;
+  const passphrase = $("restore-passphrase").value;
+  const request = ++state.restoreRequest;
+  if (!jobId) return toast(t("p1.restore.need_job"), "error");
+  if (!file) return toast(t("p1.restore.need_file"), "error");
+  const stillCurrent = () =>
+    request === state.restoreRequest && jobId === state.selectedJobId && file === state.restoreFile;
   try {
-    const tokenMap = await store.getMapping(state.selectedJobId, $("restore-passphrase").value);
+    const tokenMap = await store.getMapping(jobId, passphrase);
+    if (!stillCurrent()) return;
     const result = await runOp({
       op: "restore",
-      file: state.restoreFile,
+      file,
       options: { token_map: tokenMap },
     });
+    if (!stillCurrent()) return;
     state.restored = {
       bytes: result.bytes,
       hits: result.hits || 0,
-      name: replaceSuffix(state.restoreFile.name, "-restored"),
+      name: replaceSuffix(file.name, "-restored"),
+      jobId,
+      request,
     };
     $("restore-summary").textContent = t("p1.restore.ready", { count: state.restored.hits });
     $("restore-result").hidden = false;
   } catch (error) {
+    if (!stillCurrent()) return;
     if (error?.code) reportError(error);
     else toast(String(error?.message || error), "error", 0);
   }
@@ -993,7 +1012,11 @@ async function boot() {
   $("job-dict-load").addEventListener("click", () => loadHistoryDictionary());
   $("restore-btn").addEventListener("click", restore);
   $("restore-download").addEventListener("click", () => {
-    if (state.restored) download(state.restored.bytes, state.restored.name);
+    const restored = state.restored;
+    if (restored && restored.request === state.restoreRequest &&
+        restored.jobId === state.selectedJobId) {
+      download(restored.bytes, restored.name);
+    }
   });
   $("dict-search").addEventListener("input", renderDictionary);
   $("dict-refresh").addEventListener("click", refreshDict);

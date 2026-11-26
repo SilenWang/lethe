@@ -538,6 +538,138 @@ def test_detection_snapshot_cannot_cross_files_and_generate_state_survives_tabs(
     assert redacted_info.value.suggested_filename == "docx-001-redacted.docx"
 
 
+def _seed_restore_jobs(page) -> None:
+    page.evaluate(
+        """async () => {
+            await window.lethStore.saveJob({
+                jobId: 'job-a',
+                createdAt: '2026-11-25T10:00:00Z',
+                sourceFiles: ['a.docx'],
+                replacements: 1,
+                mapping: {'[PERSON_001]': 'Alpha From A'},
+                passphrase: ''
+            });
+            await window.lethStore.saveJob({
+                jobId: 'job-b',
+                createdAt: '2026-11-25T11:00:00Z',
+                sourceFiles: ['b.docx'],
+                replacements: 1,
+                mapping: {'[PERSON_001]': 'Beta From B'},
+                passphrase: ''
+            });
+        }"""
+    )
+
+
+def _open_restore_jobs(page) -> None:
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.click(".step[data-panel='reidentify']")
+    page.wait_for_function("document.querySelectorAll('#history-rows tr').length === 2")
+
+
+def _token_reply(tmp_path: Path) -> Path:
+    from docx import Document
+
+    path = tmp_path / "restore-race.docx"
+    document = Document()
+    document.add_paragraph("Reply for [PERSON_001].")
+    document.save(path)
+    return path
+
+
+def test_restore_discards_old_job_success_after_switching(page, tmp_path: Path) -> None:
+    """A slow successful job-a map cannot produce a result for selected job-b."""
+    _seed_restore_jobs(page)
+    _open_restore_jobs(page)
+    token_doc = _token_reply(tmp_path)
+
+    page.locator("input[value='job-a']").check()
+    page.wait_for_function(
+        "document.querySelector('#job-dict-rows').innerText.includes('Alpha From A')"
+    )
+    page.set_input_files("#restore-input", str(token_doc))
+    page.evaluate(
+        """() => {
+            const original = window.lethStore.getMapping.bind(window.lethStore);
+            window.lethStore.getMapping = async (jobId, passphrase) => {
+                if (jobId === 'job-a') {
+                    window.__slowRestoreStarted = true;
+                    await new Promise((resolve) => setTimeout(resolve, 750));
+                    const value = await original(jobId, passphrase);
+                    window.__slowRestoreFinished = true;
+                    return value;
+                }
+                return original(jobId, passphrase);
+            };
+        }"""
+    )
+
+    page.evaluate("document.getElementById('restore-btn').click()")
+    page.wait_for_function("window.__slowRestoreStarted === true")
+    page.locator("input[value='job-b']").check()
+    page.wait_for_function("window.__slowRestoreFinished === true")
+    page.wait_for_timeout(50)
+    page.wait_for_function("!document.querySelector('#restore-btn').disabled")
+    assert "job-b" in page.locator("#selected-job").inner_text()
+    assert page.locator("#restore-result").is_hidden()
+
+    page.click("#restore-btn")
+    page.wait_for_selector("#restore-result:not([hidden])")
+    with page.expect_download() as restored_info:
+        page.click("#restore-download")
+    restored_path = tmp_path / "restore-race-success.docx"
+    restored_info.value.save_as(str(restored_path))
+    from docx import Document
+
+    text = "\n".join(paragraph.text for paragraph in Document(restored_path).paragraphs)
+    assert "Beta From B" in text
+    assert "Alpha From A" not in text
+
+
+def test_restore_discards_old_job_failure_after_switching(page, tmp_path: Path) -> None:
+    """A delayed job-a failure cannot show an error under selected job-b."""
+    _seed_restore_jobs(page)
+    _open_restore_jobs(page)
+    token_doc = _token_reply(tmp_path)
+
+    page.locator("input[value='job-a']").check()
+    page.wait_for_function(
+        "document.querySelector('#job-dict-rows').innerText.includes('Alpha From A')"
+    )
+    page.set_input_files("#restore-input", str(token_doc))
+    page.evaluate(
+        """() => {
+            const original = window.lethStore.getMapping.bind(window.lethStore);
+            window.lethStore.getMapping = async (jobId, passphrase) => {
+                if (jobId === 'job-a') {
+                    window.__slowFailureStarted = true;
+                    try {
+                        await new Promise((resolve) => setTimeout(resolve, 750));
+                        throw new Error('STALE JOB-A FAILURE');
+                    } finally {
+                        window.__slowFailureFinished = true;
+                    }
+                }
+                return original(jobId, passphrase);
+            };
+        }"""
+    )
+
+    page.evaluate("document.getElementById('restore-btn').click()")
+    page.wait_for_function("window.__slowFailureStarted === true")
+    page.locator("input[value='job-b']").check()
+    page.wait_for_function("window.__slowFailureFinished === true")
+    page.wait_for_timeout(50)
+    page.wait_for_function("!document.querySelector('#restore-btn').disabled")
+    assert "job-b" in page.locator("#selected-job").inner_text()
+    assert page.locator("#restore-result").is_hidden()
+    assert "STALE JOB-A FAILURE" not in page.locator("#toast").text_content()
+
+
 def test_history_mapping_races_are_discarded_by_job_id(page) -> None:
     """A slow older mapping must not overwrite the later selected job."""
     page.evaluate(
