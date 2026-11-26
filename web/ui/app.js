@@ -44,6 +44,7 @@ const state = {
   jobs: [],
   selectedJobId: "",
   jobMapping: null,
+  jobDictRequest: 0,
   storageOk: false,
   installEvent: null,
   dictionary: null,
@@ -86,7 +87,7 @@ function setRunning(running) {
   $("cancel-btn").hidden = !running;
   for (const id of [
     "inspect-btn", "detect-btn", "rescan-btn", "generate-btn", "restore-btn",
-    "manual-add-btn", "dict-add", "job-dict-load",
+    "manual-add-btn", "dict-add", "job-dict-load", "clear-btn",
   ]) {
     const button = $(id);
     if (button) button.disabled = running;
@@ -98,6 +99,10 @@ function setRunning(running) {
     updateFileButtons();
     updateRestoreButton();
   }
+  $("upload-input").disabled = running;
+  $("restore-input").disabled = running;
+  $("upload-drop").setAttribute("aria-disabled", String(running));
+  $("restore-drop").setAttribute("aria-disabled", String(running));
 }
 
 function setPhase(phase) {
@@ -198,31 +203,39 @@ async function installPresetDictionary() {
 
 // ------------------------------------------------------------- worker runs
 
-async function runOp({ op, file, options = {} }) {
+async function runWorker({ op, file, options = {} }) {
+  return state.bridge.run({
+    op,
+    bytes: new Uint8Array(await file.arrayBuffer()),
+    fileName: file.name,
+    options,
+    onProgress: ({ phase, done, total }) => {
+      setPhase(phase);
+      const bar = $("progress-bar");
+      if (typeof done === "number" && typeof total === "number" && total > 0) {
+        bar.max = total;
+        bar.value = done;
+      } else {
+        bar.removeAttribute("value");
+      }
+    },
+  });
+}
+
+async function runBusy(task) {
   if (state.busy) throw Object.assign(new Error("busy"), { code: "BUSY" });
   setRunning(true);
   setPhase("init");
   try {
-    return await state.bridge.run({
-      op,
-      bytes: new Uint8Array(await file.arrayBuffer()),
-      fileName: file.name,
-      options,
-      onProgress: ({ phase, done, total }) => {
-        setPhase(phase);
-        const bar = $("progress-bar");
-        if (typeof done === "number" && typeof total === "number" && total > 0) {
-          bar.max = total;
-          bar.value = done;
-        } else {
-          bar.removeAttribute("value");
-        }
-      },
-    });
+    return await task();
   } finally {
     setRunning(false);
     $("progress-bar").removeAttribute("value");
   }
+}
+
+async function runOp(args) {
+  return runBusy(() => runWorker(args));
 }
 
 function reportError(error) {
@@ -258,6 +271,10 @@ function updateFileButtons() {
 }
 
 function pickFile(file) {
+  if (state.busy) {
+    $("upload-input").value = "";
+    return toast(t("p1.error.BUSY"), "info");
+  }
   if (!isSupported(file)) return toast(t("p1.upload.wrong_type"), "error");
   const gate = gateLevel(file.size);
   if (gate.level === "reject") {
@@ -290,6 +307,7 @@ function pickFile(file) {
 }
 
 function clearFile() {
+  if (state.busy) return;
   Object.assign(state, {
     file: null,
     inspection: null,
@@ -379,10 +397,10 @@ function bindDropzone(zone, input, onFile) {
   });
 }
 
-function showInspection(result) {
-  const partsKey = isXlsx(state.file)
+function showInspection(result, file) {
+  const partsKey = isXlsx(file)
     ? "p1.upload.parts_xlsx"
-    : isPptx(state.file)
+    : isPptx(file)
       ? "p1.upload.parts_pptx"
       : "p1.upload.parts";
   $("upload-inspect").hidden = false;
@@ -391,11 +409,14 @@ function showInspection(result) {
 }
 
 async function inspectFile() {
-  if (!state.file) return toast(t("p1.upload.need_file"), "error");
+  const sourceFile = state.file;
+  if (!sourceFile) return toast(t("p1.upload.need_file"), "error");
   try {
-    state.inspection = await runOp({ op: "inspect", file: state.file });
-    showInspection(state.inspection);
-    renderPreview(state.inspection.previewText || "", []);
+    const inspection = await runOp({ op: "inspect", file: sourceFile });
+    if (sourceFile !== state.file) return;
+    state.inspection = inspection;
+    showInspection(inspection, sourceFile);
+    renderPreview(inspection.previewText || "", []);
   } catch (error) {
     reportError(error);
   }
@@ -460,34 +481,39 @@ function renderPreview(text, items) {
 }
 
 async function detect() {
-  if (!state.file) return toast(t("p1.upload.need_file"), "error");
+  const sourceFile = state.file;
+  if (!sourceFile) return toast(t("p1.upload.need_file"), "error");
   try {
-    const inspection = await runOp({ op: "inspect", file: state.file });
-    state.inspection = inspection;
-    showInspection(inspection);
-    const result = await runOp({
-      op: "redact",
-      file: state.file,
-      options: { entities: entitiesForDetection() },
+    await runBusy(async () => {
+      const inspection = await runWorker({ op: "inspect", file: sourceFile });
+      showInspection(inspection, sourceFile);
+      const result = await runWorker({
+        op: "redact",
+        file: sourceFile,
+        options: { entities: entitiesForDetection() },
+      });
+      if (sourceFile !== state.file) return;
+      const manual = new Set(state.manualEntities.map((row) => row.canonical.toLowerCase()));
+      const items = (result.items || []).map((item) =>
+        manual.has(item.canonical.toLowerCase()) ? { ...item, source: "manual" } : item);
+      state.detection = {
+        file: sourceFile,
+        items,
+        bytes: result.bytes || null,
+        hits: result.hits || 0,
+        warnings: result.warnings || [],
+        previewText: inspection.previewText || "",
+        previewTruncated: !!inspection.previewTruncated,
+      };
+      state.selected = new Set(items.map((item) => item.canonical));
+      state.types = new Map(items.map((item) => [item.canonical, item.type]));
+      showWarnings(result.warnings || []);
+      state.inspection = inspection;
+      renderPreview(state.detection.previewText, items);
+      renderReview();
+      $("review-card").hidden = false;
+      toast(t("p1.review.selected", { count: state.selected.size, total: items.length }), "info", 3000);
     });
-    const manual = new Set(state.manualEntities.map((row) => row.canonical.toLowerCase()));
-    const items = (result.items || []).map((item) =>
-      manual.has(item.canonical.toLowerCase()) ? { ...item, source: "manual" } : item);
-    state.detection = {
-      items,
-      bytes: result.bytes || null,
-      hits: result.hits || 0,
-      warnings: result.warnings || [],
-      previewText: inspection.previewText || "",
-      previewTruncated: !!inspection.previewTruncated,
-    };
-    state.selected = new Set(items.map((item) => item.canonical));
-    state.types = new Map(items.map((item) => [item.canonical, item.type]));
-    showWarnings(result.warnings || []);
-    renderPreview(state.detection.previewText, items);
-    renderReview();
-    $("review-card").hidden = false;
-    toast(t("p1.review.selected", { count: state.selected.size, total: items.length }), "info", 3000);
   } catch (error) {
     reportError(error);
   }
@@ -586,7 +612,10 @@ async function saveSelectedNames(items) {
 }
 
 async function generate() {
+  const detection = state.detection;
+  const sourceFile = detection?.file;
   const all = state.detection?.items || [];
+  if (!sourceFile) return toast(t("p1.upload.need_file"), "error");
   const chosen = all.filter((item) => state.selected.has(item.canonical));
   if (!chosen.length) return toast(t("p1.review.none_selected"), "error");
   const typeChanged = all.some((item) => state.types.get(item.canonical) !== item.type);
@@ -600,7 +629,7 @@ async function generate() {
     if (!typeChanged && chosen.length === all.length && state.detection.bytes) {
       result = state.detection;
     } else {
-      result = await runOp({ op: "redact", file: state.file, options: { entities } });
+      result = await runOp({ op: "redact", file: sourceFile, options: { entities } });
     }
     const items = result.items || [];
     const mapping = {};
@@ -612,11 +641,12 @@ async function generate() {
       hits: result.hits || 0,
       tokens: items.filter((item) => item.token).length,
       jobId,
+      name: replaceSuffix(sourceFile.name, "-redacted"),
       checked: new Set(chosen.map((item) => item.canonical)),
     };
     renderGenerate();
     $("generate-card").hidden = false;
-    await persistJob(jobId, mapping);
+    await persistJob(jobId, mapping, sourceFile);
     if ($("save-names").checked) await saveSelectedNames(chosen);
     $("generate-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
@@ -624,14 +654,14 @@ async function generate() {
   }
 }
 
-async function persistJob(jobId, mapping) {
+async function persistJob(jobId, mapping, sourceFile) {
   const node = $("generate-saved");
   try {
     await store.saveJob({
       jobId,
       createdAt: new Date().toISOString(),
       mapping,
-      sourceFiles: [state.file?.name || "document.docx"],
+      sourceFiles: [sourceFile.name],
       replacements: state.generated?.hits || 0,
       passphrase: "",
     });
@@ -670,6 +700,7 @@ function download(bytes, name) {
 async function loadJobs() {
   state.jobs = await store.listJobs();
   if (state.selectedJobId && !state.jobs.some((job) => job.jobId === state.selectedJobId)) {
+    state.jobDictRequest += 1;
     state.selectedJobId = "";
     state.jobMapping = null;
   }
@@ -717,6 +748,7 @@ function renderSelectedJob() {
 }
 
 async function selectJob(job) {
+  state.jobDictRequest += 1;
   state.selectedJobId = job.jobId;
   state.jobMapping = null;
   $("job-dict-rows").textContent = "";
@@ -725,7 +757,7 @@ async function selectJob(job) {
     showJobDictionaryNote(t("p1.history.passphrase_required"));
     return;
   }
-  await loadHistoryDictionary();
+  await loadHistoryDictionary(job.jobId);
 }
 
 function showJobDictionaryNote(message) {
@@ -734,11 +766,14 @@ function showJobDictionaryNote(message) {
   note.textContent = message || "";
 }
 
-async function loadHistoryDictionary() {
-  const job = state.jobs.find((row) => row.jobId === state.selectedJobId);
+async function loadHistoryDictionary(jobId = state.selectedJobId) {
+  const request = ++state.jobDictRequest;
+  const job = state.jobs.find((row) => row.jobId === jobId);
   if (!job) return;
   try {
-    state.jobMapping = await store.getMapping(job.jobId, $("restore-passphrase").value);
+    const mapping = await store.getMapping(job.jobId, $("restore-passphrase").value);
+    if (request !== state.jobDictRequest || jobId !== state.selectedJobId) return;
+    state.jobMapping = mapping;
     const body = $("job-dict-rows");
     body.textContent = "";
     const entries = Object.entries(state.jobMapping || {}).sort(([a], [b]) => a.localeCompare(b));
@@ -753,6 +788,7 @@ async function loadHistoryDictionary() {
     }
     showJobDictionaryNote(entries.length ? "" : t("p1.history.no_dictionary"));
   } catch (error) {
+    if (request !== state.jobDictRequest || jobId !== state.selectedJobId) return;
     state.jobMapping = null;
     $("job-dict-rows").textContent = "";
     showJobDictionaryNote(String(error?.message || error));
@@ -765,6 +801,10 @@ function updateRestoreButton() {
 }
 
 function pickRestoreFile(file) {
+  if (state.busy) {
+    $("restore-input").value = "";
+    return toast(t("p1.error.BUSY"), "info");
+  }
   if (!isSupported(file)) return toast(t("p1.upload.wrong_type"), "error");
   const gate = gateLevel(file.size);
   if (gate.level === "reject") {
@@ -941,7 +981,7 @@ async function boot() {
     renderReview();
   });
   $("download-btn").addEventListener("click", () => {
-    if (state.generated) download(state.generated.bytes, replaceSuffix(state.file?.name, "-redacted"));
+    if (state.generated) download(state.generated.bytes, state.generated.name);
   });
   $("goto-restore-btn").addEventListener("click", () => showPanel("reidentify"));
   $("restart-btn").addEventListener("click", () => {
@@ -950,7 +990,7 @@ async function boot() {
     state.types = new Map();
   });
   $("history-refresh").addEventListener("click", () => loadJobs());
-  $("job-dict-load").addEventListener("click", loadHistoryDictionary);
+  $("job-dict-load").addEventListener("click", () => loadHistoryDictionary());
   $("restore-btn").addEventListener("click", restore);
   $("restore-download").addEventListener("click", () => {
     if (state.restored) download(state.restored.bytes, state.restored.name);

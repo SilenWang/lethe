@@ -1,4 +1,4 @@
-"""P1 UI: four panels, gates, i18n, IndexedDB v3 and the offline shell.
+"""P1 UI: three independent pages, gates, i18n, storage and the offline shell.
 
 The UI is the last mile of the frozen worker interface: it only calls
 ``bridge.run`` and never touches document bytes itself. These tests drive the
@@ -424,6 +424,7 @@ def test_tabs_keep_independent_state_and_dictionary_switch_survives_reload(
     )
     page.select_option("#lang-select", "en")
     page.wait_for_function("document.documentElement.lang === 'en'")
+    user_before = page.evaluate("window.lethStore.getEntities()")
 
     page.click(".step[data-panel='dictionary']")
     page.wait_for_selector("#panel-dictionary:not([hidden])")
@@ -466,9 +467,196 @@ def test_tabs_keep_independent_state_and_dictionary_switch_survives_reload(
         "document.querySelector('#review-rows').innerText.includes('John Smith')"
     )
     assert page.locator("#review-rows").inner_text().count("John Smith") == 1
+    john_row = page.locator("#review-rows tr", has_text="John Smith")
+    assert john_row.locator("input[type=checkbox]").is_checked()
+    john_row.locator("select.row-type").select_option("COUNTERPARTY")
+    assert page.locator("#document-preview mark", has_text="John Smith").count() >= 1
 
     rows_before = page.locator("#review-rows tr").count()
     page.click(".step[data-panel='dictionary']")
     page.click(".step[data-panel='deidentify']")
     page.wait_for_selector("#review-card:not([hidden])")
     assert page.locator("#review-rows tr").count() == rows_before
+    john_row = page.locator("#review-rows tr", has_text="John Smith")
+    assert john_row.locator("input[type=checkbox]").is_checked()
+    assert john_row.locator("select.row-type").input_value() == "COUNTERPARTY"
+    assert page.locator("#document-preview mark", has_text="John Smith").count() >= 1
+    assert page.evaluate("window.lethStore.getEntities()") == user_before
+
+
+def test_detection_snapshot_cannot_cross_files_and_generate_state_survives_tabs(
+    page, built: Path
+) -> None:
+    """A queued file change cannot retarget an in-flight detection or output."""
+    page.evaluate(
+        "window.lethStore.mergeEntities([{canonical:'John Smith',"
+        "type:'PERSON',aliases:['J. Smith']}])"
+    )
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.evaluate(
+        """() => {
+            const bridge = window.__letheBridge;
+            const original = bridge.run.bind(bridge);
+            let delayed = false;
+            bridge.run = async (request) => {
+                if (!delayed && request.op === "inspect") {
+                    delayed = true;
+                    window.__inspectStarted = true;
+                    await new Promise((resolve) => setTimeout(resolve, 750));
+                }
+                return original(request);
+            };
+        }"""
+    )
+
+    page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
+    page.evaluate("document.getElementById('detect-btn').click()")
+    page.wait_for_function("window.__inspectStarted === true")
+
+    # Simulate a stale UI / programmatic event that somehow gets past the
+    # disabled control. The handler must still reject it while the run is busy.
+    page.evaluate("document.getElementById('upload-input').disabled = false")
+    page.set_input_files("#upload-input", str(built / "samples" / "xlsx-001.xlsx"))
+    assert "docx-001.docx" in page.locator("#upload-file").inner_text()
+
+    page.wait_for_selector("#review-card:not([hidden])")
+    assert page.locator("#document-preview mark", has_text="John Smith").count() >= 1
+    page.click("#generate-btn")
+    page.wait_for_selector("#generate-card:not([hidden])")
+    job_before = page.locator("#generate-job").inner_text()
+
+    page.click(".step[data-panel='dictionary']")
+    page.click(".step[data-panel='deidentify']")
+    page.wait_for_selector("#generate-card:not([hidden])")
+    assert page.locator("#generate-job").inner_text() == job_before
+    with page.expect_download() as redacted_info:
+        page.click("#download-btn")
+    assert redacted_info.value.suggested_filename == "docx-001-redacted.docx"
+
+
+def test_history_mapping_races_are_discarded_by_job_id(page) -> None:
+    """A slow older mapping must not overwrite the later selected job."""
+    page.evaluate(
+        """async () => {
+            await window.lethStore.saveJob({
+                jobId: 'job-old-slow',
+                createdAt: '2026-11-25T10:00:00Z',
+                sourceFiles: ['old.docx'],
+                replacements: 1,
+                mapping: {'[PERSON_001]': 'Old Alpha'},
+                passphrase: ''
+            });
+            await window.lethStore.saveJob({
+                jobId: 'job-new-fast',
+                createdAt: '2026-11-25T11:00:00Z',
+                sourceFiles: ['new.docx'],
+                replacements: 2,
+                mapping: {'[PERSON_001]': 'New Beta'},
+                passphrase: ''
+            });
+        }"""
+    )
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.click(".step[data-panel='reidentify']")
+    page.wait_for_function("document.querySelectorAll('#history-rows tr').length === 2")
+    page.evaluate(
+        """() => {
+            const original = window.lethStore.getMapping.bind(window.lethStore);
+            window.lethStore.getMapping = async (jobId, passphrase) => {
+                if (jobId === 'job-old-slow') {
+                    window.__slowMappingStarted = true;
+                    await new Promise((resolve) => setTimeout(resolve, 750));
+                    const value = await original(jobId, passphrase);
+                    window.__slowMappingFinished = true;
+                    return value;
+                }
+                return original(jobId, passphrase);
+            };
+        }"""
+    )
+
+    page.locator("input[value='job-old-slow']").check()
+    page.wait_for_function("window.__slowMappingStarted === true")
+    page.locator("input[value='job-new-fast']").check()
+    page.wait_for_function("window.__slowMappingFinished === true")
+    page.wait_for_function(
+        "document.querySelector('#job-dict-rows').innerText.includes('New Beta')"
+    )
+    selected = page.locator("#selected-job").inner_text()
+    rows = page.locator("#job-dict-rows").inner_text()
+    assert "job-new-fast" in selected
+    assert "New Beta" in rows
+    assert "Old Alpha" not in rows
+
+
+def test_restore_uses_the_selected_historical_mapping_and_keeps_reid_state(
+    page, tmp_path: Path
+) -> None:
+    """The token is restored from the job map, not the current dictionary."""
+    from docx import Document
+
+    token_doc = tmp_path / "token-reply.docx"
+    document = Document()
+    document.add_paragraph("Reply for [PERSON_001].")
+    document.save(token_doc)
+    page.evaluate(
+        """async () => {
+            await window.lethStore.saveJob({
+                jobId: 'job-historic-alpha',
+                createdAt: '2026-11-24T09:00:00Z',
+                sourceFiles: ['historic-source.docx'],
+                replacements: 1,
+                mapping: {'[PERSON_001]': 'Historic Alpha'},
+                passphrase: ''
+            });
+            await window.lethStore.saveJob({
+                jobId: 'job-other-mapping',
+                createdAt: '2026-11-24T10:00:00Z',
+                sourceFiles: ['other-source.docx'],
+                replacements: 1,
+                mapping: {'[PERSON_001]': 'Different Beta'},
+                passphrase: ''
+            });
+        }"""
+    )
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    page.click(".step[data-panel='reidentify']")
+    page.wait_for_function("document.querySelectorAll('#history-rows tr').length === 2")
+    page.locator("input[value='job-historic-alpha']").check()
+    page.wait_for_function(
+        "document.querySelector('#job-dict-rows').innerText.includes('Historic Alpha')"
+    )
+    page.set_input_files("#restore-input", str(token_doc))
+    page.wait_for_function("!document.querySelector('#restore-btn').disabled")
+
+    page.click(".step[data-panel='dictionary']")
+    page.click(".step[data-panel='reidentify']")
+    page.wait_for_selector("#panel-reidentify:not([hidden])")
+    assert page.locator("input[value='job-historic-alpha']").is_checked()
+    assert "Historic Alpha" in page.locator("#job-dict-rows").inner_text()
+    assert "token-reply.docx" in page.locator("#restore-file").inner_text()
+    assert page.locator("#restore-btn").is_enabled()
+
+    page.click("#restore-btn")
+    page.wait_for_selector("#restore-result:not([hidden])")
+    with page.expect_download() as restored_info:
+        page.click("#restore-download")
+    restored_path = tmp_path / "historic-restored.docx"
+    restored_info.value.save_as(str(restored_path))
+    restored = Document(restored_path)
+    text = "\n".join(paragraph.text for paragraph in restored.paragraphs)
+    assert "Historic Alpha" in text
+    assert "Different Beta" not in text
+    assert "[PERSON_001]" not in text
