@@ -14,6 +14,7 @@ import {
   normaliseJobFiles,
   partitionPicks,
   splitCounts,
+  taskCounterTotals,
   taskSummary,
   tokenKey,
   tokenPrefix,
@@ -363,7 +364,7 @@ test("a job with neither files nor sourceFiles opens as an empty list", () => {
 test("a DOCX result keeps body, comment and other hits apart per file", () => {
   const counts = {
     "word/document.xml": 7,
-    "word/comments.xml": 2,
+    "word/comments1.xml": 2,
     "word/header1.xml": 3,
     "word/footer1.xml": 1,
   };
@@ -384,6 +385,31 @@ test("a non-DOCX or absent count lands in otherHits instead of vanishing", () =>
     bodyHits: 0,
     commentHits: 0,
     otherHits: 0,
+  });
+});
+
+test("the task counter groups are the sum of every per-file group", () => {
+  const files = [
+    entry("memo.docx", [], {
+      status: "generated",
+      output: {
+        counts: {
+          "word/document.xml": 6,
+          "word/comments1.xml": 3,
+          "word/header1.xml": 2,
+        },
+      },
+    }),
+    entry("deck.pptx", [], {
+      status: "generated",
+      output: { counts: { "ppt/slides/slide1.xml": 4 } },
+    }),
+    entry("broken.docx", [], { status: "failed", output: null }),
+  ];
+  assert.deepEqual(taskCounterTotals(files), {
+    bodyHits: 6,
+    commentHits: 3,
+    otherHits: 6,
   });
 });
 

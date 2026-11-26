@@ -270,11 +270,27 @@ export function splitCounts(counts) {
     const hits = Number(value) || 0;
     if (!hits) continue;
     const name = String(part).toLowerCase();
+    const leaf = name.split("/").pop() || "";
     if (name.endsWith("/document.xml")) bodyHits += hits;
-    else if (name.endsWith("/comments.xml")) commentHits += hits;
+    // Word numbers comment parts after a merge: comments1.xml and friends are
+    // the same user-visible surface as comments.xml, not "other".
+    else if (/^comments\d*\.xml$/.test(leaf)) commentHits += hits;
     else otherHits += hits;
   }
   return { bodyHits, commentHits, otherHits };
+}
+
+/** Task-level counter groups, defined as the sum of the per-file groups. */
+export function taskCounterTotals(entries) {
+  const totals = { bodyHits: 0, commentHits: 0, otherHits: 0 };
+  for (const entry of entries) {
+    if (entry.status === "failed") continue;
+    const split = splitCounts(entry.output?.counts || entry.detection?.counts || null);
+    totals.bodyHits += split.bodyHits;
+    totals.commentHits += split.commentHits;
+    totals.otherHits += split.otherHits;
+  }
+  return totals;
 }
 
 /**

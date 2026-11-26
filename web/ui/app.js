@@ -32,6 +32,8 @@ import {
   fileIdentity,
   normaliseJobFiles,
   partitionPicks,
+  splitCounts,
+  taskCounterTotals,
   taskSummary,
   tokenKey,
   uniqueOutputNames,
@@ -53,6 +55,7 @@ const state = {
   taskFileSeq: 0,
   // Selection and type overrides are task-wide: one real value must be handled
   // the same way in every file, or the shared token would mean two things.
+  redactionWarning: null,
   selected: new Set(),
   types: new Map(),
   generated: null,
@@ -420,6 +423,7 @@ function makeTaskFile(file, gate) {
   return {
     id: `task-file-${state.taskFileSeq}`,
     file,
+    redactionConfirmed: false,
     inspection: null,
     detection: null,
     output: null,
@@ -450,6 +454,9 @@ function pickFiles(fileList) {
     if (unsupported) return toastKey("p1.upload.wrong_type", null, "error");
     return toastKey("p1.upload.no_new_files", null, "info");
   }
+  // A question and confirmation belong to the previously active file.
+  dismissRedactionWarning();
+  if (activeFile()) activeFile().redactionConfirmed = false;
   state.generated = null;
   state.files.push(...accepted.map(({ file, gate }) => makeTaskFile(file, gate)));
   state.activeFileIndex = state.files.length - accepted.length;
@@ -462,6 +469,7 @@ function pickFiles(fileList) {
 
 function removeTaskFile(id) {
   if (state.busy) return;
+  dismissRedactionWarning();
   const index = state.files.findIndex((entry) => entry.id === id);
   if (index < 0) return;
   state.files.splice(index, 1);
@@ -472,6 +480,7 @@ function removeTaskFile(id) {
 
 function clearTask() {
   if (state.busy) return;
+  dismissRedactionWarning();
   state.files = [];
   state.activeFileIndex = 0;
   state.manualEntities = [];
@@ -547,7 +556,15 @@ function selectTaskFile(index) {
   if (!state.files.length) {
     state.activeFileIndex = 0;
   } else {
-    state.activeFileIndex = Math.max(0, Math.min(Number(index) || 0, state.files.length - 1));
+    const next = Math.max(0, Math.min(Number(index) || 0, state.files.length - 1));
+    if (next !== state.activeFileIndex) {
+      // Confirmation and any open question are valid only for this file while
+      // it is active. Switching invalidates both rather than carrying consent
+      // into another document or letting a stale modal answer the new one.
+      dismissRedactionWarning();
+      if (activeFile()) activeFile().redactionConfirmed = false;
+    }
+    state.activeFileIndex = next;
   }
   renderTask();
 }
@@ -598,10 +615,7 @@ function renderTask() {
 function updateFileSwitchers() {
   for (const [id, handler] of [
     ["preview-file", (index) => selectTaskFile(index)],
-    ["result-file", (index) => {
-      state.activeFileIndex = Math.max(0, Math.min(index, state.files.length - 1));
-      renderTask();
-    }],
+    ["result-file", (index) => selectTaskFile(index)],
   ]) {
     const select = $(id);
     if (!select) continue;
@@ -708,14 +722,84 @@ function renderInspection(file = activeFile()?.file, result = activeFile()?.insp
   })}`;
 }
 
+function renderRedactionWarning() {
+  const warning = state.redactionWarning;
+  if (!warning) return;
+  $("redaction-warning-text").textContent = t("p1.redaction_warning.body", {
+    occurrences: warning.tokenCount,
+    distinct: warning.distinctCount,
+  });
+  const examples = Array.isArray(warning.examples) ? warning.examples : [];
+  $("redaction-warning-examples").textContent = examples.length
+    ? t("p1.redaction_warning.examples", { examples: examples.join(", ") })
+    : "";
+}
+
+// The confirmation is a real gate: nothing is written to a file that already
+// carries Lethe placeholders until the user has read the dialog and chosen.
+// The answer is `true` (continue), `false` (the user stopped) or `null` (the
+// question no longer applies because the file changed under it).
+let redactionPrompt = null;
+let redactionPending = null; // { entry, promise }: the question on screen
+
+function closeRedactionWarning(answer) {
+  const dialog = $("redaction-warning");
+  if (dialog.open) dialog.close();
+  state.redactionWarning = null;
+  const resolve = redactionPrompt;
+  redactionPrompt = null;
+  redactionPending = null;
+  if (resolve) resolve(answer);
+}
+
+function dismissRedactionWarning() {
+  if (redactionPrompt) closeRedactionWarning(null);
+}
+
+function askAboutExistingRedaction(inspection, entry) {
+  const warning = inspection?.redactionWarning;
+  if (!warning) return Promise.resolve(true);
+  if (entry.redactionConfirmed) return Promise.resolve(true);
+  // Asking again for the task file already on screen must share that answer:
+  // replacing the resolver would strand the first caller forever.
+  if (redactionPending?.entry === entry) return redactionPending.promise;
+  if (redactionPending) closeRedactionWarning(null);
+  state.redactionWarning = warning;
+  renderRedactionWarning();
+  const dialog = $("redaction-warning");
+  if (!dialog.open) dialog.showModal();
+  const promise = new Promise((resolve) => {
+    redactionPrompt = (answer) => {
+      if (answer) entry.redactionConfirmed = true;
+      resolve(answer);
+    };
+  });
+  redactionPending = { entry, promise };
+  return promise;
+}
+
+// The inspect op needs the user's custom token types so the "already
+// de-identified" detector recognises placeholders the dictionary itself
+// defines, not just Lethe's built-in prefixes.
+function inspectOptions() {
+  return { tokenTypes: state.customTypesList };
+}
+
 async function inspectActive() {
   const entry = activeFile();
   if (!entry) return toastKey("p1.upload.need_file", null, "error");
   try {
-    const inspection = await runOp({ op: "inspect", file: entry.file });
+    const inspection = await runOp({
+      op: "inspect",
+      file: entry.file,
+      options: inspectOptions(),
+    });
     if (entry !== activeFile()) return;
     entry.inspection = inspection;
     renderTask();
+    // `null` means the question went stale because the active file changed.
+    const answer = await askAboutExistingRedaction(inspection, entry);
+    if (answer === false) toastKey("p1.redaction_warning.stopped", null, "info");
   } catch (error) {
     reportError(error);
   }
@@ -795,9 +879,13 @@ async function detectTask() {
   if (!state.files.length) return toastKey("p1.upload.need_file", null, "error");
   const entities = entitiesForDetection();
   const target = [...state.files];
+  const inspections = new Map();
+  const originalIndex = state.activeFileIndex;
   try {
+    // Inspect first and ask outside the busy scope. Nothing is redacted until
+    // every inspected file has passed its own repeat-redaction gate, so Stop
+    // leaves the whole task untouched instead of writing earlier files.
     await runBusy(async () => {
-      let ok = 0;
       for (const [index, entry] of target.entries()) {
         setTaskProgress(index, target.length, entry.file.name);
         entry.detection = null;
@@ -807,21 +895,64 @@ async function detectTask() {
         entry.warnings = [];
         entry.status = "pending";
         try {
-          const inspection = await runWorker({ op: "inspect", file: entry.file });
+          const inspection = await runWorker({
+            op: "inspect",
+            file: entry.file,
+            options: inspectOptions(),
+          });
+          entry.inspection = inspection;
+          inspections.set(entry.id, inspection);
+        } catch (error) {
+          entry.status = "failed";
+          entry.error = error?.message || String(error);
+          if (state.files.length === 1) reportError(error);
+        }
+      }
+    });
+
+    // Each file gets its own answer. A confirmation on one file never covers
+    // the next, and selecting another task file dismisses a pending question.
+    for (const [index, entry] of target.entries()) {
+      const inspection = inspections.get(entry.id);
+      if (!inspection) continue;
+      state.activeFileIndex = index;
+      renderTask();
+      const answer = await askAboutExistingRedaction(inspection, entry);
+      if (answer !== true) {
+        if (answer === false) toastKey("p1.redaction_warning.stopped", null, "info");
+        renderTask();
+        return;
+      }
+    }
+
+    let ok = 0;
+    await runBusy(async () => {
+      for (const [index, entry] of target.entries()) {
+        const inspection = inspections.get(entry.id);
+        if (!inspection) continue;
+        setTaskProgress(index, target.length, entry.file.name);
+        try {
           const result = await runWorker({
             op: "redact",
             file: entry.file,
             options: { entities },
           });
+          const manual = new Set(
+            state.manualEntities.map((row) => row.canonical.toLowerCase()),
+          );
           const items = (result.items || []).map((item) => ({
             ...item,
             include: item.include !== false,
+            source: manual.has(item.canonical.toLowerCase()) ? "manual" : item.source,
           }));
-          entry.inspection = inspection;
+          const counts = result.counts || {};
+          const split = splitCounts(counts);
           entry.detection = {
             items,
             bytes: result.bytes || null,
             hits: result.hits || 0,
+            counts: { ...counts },
+            ...split,
             warnings: result.warnings || [],
             previewText: inspection.previewText || "",
             previewTruncated: !!inspection.previewTruncated,
@@ -853,7 +984,7 @@ async function detectTask() {
       }
       allocateTaskTokens(state.files, state.types);
       state.generated = null;
-      state.activeFileIndex = Math.min(state.activeFileIndex, Math.max(0, state.files.length - 1));
+      state.activeFileIndex = Math.min(originalIndex, Math.max(0, state.files.length - 1));
       renderTask();
       if (!ok) {
         toastKey("p1.detect.all_failed", { files: target.length }, "error", 0);
@@ -1071,10 +1202,15 @@ async function generateTask() {
         // left exactly as the successful write left it.
         try {
           if (detectionIsCurrent(entry, overrides)) {
+            const counts = entry.detection.counts || {};
             entry.output = {
               name: outputName,
               bytes: entry.detection.bytes,
               hits: entry.detection.hits || 0,
+              counts: { ...counts },
+              bodyHits: entry.detection.bodyHits || 0,
+              commentHits: entry.detection.commentHits || 0,
+              otherHits: entry.detection.otherHits || 0,
               reused: true,
             };
           } else {
@@ -1083,10 +1219,14 @@ async function generateTask() {
               file: entry.file,
               options: { entities, token_overrides: overrides },
             });
+            const counts = result.counts || {};
+            const split = splitCounts(counts);
             entry.output = {
               name: outputName,
               bytes: result.bytes,
               hits: result.hits || 0,
+              counts: { ...counts },
+              ...split,
               reused: false,
             };
             entry.detection = {
@@ -1094,6 +1234,8 @@ async function generateTask() {
               items: result.items || entry.detection?.items || [],
               bytes: result.bytes || null,
               hits: result.hits || 0,
+              counts: { ...counts },
+              ...split,
               warnings: result.warnings || entry.detection?.warnings || [],
             };
             // These bytes now carry the task-wide numbering, so that is what a
@@ -1115,11 +1257,13 @@ async function generateTask() {
           failures.push({ name: entry.file.name, error: entry.error });
         }
       }
+      const counterTotals = taskCounterTotals(entries);
       state.generated = {
         jobId,
         files: entries.length,
         failed: failures.length,
         hits: entries.reduce((total, entry) => total + (entry.output?.hits || 0), 0),
+        ...counterTotals,
         // One token per distinct entity, not per override key: the same entity
         // spelled two ways in two files shares one token and two keys.
         tokens: allocations.filter((row) => state.selected.has(row.canonical)).length,
@@ -1215,11 +1359,20 @@ function renderGenerate() {
     return;
   }
   $("generate-card").hidden = false;
-  $("generate-summary").textContent = t("p1.generate.ready", {
+  const summary = t("p1.generate.ready", {
     count: out.hits,
     tokens: out.tokens,
     files: out.files,
   });
+  const hasBreakdown =
+    Number.isFinite(out.bodyHits) || Number.isFinite(out.commentHits);
+  $("generate-summary").textContent = hasBreakdown
+    ? `${summary} · ${t("p1.generate.breakdown", {
+      body: out.bodyHits || 0,
+      comments: out.commentHits || 0,
+      other: out.otherHits || 0,
+    })}`
+    : summary;
   $("generate-job").textContent = `${t("p1.generate.job")}: ${out.jobId}`;
   const entry = activeFile();
   const status = $("result-file-status");
@@ -1682,6 +1835,7 @@ function repaint() {
     renderTaskFileList();
     renderTaskSummary();
   }
+  renderRedactionWarning();
   renderGenerate();
   // The saved / not-saved line is stored as a key, so it must be repainted too:
   // a store failure reported in Chinese would otherwise stay Chinese after the
@@ -1751,6 +1905,14 @@ async function boot() {
   $("dict-search").addEventListener("input", renderDictionary);
   $("dict-refresh").addEventListener("click", refreshDict);
   $("dict-add").addEventListener("click", addDictionaryTerm);
+  $("redaction-warning-cancel").addEventListener("click", () => closeRedactionWarning(false));
+  $("redaction-warning-continue").addEventListener("click", () => closeRedactionWarning(true));
+  // Esc must mean "stop", not "continue": cancel the dialog explicitly so the
+  // pending run resolves false and no file is written.
+  $("redaction-warning").addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeRedactionWarning(false);
+  });
   $("cancel-btn").addEventListener("click", () => {
     state.bridge.cancel();
     toastKey("p1.cancelled", null, "info");

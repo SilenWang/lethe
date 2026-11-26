@@ -977,3 +977,144 @@ def test_language_switch_keeps_the_active_task_file(page, built: Path) -> None:
     assert page.locator("#review-file").inner_text() == file_before
     assert page.locator("#review-count").inner_text() == count_before
     assert page.locator("#document-preview mark", has_text="John Smith").count() == marks_before
+
+
+def _tokenised_docx(path: Path) -> Path:
+    """A real DOCX that already carries Lethe placeholders.
+
+    Produced by the engine itself, so the detector sees exactly the shape the
+    writer emits rather than a hand-written lookalike.
+    """
+    import io
+    import zipfile
+
+    from lethe import Entity
+    from lethe.docx_engine import redact
+
+    source = (REPO / "corpus" / "docx" / "docx-001.docx").read_bytes()
+    result = redact(
+        source, [Entity("John Smith", "PERSON"), Entity("Alice Chen", "PERSON")]
+    )
+    assert result.hits > 0
+    with zipfile.ZipFile(io.BytesIO(source)) as archive:
+        parts = {name: archive.read(name) for name in archive.namelist()}
+    for name, xml in result.updates.items():
+        parts[name] = xml.encode("utf-8")
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in parts.items():
+            archive.writestr(name, data)
+    return path
+
+
+def test_clean_file_is_never_asked_about(page, built: Path) -> None:
+    """No dialog for a document that was never de-identified."""
+    page.select_option("#lang-select", "en")
+    page.wait_for_function("document.documentElement.lang === 'en'")
+    page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
+    page.click("#inspect-btn")
+    page.wait_for_function(
+        "document.querySelector('#upload-inspect').hidden === false"
+    )
+    assert page.evaluate("document.querySelector('#redaction-warning').open") is False
+
+
+def test_already_deidentified_file_asks_before_a_second_pass(page, tmp_path: Path) -> None:
+    """The gate: stop by default, continue only when the user says so.
+
+    ``docx-001.docx`` redacted once and fed back in is the exact situation a
+    user hits when they re-drop yesterday's output. Cancelling must write
+    nothing; confirming must let the second pass run.
+    """
+    page.select_option("#lang-select", "en")
+    page.wait_for_function("document.documentElement.lang === 'en'")
+    tokenised = _tokenised_docx(tmp_path / "tokenised.docx")
+    page.set_input_files("#upload-input", str(tokenised))
+
+    page.click("#detect-btn")
+    page.wait_for_selector("#redaction-warning[open]")
+    assert "[PERSON_" in page.locator("#redaction-warning-examples").inner_text()
+    assert "de-identified" in page.locator("#redaction-warning-title").inner_text()
+    # The dialog stays open across a language switch, so its dynamic body and
+    # examples must be repainted too rather than freezing in the old language.
+    page.evaluate(
+        """() => {
+            const select = document.querySelector('#lang-select');
+            select.value = 'zh';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }"""
+    )
+    page.wait_for_function(
+        "document.querySelector('#redaction-warning-title')"
+        ".innerText.includes('已经脱敏')"
+    )
+    assert "文件中已有" in page.locator("#redaction-warning-text").inner_text()
+    assert "例如" in page.locator("#redaction-warning-examples").inner_text()
+    page.evaluate(
+        """() => {
+            const select = document.querySelector('#lang-select');
+            select.value = 'en';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }"""
+    )
+    page.wait_for_function(
+        "document.querySelector('#redaction-warning-title')"
+        ".innerText.includes('de-identified')"
+    )
+
+    # Stop: the dialog closes, nothing is written, no review table appears.
+    page.click("#redaction-warning-cancel")
+    page.wait_for_function("!document.querySelector('#redaction-warning').open")
+    page.wait_for_function(
+        "document.querySelector('#review-card').hidden === true"
+    )
+    assert "Stopped" in page.locator("#toast").inner_text()
+
+    # Asking again must ask again (the refusal was not remembered as consent).
+    page.click("#detect-btn")
+    page.wait_for_selector("#redaction-warning[open]")
+    page.click("#redaction-warning-continue")
+    page.wait_for_selector("#review-card:not([hidden])")
+    assert page.evaluate("document.querySelector('#redaction-warning').open") is False
+
+
+def test_each_task_file_needs_its_own_redaction_confirmation(
+    page, tmp_path: Path
+) -> None:
+    """One Continue covers one file; switching invalidates the old answer."""
+    page.select_option("#lang-select", "en")
+    page.wait_for_function("document.documentElement.lang === 'en'")
+    first = _tokenised_docx(tmp_path / "tokenised-a.docx")
+    second = _tokenised_docx(tmp_path / "tokenised-b.docx")
+    page.set_input_files("#upload-input", [str(first), str(second)])
+    page.wait_for_function("document.querySelectorAll('.task-file').length === 2")
+
+    page.click("#detect-btn")
+    page.wait_for_selector("#redaction-warning[open]")
+    assert "tokenised-a.docx" in page.locator("#upload-file").inner_text()
+
+    # Continuing the first file must not silently approve the second: the next
+    # prompt appears and names the second active file.
+    page.click("#redaction-warning-continue")
+    page.wait_for_selector("#redaction-warning[open]")
+    page.wait_for_function(
+        "document.querySelector('#upload-file').innerText.includes('tokenised-b.docx')"
+    )
+
+    # Switching away from the second file drops its pending question. Switching
+    # back must ask again because the old confirmation was invalidated.
+    # A native modal blocks pointer input to the page, so drive the same file
+    # switch from script to exercise its invalidation path directly.
+    page.evaluate(
+        """() => [...document.querySelectorAll('.task-file-name')]
+            .find((node) => node.textContent === 'tokenised-a.docx').click()"""
+    )
+    page.wait_for_function("!document.querySelector('#redaction-warning').open")
+    page.locator(".task-file-name", has_text="tokenised-b.docx").click()
+    page.click("#detect-btn")
+    page.wait_for_selector("#redaction-warning[open]")
+    page.wait_for_function(
+        "document.querySelector('#upload-file').innerText.includes('tokenised-a.docx')"
+    )
+    page.click("#redaction-warning-cancel")
+    page.wait_for_function("!document.querySelector('#redaction-warning').open")
+    assert page.locator("#review-card").is_hidden()
