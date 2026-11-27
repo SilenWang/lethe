@@ -45,10 +45,18 @@ The loader rejects, naming the source path and the failing entry index:
 - unknown top-level fields or unknown per-entity fields;
 - a `schemaVersion` other than `1`, or an `entities` value that is not a
   non-empty list;
-- a duplicate key inside one mapping (YAML would otherwise silently keep the
-  last value), reported with line and column;
-- a non-string or empty `canonical` / `type`, non-string aliases, an invalid
-  shard id, or a `tier` other than `core` / `full`;
+- a duplicate key written inside one mapping (YAML would otherwise silently
+  keep the last value), reported with line and column. A standard merge key
+  (`<<: *base`) is not a duplicate: only keys spelled out in the same mapping
+  are compared;
+- a non-string or empty `canonical` / `type`, an invalid shard id, or a `tier`
+  other than `core` / `full`;
+- an `aliases` value that is present but not a list, such as `null`, `""`, a
+  number or a mapping; the message names the field and the offending type
+  (e.g. `aliases must be a list of strings, got null`). A **missing**
+  `aliases` key is valid and means "no aliases";
+- a non-string element inside `aliases`, reported with its index
+  (e.g. `aliases[1] must be a string, got number 7`);
 - duplicate canonical values, compared case-insensitively;
 - malformed YAML, reported with line and column.
 

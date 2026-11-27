@@ -51,6 +51,26 @@ class DictionaryError(ValueError):
     """The source tree or built pack violates the distribution contract."""
 
 
+_MISSING = object()
+
+
+def _describe_value(value: Any) -> str:
+    """Name a YAML value for a diagnostic, distinguishing absent from invalid."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return f"boolean {value}"
+    if isinstance(value, (int, float)):
+        return f"number {value}"
+    if isinstance(value, str):
+        return "an empty string" if not value.strip() else f"string {value!r}"
+    if isinstance(value, dict):
+        return "a mapping"
+    if isinstance(value, list):
+        return "a list"
+    return type(value).__name__
+
+
 def _json_bytes(value: Any) -> bytes:
     return (
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -141,14 +161,22 @@ def _normalise_entity(row: Any, location: str) -> dict[str, Any]:
     entity_type = type_value.strip().upper()
     if not entity_type:
         raise DictionaryError(f"{location}: type must be a non-empty string")
-    aliases = row.get("aliases") or []
-    if not isinstance(aliases, list):
-        raise DictionaryError(f"{location}: aliases must be a list")
+    aliases_value = row.get("aliases", _MISSING)
+    if aliases_value is _MISSING:
+        aliases: list[Any] = []
+    elif isinstance(aliases_value, list):
+        aliases = aliases_value
+    else:
+        raise DictionaryError(
+            f"{location}: aliases must be a list of strings, got {_describe_value(aliases_value)}"
+        )
     clean_aliases: list[str] = []
     seen = {canonical.casefold()}
-    for alias in aliases:
+    for index, alias in enumerate(aliases):
         if not isinstance(alias, str):
-            raise DictionaryError(f"{location}: aliases must contain only strings")
+            raise DictionaryError(
+                f"{location}: aliases[{index}] must be a string, got {_describe_value(alias)}"
+            )
         value = alias.strip()
         if value and value.casefold() not in seen:
             clean_aliases.append(value)
@@ -190,18 +218,24 @@ class _StrictLoader(yaml.SafeLoader):
     A repeated ``canonical`` or ``tier`` in an edited glossary is almost always
     a mistake, and silently keeping the last value would make the built pack
     disagree with what the editor sees.
+
+    Explicit keys are checked before merge keys are expanded: a ``<<: *base``
+    merge legitimately shares names with the keys it provides, so only repeats
+    among the keys written in the same mapping are errors.
     """
 
     def construct_mapping(self, node: Any, deep: bool = False) -> Any:
-        self.flatten_mapping(node)
         seen: set[str] = set()
         for key_node, _value_node in node.value:
             if not isinstance(key_node, yaml.ScalarNode):
                 continue
             key = str(key_node.value)
+            if key == "<<":
+                continue
             if key in seen:
                 raise _DuplicateKeyError(key, key_node)
             seen.add(key)
+        self.flatten_mapping(node)
         return super().construct_mapping(node, deep=deep)
 
 

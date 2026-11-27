@@ -382,3 +382,126 @@ def test_non_preset_layer_is_rejected_on_verification(
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(build_dictionary.DictionaryError, match="signature|preset"):
         build_dictionary.verify_dictionary(out, signing_keys[1], signing_keys[2])
+
+
+def test_missing_aliases_defaults_to_an_empty_list(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\nentities:\n  - canonical: Alpha\n    type: PERSON\n",
+    )
+    assert build_dictionary._load_entities(source)[0]["aliases"] == []
+
+
+def test_explicit_empty_string_aliases_is_rejected_with_its_path(
+    tmp_path: Path,
+) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        '    aliases: ""\n',
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"entities\[0\]: aliases must be a list of strings, got an empty string",
+    ):
+        build_dictionary._load_entities(source)
+
+
+@pytest.mark.parametrize(
+    ("label", "rendered", "described"),
+    [
+        ("null", "null", "null"),
+        ("number", "42", "number 42"),
+        ("mapping", "{a: b}", "a mapping"),
+        ("boolean", "true", "boolean True"),
+    ],
+)
+def test_explicit_non_list_aliases_is_rejected_with_its_type(
+    tmp_path: Path, label: str, rendered: str, described: str
+) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        f"    aliases: {rendered}\n",
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=rf"entities\[0\]: aliases must be a list of strings, got {described}",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_non_string_alias_reports_its_index_and_type(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        "    aliases:\n"
+        "      - ALPHA\n"
+        "      - 7\n",
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"entities\[0\]: aliases\[1\] must be a string, got number 7",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_valid_alias_list_is_trimmed_and_deduplicated(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        "    aliases:\n"
+        "      - \"  ALPHA \"\n"
+        "      - alpha\n"
+        "      - \"  \"\n"
+        "      - A. Holdings\n",
+    )
+    assert build_dictionary._load_entities(source)[0]["aliases"] == ["A. Holdings"]
+
+
+def test_merge_key_is_not_reported_as_a_duplicate(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - <<: &base\n"
+        "      type: PERSON\n"
+        "      shard: people\n"
+        "    canonical: Alpha\n"
+        "    aliases: [A. Holdings]\n",
+    )
+    entity = build_dictionary._load_entities(source)[0]
+    assert entity["canonical"] == "Alpha"
+    assert entity["type"] == "PERSON"
+    assert entity["shard"] == "people"
+    assert entity["aliases"] == ["A. Holdings"]
+
+
+def test_merge_key_still_reports_real_duplicates(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - <<: &base\n"
+        "      type: PERSON\n"
+        "    canonical: Alpha\n"
+        "    canonical: Beta\n"
+        "    type: PERSON\n",
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"duplicate key 'canonical' at line 6",
+    ):
+        build_dictionary._load_entities(source)
