@@ -218,3 +218,38 @@ def test_a_failed_file_does_not_stop_the_rest_of_the_batch() -> None:
 
 def _redact_raw(raw: bytes, kind: str):
     return ENGINE[kind].redact(raw, ENTITIES)
+
+
+def test_a_failure_in_the_middle_of_the_batch_keeps_both_neighbours() -> None:
+    """Failure is per file, not per task.
+
+    The batch here is [good docx, corrupt docx, good xlsx]. Walking it the way
+    the worker does — one file at a time, recording a failure instead of
+    aborting — must leave the first and last file with their own bytes, hits
+    and token, because a partially written task is still worth delivering.
+    """
+    batch = [
+        ("docx", CORPUS["docx"].read_bytes()),
+        ("docx", b"not a zip at all"),
+        ("xlsx", CORPUS["xlsx"].read_bytes()),
+    ]
+    overrides = {"PERSON|John Smith": "[PERSON_004]"}
+    written: dict[int, object] = {}
+    failures: dict[int, str] = {}
+
+    for index, (kind, raw) in enumerate(batch):
+        try:
+            written[index] = ENGINE[kind].redact(raw, ENTITIES, token_overrides=overrides)
+        except Exception as exc:  # noqa: BLE001 - this is the per-file failure path
+            failures[index] = str(exc) or exc.__class__.__name__
+
+    assert set(failures) == {1}, "only the corrupt file may fail"
+    assert set(written) == {0, 2}, "the files on either side must still be written"
+
+    # Each survivor carries the task token and its own replacement count, so
+    # neither inherits the other's numbers.
+    for index, kind in ((0, "docx"), (2, "xlsx")):
+        result = written[index]
+        assert _tokens_by_canonical(result.items)["John Smith"] == "[PERSON_004]", kind
+        assert result.hits >= 1, (kind, result.hits)
+    assert written[0].hits != 0 and written[2].hits != 0

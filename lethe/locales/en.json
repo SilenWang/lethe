@@ -485,5 +485,6 @@
   "p1.upload.some_unsupported": "{count} file(s) skipped: unsupported format.",
   "p1.preview.file_label": "Choose which file to preview",
   "p1.generate.file_label": "Choose which file's result to view",
-  "p1.history.file_label": "Choose which file in this task to view"
+  "p1.history.file_label": "Choose which file in this task to view",
+  "p1.generate.partial_failed": "{failed} of {files} file(s) could not be written; the rest are ready to download. First failure: {name}."
 }

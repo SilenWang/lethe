@@ -485,5 +485,6 @@
   "p1.upload.some_unsupported": "{count} 个文件因格式不受支持被跳过。",
   "p1.preview.file_label": "选择要预览的文件",
   "p1.generate.file_label": "选择要查看结果的文件",
-  "p1.history.file_label": "选择要查看的任务内文件"
+  "p1.history.file_label": "选择要查看的任务内文件",
+  "p1.generate.partial_failed": "{files} 个文件中有 {failed} 个写入失败，其余可正常下载。首个失败文件：{name}。"
 }

@@ -13,9 +13,11 @@ import {
   fileIdentity,
   normaliseJobFiles,
   partitionPicks,
+  splitCounts,
   taskSummary,
   tokenKey,
   tokenPrefix,
+  uniqueOutputNames,
   writableEntries,
 } from "../../web/ui/task-model.js";
 
@@ -177,6 +179,115 @@ test("tokens clear when an item stops being included", () => {
   assert.equal(item.token, "");
 });
 
+// ------------------------------------------------- effective (edited) type
+
+test("retyping an entity moves its token to the new type's prefix", () => {
+  // "Acme" is detected as PERSON, then the reviewer retypes it as
+  // COUNTERPARTY in the review table. The token must follow the type the user
+  // chose — "[COUNTERPARTY_001]", not the "[PERSON_001]" detection produced.
+  const a = entry("a.docx", [{ type: "PERSON", canonical: "Acme" }]);
+  const types = new Map([["Acme", "COUNTERPARTY"]]);
+  const { overrides, allocations } = assignTaskTokens([a], types);
+
+  assert.equal(allocations.length, 1);
+  assert.equal(allocations[0].type, "COUNTERPARTY");
+  assert.equal(allocations[0].token, "[COUNTERPARTY_001]");
+  assert.equal(a.detection.items[0].token, "[COUNTERPARTY_001]");
+  // The detected key must stay addressable too: the engine matches against the
+  // type detection recorded, so dropping "PERSON|Acme" would make the engine
+  // miss the override and keep its own per-file numbering.
+  assert.equal(overrides["COUNTERPARTY|Acme"], "[COUNTERPARTY_001]");
+  assert.equal(overrides["PERSON|Acme"], "[COUNTERPARTY_001]");
+});
+
+test("a retyped entity keeps its token across every file and every spelling", () => {
+  // One counterparty spelled two ways in two files, retyped from PERSON to
+  // COUNTERPARTY: one token, and every detected key of every spelling resolves
+  // to it, or one of the files would fall back to its own numbering.
+  const a = entry("a.docx", [{ type: "PERSON", canonical: "Acme" }]);
+  const b = entry("b.xlsx", [{ type: "PERSON", canonical: "ACME" }]);
+  const types = new Map([["Acme", "COUNTERPARTY"], ["ACME", "COUNTERPARTY"]]);
+  const { overrides } = assignTaskTokens([a, b], types);
+
+  const token = overrides["COUNTERPARTY|Acme"];
+  assert.equal(token, "[COUNTERPARTY_001]");
+  for (const key of ["COUNTERPARTY|Acme", "COUNTERPARTY|ACME", "PERSON|Acme", "PERSON|ACME"]) {
+    assert.equal(overrides[key], token, key);
+  }
+  assert.equal(a.detection.items[0].token, token);
+  assert.equal(b.detection.items[0].token, token);
+});
+
+test("without a type override the detected type still decides the prefix", () => {
+  const a = entry("a.docx", [{ type: "ORG", canonical: "Acme" }]);
+  const { overrides } = assignTaskTokens([a], new Map());
+  // ORG folds onto COUNTERPARTY, and no effective-type key is invented.
+  assert.deepEqual(Object.keys(overrides).sort(), ["ORG|Acme"]);
+  assert.equal(overrides["ORG|Acme"], "[COUNTERPARTY_001]");
+});
+
+test("an exclusion outranks a type override", () => {
+  const item = { type: "PERSON", canonical: "Acme" };
+  const a = entry("a.docx", [item]);
+  const types = new Map([["Acme", "COUNTERPARTY"]]);
+  item.include = false;
+  const { overrides, allocations } = assignTaskTokens([a], types);
+  assert.deepEqual(allocations, []);
+  assert.deepEqual(overrides, {});
+  assert.equal(item.token, "");
+});
+
+// ------------------------------------------------------------ output names
+
+test("same-named files from different folders get distinct result names", () => {
+  // "memo.docx" in two folders are two different documents. One shared result
+  // name would make the stored set ambiguous: history downloads by name.
+  const a = entry("memo.docx", []);
+  const b = entry("memo.docx", []);
+  a.id = "task-file-1";
+  b.id = "task-file-2";
+  const names = uniqueOutputNames([a, b]);
+
+  assert.equal(names.get("task-file-1"), "memo-redacted.docx");
+  assert.equal(names.get("task-file-2"), "memo-redacted-2.docx");
+  assert.equal(new Set(names.values()).size, 2, "every file keeps its own name");
+});
+
+test("a third collision keeps counting instead of reusing -2", () => {
+  const rows = ["memo.docx", "memo.docx", "memo.docx"].map((name, index) => ({
+    id: `task-file-${index + 1}`,
+    file: file(name),
+  }));
+  const names = uniqueOutputNames(rows);
+  assert.deepEqual([...names.values()], [
+    "memo-redacted.docx",
+    "memo-redacted-2.docx",
+    "memo-redacted-3.docx",
+  ]);
+});
+
+test("distinct files keep their own names untouched", () => {
+  const rows = [
+    { id: "a", file: file("report.docx") },
+    { id: "b", file: file("sheet.xlsx") },
+    { id: "c", file: file("deck.pptx") },
+  ];
+  assert.deepEqual([...uniqueOutputNames(rows).values()], [
+    "report-redacted.docx",
+    "sheet-redacted.xlsx",
+    "deck-redacted.pptx",
+  ]);
+});
+
+test("the extension is preserved and normalised in a de-duplicated name", () => {
+  const rows = [
+    { id: "a", file: file("Memo.DOCX") },
+    { id: "b", file: file("Memo.DOCX") },
+  ];
+  const names = [...uniqueOutputNames(rows).values()];
+  assert.deepEqual(names, ["Memo-redacted.docx", "Memo-redacted-2.docx"]);
+});
+
 // ---------------------------------------------------------------- summary
 
 test("a partly failed task still reports what the successful files produced", () => {
@@ -245,4 +356,110 @@ test("a job saved before the multi-file model still opens", () => {
 test("a job with neither files nor sourceFiles opens as an empty list", () => {
   assert.deepEqual(normaliseJobFiles({ jobId: "x" }), []);
   assert.deepEqual(normaliseJobFiles(null), []);
+});
+
+// ------------------------------------------------- per-file DOCX counters
+
+test("a DOCX result keeps body, comment and other hits apart per file", () => {
+  const counts = {
+    "word/document.xml": 7,
+    "word/comments.xml": 2,
+    "word/header1.xml": 3,
+    "word/footer1.xml": 1,
+  };
+  assert.deepEqual(splitCounts(counts), { bodyHits: 7, commentHits: 2, otherHits: 4 });
+  // Nothing split is lost: a total that does not add up is worse than none.
+  const split = splitCounts(counts);
+  assert.equal(split.bodyHits + split.commentHits + split.otherHits, 13);
+});
+
+test("a non-DOCX or absent count lands in otherHits instead of vanishing", () => {
+  assert.deepEqual(splitCounts({ "sheets/sheet1.xml": 5 }), {
+    bodyHits: 0,
+    commentHits: 0,
+    otherHits: 5,
+  });
+  assert.deepEqual(splitCounts(null), { bodyHits: 0, commentHits: 0, otherHits: 0 });
+  assert.deepEqual(splitCounts({ "word/document.xml": 0 }), {
+    bodyHits: 0,
+    commentHits: 0,
+    otherHits: 0,
+  });
+});
+
+test("each saved file carries its own counts, not the task's single total", () => {
+  const files = [
+    entry("memo.docx", [{ type: "PERSON", canonical: "John Smith", count: 9 }], {
+      status: "generated",
+      output: {
+        name: "memo-redacted.docx",
+        hits: 9,
+        counts: { "word/document.xml": 6, "word/comments.xml": 3 },
+        bytes: new Uint8Array([1]),
+      },
+    }),
+    entry("deck.pptx", [{ type: "PERSON", canonical: "John Smith", count: 2 }], {
+      status: "generated",
+      output: {
+        name: "deck-redacted.pptx",
+        hits: 2,
+        counts: { "ppt/slides/slide1.xml": 2 },
+        bytes: new Uint8Array([2]),
+      },
+    }),
+  ];
+  const rows = buildJobFiles(files);
+  assert.deepEqual(
+    rows.map((row) => [row.bodyHits, row.commentHits, row.otherHits]),
+    [
+      [6, 3, 0],
+      [0, 0, 2],
+    ],
+  );
+  assert.deepEqual(rows[0].counts, { "word/document.xml": 6, "word/comments.xml": 3 });
+  assert.deepEqual(rows[1].counts, { "ppt/slides/slide1.xml": 2 });
+});
+
+test("a failed file reports no counter groups at all", () => {
+  const rows = buildJobFiles([
+    { file: file("broken.docx"), status: "failed", error: "bad zip", detection: null },
+  ]);
+  assert.equal(rows[0].hits, null);
+  assert.equal(rows[0].bodyHits, null);
+  assert.equal(rows[0].commentHits, null);
+  assert.equal(rows[0].otherHits, null);
+  assert.deepEqual(rows[0].counts, {});
+});
+
+test("reopening history restores the split the job was saved with", () => {
+  const rows = normaliseJobFiles({
+    jobId: "job-counts",
+    files: [
+      {
+        name: "memo.docx",
+        status: "generated",
+        output: "memo-redacted.docx",
+        hits: 9,
+        counts: { "word/document.xml": 6, "word/comments.xml": 3 },
+        error: "",
+      },
+      {
+        name: "old.docx",
+        status: "done",
+        output: "old-redacted.docx",
+        hits: 4,
+        error: "",
+      },
+    ],
+  });
+  // Saved groups are taken as-is; a job without them is derived, not zeroed.
+  assert.equal(rows[0].bodyHits, 6);
+  assert.equal(rows[0].commentHits, 3);
+  assert.equal(rows[0].otherHits, 0);
+  assert.equal(rows[1].bodyHits, 0);
+  assert.equal(rows[1].otherHits, 0);
+  // A legacy job with no per-file total still claims no share of it.
+  const legacy = normaliseJobFiles({ jobId: "old", sourceFiles: ["a.docx"] });
+  assert.equal(legacy[0].bodyHits, null);
+  assert.deepEqual(legacy[0].counts, {});
 });

@@ -897,3 +897,83 @@ def test_restore_uses_the_selected_historical_mapping_and_keeps_reid_state(
     assert "Historic Alpha" in text
     assert "Different Beta" not in text
     assert "[PERSON_001]" not in text
+
+
+def test_language_switch_keeps_the_active_task_file(page, built: Path) -> None:
+    """A switch must redraw the file the user is looking at — and only it.
+
+    A task holds two files of different types. After switching language, the
+    preview, the highlight, the selection count and both file switchers must all
+    still describe the active file: no pane may fall back to another file in the
+    task, and no count may be recomputed from the wrong file's items.
+    """
+    page.evaluate(
+        "window.lethStore.mergeEntities([{canonical:'John Smith',"
+        "type:'PERSON',aliases:['J. Smith']}])"
+    )
+    page.reload()
+    page.wait_for_function("window.lethStore && document.querySelector('#detect-btn')")
+    page.wait_for_function(
+        "window.__letheBridge && window.__letheBridge.state() === 'ready'"
+    )
+    _switch_language(page, "en")
+
+    # Mixed types in one task: a docx and a sheet, both mentioning John Smith.
+    page.set_input_files(
+        "#upload-input",
+        [
+            str(built / "samples" / "docx-001.docx"),
+            str(built / "samples" / "xlsx-001.xlsx"),
+        ],
+    )
+    page.wait_for_function("document.querySelectorAll('.task-file').length === 2")
+    page.click("#detect-btn")
+    page.wait_for_selector("#review-card:not([hidden])")
+
+    # Make the sheet active: everything below is asserted against it.
+    page.locator(".task-file-name", has_text="xlsx-001.xlsx").click()
+    page.wait_for_function(
+        "() => { const s = document.querySelector('#preview-file');"
+        " return s && s.options[s.selectedIndex].textContent === 'xlsx-001.xlsx'; }"
+    )
+    index_before = page.evaluate("document.querySelector('#preview-file').value")
+    count_before = page.locator("#review-count").inner_text()
+    file_before = page.locator("#review-file").inner_text()
+    marks_before = page.locator("#document-preview mark", has_text="John Smith").count()
+    assert marks_before >= 1, "the fixture must highlight John Smith in the sheet"
+    assert "xlsx-001.xlsx" in file_before
+
+    _switch_language(page, "zh")
+    page.wait_for_function(
+        "document.querySelector('#review-file').innerText.includes('本任务共')"
+    )
+
+    # The switchers still point at the same file, not at the first one.
+    assert page.evaluate("document.querySelector('#preview-file').value") == index_before
+    assert (
+        page.evaluate(
+            "document.querySelector('#preview-file').options"
+            "[document.querySelector('#preview-file').selectedIndex].textContent"
+        )
+        == "xlsx-001.xlsx"
+    )
+    # Copy is translated, but it still names the sheet and keeps its numbers.
+    assert "xlsx-001.xlsx" in page.locator("#review-file").inner_text()
+    assert "本任务共 2 个文件" in page.locator("#review-file").inner_text()
+    # Exactly the same selection is reported, now in Chinese: "已选 c / t".
+    count_zh = page.locator("#review-count").inner_text()
+    assert count_zh.startswith("已选 "), count_zh
+    chosen_en, total_en = count_before.split(" of ")
+    total_en = total_en.split()[0]
+    assert count_zh.split(" / ") == ["已选 " + chosen_en, total_en], count_zh
+    # The preview is still the sheet's text with its own highlights.
+    assert page.locator("#document-preview mark", has_text="John Smith").count() == marks_before
+    assert "xlsx-001.xlsx" in page.locator("#upload-file").inner_text()
+
+    _switch_language(page, "en")
+    page.wait_for_function(
+        "document.querySelector('#review-file').innerText.includes('file(s) in this task')"
+    )
+    assert page.locator("#review-file").inner_text() == file_before
+    assert page.locator("#review-count").inner_text() == count_before
+    assert page.locator("#document-preview mark", has_text="John Smith").count() == marks_before

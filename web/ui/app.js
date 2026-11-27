@@ -34,6 +34,7 @@ import {
   partitionPicks,
   taskSummary,
   tokenKey,
+  uniqueOutputNames,
   writableEntries,
 } from "./task-model.js";
 
@@ -850,7 +851,7 @@ async function detectTask() {
           state.types.set(item.canonical, item.type);
         }
       }
-      allocateTaskTokens(state.files);
+      allocateTaskTokens(state.files, state.types);
       state.generated = null;
       state.activeFileIndex = Math.min(state.activeFileIndex, Math.max(0, state.files.length - 1));
       renderTask();
@@ -952,7 +953,7 @@ function renderReview() {
     type.value = state.types.get(item.canonical) || item.type;
     type.addEventListener("change", () => {
       state.types.set(item.canonical, type.value);
-      allocateTaskTokens(state.files);
+      allocateTaskTokens(state.files, state.types);
       renderTask();
     });
     typeCell.appendChild(type);
@@ -1046,51 +1047,78 @@ async function generateTask() {
   if (!entries.length) return toastKey("p1.upload.need_file", null, "error");
   const entities = chosenEntities();
   if (!entities.length) return toastKey("p1.review.none_selected", null, "error");
-  const { overrides, allocations } = allocateTaskTokens(state.files);
+  const { overrides, allocations } = allocateTaskTokens(state.files, state.types);
+  // Names are assigned across the whole task before any file is written: two
+  // same-named files from different folders are different documents, and giving
+  // them one result name would make the stored set ambiguous — history
+  // downloads by name and would hand one file the other's bytes.
+  const outputNames = uniqueOutputNames(entries);
   const jobId = `job-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}-` +
     Math.random().toString(36).slice(2, 6);
+  // Declared outside the busy block so the outcome is still readable after it:
+  // the per-file failure list is what the task reports and what history keeps.
+  const failures = [];
   try {
     await runBusy(async () => {
       for (const [index, entry] of entries.entries()) {
         setTaskProgress(index, entries.length, entry.file.name);
-        if (detectionIsCurrent(entry, overrides)) {
-          entry.output = {
-            name: replaceSuffix(entry.file.name, "-redacted"),
-            bytes: entry.detection.bytes,
-            hits: entry.detection.hits || 0,
-            reused: true,
-          };
-        } else {
-          const result = await runWorker({
-            op: "redact",
-            file: entry.file,
-            options: { entities, token_overrides: overrides },
-          });
-          entry.output = {
-            name: replaceSuffix(entry.file.name, "-redacted"),
-            bytes: result.bytes,
-            hits: result.hits || 0,
-            reused: false,
-          };
-          entry.detection = {
-            ...(entry.detection || {}),
-            items: result.items || entry.detection?.items || [],
-            bytes: result.bytes || null,
-            hits: result.hits || 0,
-            warnings: result.warnings || entry.detection?.warnings || [],
-          };
-          // These bytes now carry the task-wide numbering, so that is what a
-          // later reuse check must compare against.
-          entry.detectedTokens = Object.fromEntries(
-            (result.items || []).filter((item) => item.token)
-              .map((item) => [item.canonical, item.token]),
-          );
+        const outputName = outputNames.get(entry.id) || replaceSuffix(entry.file.name, "-redacted");
+        // Failure is per file. One file that cannot be written must not throw
+        // away the files already written in this loop, nor stop the ones after
+        // it: a task where four of five files succeeded is a usable result, and
+        // re-running the whole batch to recover the fifth would be worse. The
+        // file is recorded as failed with its own message, everything else is
+        // left exactly as the successful write left it.
+        try {
+          if (detectionIsCurrent(entry, overrides)) {
+            entry.output = {
+              name: outputName,
+              bytes: entry.detection.bytes,
+              hits: entry.detection.hits || 0,
+              reused: true,
+            };
+          } else {
+            const result = await runWorker({
+              op: "redact",
+              file: entry.file,
+              options: { entities, token_overrides: overrides },
+            });
+            entry.output = {
+              name: outputName,
+              bytes: result.bytes,
+              hits: result.hits || 0,
+              reused: false,
+            };
+            entry.detection = {
+              ...(entry.detection || {}),
+              items: result.items || entry.detection?.items || [],
+              bytes: result.bytes || null,
+              hits: result.hits || 0,
+              warnings: result.warnings || entry.detection?.warnings || [],
+            };
+            // These bytes now carry the task-wide numbering, so that is what a
+            // later reuse check must compare against.
+            entry.detectedTokens = Object.fromEntries(
+              (result.items || []).filter((item) => item.token)
+                .map((item) => [item.canonical, item.token]),
+            );
+          }
+          entry.status = "generated";
+          entry.error = "";
+        } catch (error) {
+          // A cancelled run is not a broken file: it stops the loop rather than
+          // being reported as this file's failure.
+          if (error?.code === "CANCELLED") throw error;
+          entry.output = null;
+          entry.status = "failed";
+          entry.error = error?.message || String(error);
+          failures.push({ name: entry.file.name, error: entry.error });
         }
-        entry.status = "generated";
       }
       state.generated = {
         jobId,
         files: entries.length,
+        failed: failures.length,
         hits: entries.reduce((total, entry) => total + (entry.output?.hits || 0), 0),
         // One token per distinct entity, not per override key: the same entity
         // spelled two ways in two files shares one token and two keys.
@@ -1107,6 +1135,16 @@ async function generateTask() {
     }
     await persistJob(jobId, mapping);
     if ($("save-names").checked) await saveSelectedNames(entities);
+    // The successful files stay written and stored; this only names the ones
+    // that did not make it, so the user can retry just those.
+    if (failures.length) {
+      toastKey(
+        "p1.generate.partial_failed",
+        { failed: failures.length, files: entries.length, name: failures[0].name },
+        "error",
+        0,
+      );
+    }
     $("generate-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     reportError(error);
@@ -1186,9 +1224,19 @@ function renderGenerate() {
   const entry = activeFile();
   const status = $("result-file-status");
   if (status) {
-    status.textContent = entry?.output
-      ? t("p1.generate.file_status", { name: entry.file.name, count: entry.output.hits })
-      : t("p1.files.pending");
+    // A file that failed generation says so with its own error. Reporting it as
+    // "pending" would suggest it can still be downloaded, and reporting another
+    // file's count would be plainly wrong.
+    if (entry?.status === "failed") {
+      status.textContent = t("p1.files.failed_reason", { error: entry.error || "" });
+    } else if (entry?.output) {
+      status.textContent = t("p1.generate.file_status", {
+        name: entry.file.name,
+        count: entry.output.hits,
+      });
+    } else {
+      status.textContent = t("p1.files.pending");
+    }
   }
   const download = $("download-btn");
   if (download) download.disabled = !entry?.output?.bytes;
@@ -1295,10 +1343,22 @@ function updateRestoreFileCard() {
   const select = $("history-file");
   if (!select) return;
   select.textContent = "";
+  // A task may hold two files with the same name from different folders, so the
+  // option text falls back to the distinct result name when the source names
+  // alone would read as two identical entries.
+  const repeated = new Set();
+  const seen = new Map();
+  for (const file of state.jobFiles) {
+    const count = (seen.get(file.name) || 0) + 1;
+    seen.set(file.name, count);
+    if (count > 1) repeated.add(file.name);
+  }
   for (const [index, file] of state.jobFiles.entries()) {
     const option = document.createElement("option");
     option.value = String(index);
-    option.textContent = file.name;
+    option.textContent = repeated.has(file.name) && file.output
+      ? `${file.name} → ${file.output}`
+      : file.name;
     select.appendChild(option);
   }
   state.jobFileIndex = Math.min(state.jobFileIndex, Math.max(0, state.jobFiles.length - 1));
@@ -1623,6 +1683,10 @@ function repaint() {
     renderTaskSummary();
   }
   renderGenerate();
+  // The saved / not-saved line is stored as a key, so it must be repainted too:
+  // a store failure reported in Chinese would otherwise stay Chinese after the
+  // switch while the rest of the pane turns English.
+  paintGeneratedSaved();
   renderHistory();
   paintJobDictionaryNote();
   if (state.restored) renderRestore();
