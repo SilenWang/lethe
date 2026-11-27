@@ -67,37 +67,48 @@ const t = (key, vars) => state.i18n.t(key, vars);
 // screen instead of leaving the previous language's sentence behind.
 let toastSpec = null;
 
-function toastKey(key, vars, kind = "info", ms = 7000) {
-  toastSpec = { build: () => t(key, vars), kind, ms };
+function showToast(spec) {
+  // An error that is still on screen outranks an informational update. Decide
+  // that from semantic state, before replacing the current message.
+  if (spec.kind !== "error" && toastSpec?.visible && toastSpec.kind === "error") return;
+  clearTimeout(paintToast.timer);
+  toastSpec = { ...spec, visible: true };
   paintToast();
+}
+
+function toastKey(key, vars, kind = "info", ms = 7000) {
+  showToast({ key, vars, kind, ms });
 }
 
 // Composite messages (a localised code sentence plus its gate findings) keep
 // their builder so the toast repaints in the new language too.
 function toastBuild(build, kind, ms = 0) {
-  toastSpec = { build, kind, ms };
-  paintToast();
+  showToast({ render: build, kind, ms });
 }
 
 function paintToast() {
-  if (!toastSpec) return;
   const el = $("toast");
-  const { build, kind, ms } = toastSpec;
-  if (kind !== "error" && !el.hidden && el.classList.contains("toast-error")) return;
-  el.textContent = build();
+  if (!toastSpec?.visible) {
+    el.hidden = true;
+    return;
+  }
+  const { key, vars, render, kind, ms } = toastSpec;
+  el.textContent = key ? t(key, vars) : render();
   el.className = `toast toast-${kind}`;
   el.hidden = false;
   clearTimeout(paintToast.timer);
   if (ms) {
-    paintToast.timer = setTimeout(() => {
-      el.hidden = true;
-      toastSpec = null;
-    }, ms);
+    paintToast.timer = setTimeout(hideToast, ms);
   }
 }
 
 function hideToast() {
-  $("toast").hidden = true;
+  clearTimeout(paintToast.timer);
+  paintToast.timer = null;
+  toastSpec = null;
+  const el = $("toast");
+  el.hidden = true;
+  el.textContent = "";
 }
 
 function showPanel(name) {
@@ -142,7 +153,7 @@ function setPhase(phase) {
   if (phase) $("progress-label").textContent = t(`p1.progress.${phase}`);
 }
 
-function onStatus(event) {
+function onStatus(event, notify = true) {
   state.statusEvent = event;
   state.runtime = event.state;
   const badge = $("runtime-badge");
@@ -160,13 +171,15 @@ function onStatus(event) {
       "betteroffice-pptx": "p1.init.pptx",
     };
     badge.textContent = t(initKeys[event.phase] || "p1.runtime.initializing");
-    if (event.reason && event.reason !== "init") {
+    if (notify && event.reason && event.reason !== "init") {
       toastKey("p1.runtime.rebuilding", null, "info", 0);
     }
   } else {
     badge.classList.add("badge-bad");
     badge.textContent = t("p1.runtime.failed");
-    if (event.reason) toastKey("p1.error.INIT_FAILED", { error: event.reason }, "error", 0);
+    if (notify && event.reason) {
+      toastKey("p1.error.INIT_FAILED", { error: event.reason }, "error", 0);
+    }
   }
   updateFileButtons();
 }
@@ -178,14 +191,17 @@ function showPreload(done, total) {
   const bar = $("preload-bar");
   const text = $("preload-text");
   if (!panel || !bar || !text) return;
-  state.preload = { done: done || 0, total: total || 0 };
+  state.preload = { done: done || 0, total: total || 0, visible: true };
   paintPreload();
 }
 
 function paintPreload() {
   const bar = $("preload-bar");
   const text = $("preload-text");
-  if (!bar || !text || !state.preload) return;
+  if (!bar || !text || !state.preload?.visible) {
+    $("preload-panel").hidden = true;
+    return;
+  }
   const { done, total, error, finished } = state.preload;
   $("preload-panel").hidden = false;
   $("preload-retry").hidden = !error;
@@ -207,8 +223,13 @@ function paintPreload() {
 }
 
 function failPreload(message) {
-  state.preload = { done: 0, total: 0, error: message };
+  state.preload = { done: 0, total: 0, error: message, visible: true };
   paintPreload();
+}
+
+function hidePreload() {
+  if (state.preload) state.preload.visible = false;
+  $("preload-panel").hidden = true;
 }
 
 async function preloadRuntime() {
@@ -231,9 +252,9 @@ async function preloadRuntime() {
         reject(error);
         return;
       }
-      state.preload = { done: 0, total: 0, finished: true };
+      state.preload = { done: 0, total: 0, finished: true, visible: true };
       paintPreload();
-      setTimeout(() => { $("preload-panel").hidden = true; }, 1500);
+      setTimeout(hidePreload, 1500);
       toastKey("p1.offline.ready", null, "ok", 5000);
       resolve();
     };
@@ -758,6 +779,9 @@ async function generate() {
       checked: new Set(chosen.map((item) => item.canonical)),
     };
     renderGenerate();
+    if (result.bytes?.byteLength > RECYCLE_BYTES) {
+      toastKey("p1.upload.large_note", null, "info", 0);
+    }
     $("generate-card").hidden = false;
     await persistJob(jobId, mapping, sourceFile);
     if ($("save-names").checked) await saveSelectedNames(chosen);
@@ -781,7 +805,7 @@ async function persistJob(jobId, mapping, sourceFile) {
     state.generatedSaved = { key: "p1.generate.saved", vars: null };
     await loadJobs();
   } catch (error) {
-    state.generatedSaved = { key: "p1.generate.unsaved", vars: { error: error?.message || error } };
+    state.generatedSaved = storeErrorSpec(error, "p1.generate.unsaved");
   }
   paintGeneratedSaved();
 }
@@ -804,7 +828,6 @@ function renderGenerate() {
   });
   $("generate-job").textContent = `${t("p1.generate.job")}: ${out.jobId}`;
   paintGeneratedSaved();
-  if (out.bytes?.byteLength > RECYCLE_BYTES) toastKey("p1.upload.large_note", null, "info", 0);
 }
 
 function download(bytes, name) {
@@ -1115,7 +1138,7 @@ function fillTypeSelects() {
 // language.
 function repaint() {
   state.i18n.apply();
-  if (state.statusEvent) onStatus(state.statusEvent);
+  if (state.statusEvent) onStatus(state.statusEvent, false);
   else $("runtime-badge").textContent = t("p1.runtime.initializing");
   if (state.phase) $("progress-label").textContent = t(`p1.progress.${state.phase}`);
   if (state.preload) paintPreload();

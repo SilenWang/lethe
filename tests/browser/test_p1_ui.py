@@ -118,6 +118,102 @@ def test_file_gates_warn_at_35mb_and_reject_over_50mb(page, built: Path, tmp_pat
     assert page.locator("#detect-btn").is_disabled()
 
 
+def _switch_language(page, lang: str) -> None:
+    page.select_option("#lang-select", lang)
+    page.wait_for_function("lang => document.documentElement.lang === lang", arg=lang)
+
+
+def test_visible_toast_repaints_on_language_switch(page, tmp_path: Path) -> None:
+    _switch_language(page, "en")
+    wrong = tmp_path / "wrong.txt"
+    wrong.write_text("not a document", encoding="utf-8")
+    page.set_input_files("#upload-input", str(wrong))
+    page.wait_for_function(
+        "document.querySelector('#toast').innerText.includes('accepts .docx')"
+    )
+
+    _switch_language(page, "zh")
+    page.wait_for_function(
+        "document.querySelector('#toast').innerText.includes('本版本接受')"
+    )
+    _switch_language(page, "en")
+    page.wait_for_function(
+        "document.querySelector('#toast').innerText.includes('accepts .docx')"
+    )
+
+
+def test_hidden_and_suppressed_toasts_stay_hidden(page, tmp_path: Path) -> None:
+    _switch_language(page, "en")
+    wrong = tmp_path / "wrong.txt"
+    wrong.write_text("not a document", encoding="utf-8")
+    page.set_input_files("#upload-input", str(wrong))
+    page.wait_for_function(
+        "document.querySelector('#toast').innerText.includes('accepts .docx')"
+    )
+
+    # Informational copy must not replace an error that is still on screen.
+    page.evaluate("document.getElementById('cancel-btn').click()")
+    assert "accepts .docx" in page.locator("#toast").inner_text()
+    _switch_language(page, "zh")
+    page.wait_for_function(
+        "document.querySelector('#toast').innerText.includes('本版本接受')"
+    )
+
+    # Once dismissed, language changes must not resurrect it.
+    page.evaluate("window.dispatchEvent(new Event('online'))")
+    page.wait_for_selector("#toast", state="hidden")
+    _switch_language(page, "en")
+    _switch_language(page, "zh")
+    assert page.locator("#toast").is_hidden()
+    assert page.locator("#toast").inner_text() == ""
+
+
+def test_completed_preload_panel_stays_hidden_on_language_switch(page) -> None:
+    _switch_language(page, "en")
+    # Start the same preload path through its retry control, then complete it
+    # deterministically instead of depending on service-worker network caching.
+    page.evaluate(
+        """() => {
+            Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true });
+            document.getElementById('preload-retry').click();
+        }"""
+    )
+    page.wait_for_selector("#preload-panel:not([hidden])")
+    page.evaluate(
+        "navigator.serviceWorker.dispatchEvent(new MessageEvent('message', "
+        "{data: {type: 'precache-done'}}))"
+    )
+    page.wait_for_selector("#preload-panel", state="hidden")
+    _switch_language(page, "zh")
+    _switch_language(page, "en")
+    assert page.locator("#preload-panel").is_hidden()
+
+
+def test_save_failure_uses_localized_store_error(page, built: Path) -> None:
+    _switch_language(page, "zh")
+    page.evaluate(
+        """() => {
+            window.lethStore.saveJob = async () => {
+                throw new Error('Browser storage is unavailable.');
+            };
+        }"""
+    )
+    page.set_input_files("#upload-input", str(built / "samples" / "docx-001.docx"))
+    page.click("#detect-btn")
+    page.wait_for_selector("#review-card:not([hidden])")
+    page.click("#generate-btn")
+    page.wait_for_selector("#generate-card:not([hidden])")
+    page.wait_for_function(
+        "document.querySelector('#generate-saved').innerText.includes('浏览器存储不可用')"
+    )
+    assert "Browser storage is unavailable" not in page.locator("#generate-saved").inner_text()
+
+    _switch_language(page, "en")
+    page.wait_for_function(
+        "document.querySelector('#generate-saved').innerText.includes('Browser storage is unavailable')"
+    )
+
+
 def test_docx_roundtrip_review_generate_restore_and_cache_privacy(
     page, built: Path, tmp_path: Path
 ) -> None:

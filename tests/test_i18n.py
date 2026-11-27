@@ -504,11 +504,31 @@ def test_toasts_and_notes_survive_a_switch():
     """Messages that are still on screen are kept as builders/keys, so a switch
     re-renders them rather than leaving the old language's sentence visible."""
     source = _p1_sources()
-    assert 'toastSpec = { build: () => t(key, vars), kind, ms };' in source, \
-        "toastKey() no longer stores a locale builder"
-    assert "el.textContent = build();" in source, "paintToast() stops repainting"
+    assert "showToast({ key, vars, kind, ms })" in source, \
+        "toastKey() no longer keeps its semantic key and values"
+    assert "toastSpec = { ...spec, visible: true };" in source, \
+        "toast visibility is no longer explicit state"
+    assert "el.textContent = key ? t(key, vars) : render();" in source, \
+        "paintToast() stops resolving the semantic copy"
+    assert "toastSpec = null;" in source, "hideToast() leaves a hidden toast repaintable"
     assert "function paintJobDictionaryNote()" in source, \
         "the job dictionary note is no longer repaintable"
+
+
+def test_repaint_preserves_hidden_state_and_localizes_save_errors():
+    """A repaint updates currently visible content; it must not turn hidden or
+    completed messages back on, and a store failure must not embed English."""
+    source = _p1_sources()
+    assert "onStatus(state.statusEvent, false)" in source, \
+        "repainting the runtime badge can recreate a transient status toast"
+    assert "if (!toastSpec?.visible)" in source, \
+        "a hidden toast is not guarded during repaint"
+    assert "if (!bar || !text || !state.preload?.visible)" in source, \
+        "a hidden preload panel is reopened during repaint"
+    assert 'state.generatedSaved = storeErrorSpec(error, "p1.generate.unsaved");' in source, \
+        "the save-failure line still embeds the raw English store error"
+    assert 'return { key: fallbackKey, vars: { error: message } };' in source, \
+        "unknown store errors no longer keep a localized wrapper plus technical detail"
 
 
 def test_browser_store_errors_map_to_locale_keys():
