@@ -6,7 +6,8 @@ covered:
 
 * body, headers, footers, footnotes, endnotes and comment bodies;
 * tracked-change text (``w:delText``);
-* revision/comment authors (``w:author``);
+* revision/comment authors (``w:author``) and People-pane authors
+  (``w15:author`` in ``word/people.xml``);
 * ``docProps/core.xml`` author/title fields.
 
 The parser is hardened (no network, no DTD, no entities) because the file comes
@@ -25,10 +26,12 @@ from lxml import etree
 from lethe import core
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+W15 = "http://schemas.microsoft.com/office/word/2012/wordml"
 DC = "http://purl.org/dc/elements/1.1/"
 CP = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
 TEXT_TAGS = {f"{{{W}}}t", f"{{{W}}}delText", f"{{{W}}}instrText"}
 AUTHOR = f"{{{W}}}author"
+W15_AUTHOR = f"{{{W15}}}author"
 PARAGRAPH = f"{{{W}}}p"
 CORE_TAGS = {
     f"{{{DC}}}title",
@@ -42,7 +45,7 @@ TEXT_PART = re.compile(
     # ``comments\d*`` matters: a document saved after a merge carries
     # ``word/comments1.xml`` and friends, and those comment bodies are just as
     # user-visible as the first part.
-    r"^(word/(document|header\d*|footer\d*|footnotes|endnotes|comments\d*)\.xml"
+    r"^(word/(document|header\d*|footer\d*|footnotes|endnotes|comments\d*|people)\.xml"
     r"|docProps/core\.xml)$"
 )
 COMMENT_PART = re.compile(r"^word/comments\d*\.xml$")
@@ -103,9 +106,17 @@ def _paragraph_groups(root: etree._Element) -> list[list[etree._Element]]:
     """
     groups: list[list[etree._Element]] = []
     for paragraph in root.iter(PARAGRAPH):
-        if any(ancestor.tag == PARAGRAPH for ancestor in paragraph.iterancestors()):
-            continue  # nested (text-box) paragraph: owned by its own iteration
-        nodes = [node for node in paragraph.iter() if node.tag in TEXT_TAGS and node.text]
+        # ``iter()`` descends through text boxes and would otherwise pull a
+        # nested ``w:p`` into its outer paragraph.  A text node belongs to the
+        # closest paragraph ancestor, so nested paragraphs stay independent and
+        # their runs cannot be flattened into the surrounding body paragraph.
+        nodes = [
+            node
+            for node in paragraph.iter()
+            if node.tag in TEXT_TAGS
+            and node.text
+            and _nearest_paragraph(node) is paragraph
+        ]
         # Only merge nodes of the same kind: ``w:instrText`` holds field code
         # (``HYPERLINK "…"``), never user prose, so it stays on its own.
         block: list[etree._Element] = []
@@ -157,7 +168,15 @@ def _replace_group(nodes: list[etree._Element], replace) -> int:
 
 
 def _author_nodes(root: etree._Element) -> list[etree._Element]:
-    return [node for node in root.iter() if node.get(AUTHOR)]
+    return [node for node in root.iter() if node.get(AUTHOR) or node.get(W15_AUTHOR)]
+
+
+def _author_values(node: etree._Element) -> list[tuple[str, str]]:
+    return [
+        (attribute, node.get(attribute, ""))
+        for attribute in (AUTHOR, W15_AUTHOR)
+        if node.get(attribute)
+    ]
 
 
 def _core_nodes(root: etree._Element) -> list[etree._Element]:
@@ -166,6 +185,13 @@ def _core_nodes(root: etree._Element) -> list[etree._Element]:
 
 def _in_paragraph(node: etree._Element) -> bool:
     return any(ancestor.tag == PARAGRAPH for ancestor in node.iterancestors())
+
+
+def _nearest_paragraph(node: etree._Element) -> etree._Element | None:
+    return next(
+        (ancestor for ancestor in node.iterancestors() if ancestor.tag == PARAGRAPH),
+        None,
+    )
 
 
 def extract_all_text_parts(raw: bytes) -> dict[str, str]:
@@ -181,7 +207,9 @@ def extract_all_text_parts(raw: bytes) -> dict[str, str]:
                       for group in _paragraph_groups(root)]
             pieces += [node.text or "" for node in _text_nodes(root)
                        if not _in_paragraph(node)]
-            pieces += [node.get(AUTHOR, "") for node in _author_nodes(root)]
+            pieces += [
+                value for node in _author_nodes(root) for _, value in _author_values(node)
+            ]
             pieces += [node.text or "" for node in _core_nodes(root)]
             out[name] = "\n".join(piece for piece in pieces if piece)
     return out
@@ -209,11 +237,11 @@ def _apply(
                     node.text = new_text
                     hits += count
             for node in _author_nodes(root):
-                current = node.get(AUTHOR, "")
-                new_text, count = replace(current)
-                if count:
-                    node.set(AUTHOR, new_text)
-                    hits += count
+                for attribute, current in _author_values(node):
+                    new_text, count = replace(current)
+                    if count:
+                        node.set(attribute, new_text)
+                        hits += count
             for node in _core_nodes(root):
                 new_text, count = replace(node.text or "")
                 if count:

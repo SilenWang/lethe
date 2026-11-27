@@ -6,6 +6,8 @@ import io
 import zipfile
 from pathlib import Path
 
+from lxml import etree
+
 from lethe import Entity, build_restorer
 from lethe.docx_engine import extract_all_text_parts, redact, restore, scan_leaks
 from lethe.postprocess import postprocess
@@ -104,6 +106,7 @@ def test_restore_survives_postprocess() -> None:
 # numbered part, a name split across runs, and the body/comment/metadata split.
 
 _W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+_W15 = 'xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"'
 _DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 
 
@@ -215,3 +218,54 @@ def test_detection_sees_text_the_writer_replaces() -> None:
         ),
     })
     assert "John Smith" in extract_all_text_parts(raw)["word/document.xml"]
+
+
+def test_text_box_paragraphs_are_not_merged_into_the_outer_paragraph() -> None:
+    """Nested text-box runs stay in place and do not clear sibling runs."""
+    raw = _package({
+        "word/document.xml": _document(
+            "<w:p>"
+            "<w:r><w:t>John Smith</w:t></w:r>"
+            "<w:r><w:pict><w:txbxContent><w:p>"
+            "<w:r><w:t>John</w:t></w:r>"
+            '<w:r><w:t xml:space="preserve"> Smith</w:t></w:r>'
+            "</w:p></w:txbxContent></w:pict></w:r>"
+            "<w:r><w:t>Tail</w:t></w:r>"
+            "</w:p>"
+        ),
+    })
+    result = redact(raw, ENTITIES)
+    root = etree.fromstring(result.updates["word/document.xml"].encode("utf-8"))
+    namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+    body_texts = [
+        node.text for node in root.xpath(".//w:body/w:p/w:r/w:t", namespaces=namespaces)
+    ]
+    box_texts = [
+        node.text
+        for node in root.xpath(
+            ".//w:txbxContent/w:p/w:r/w:t", namespaces=namespaces
+        )
+    ]
+
+    assert body_texts == ["[PERSON_001]", "Tail"]
+    assert box_texts == ["[PERSON_001]", None]
+    assert result.body_hits == 2
+    assert _exported_hits(raw, result) == result.hits == 2
+
+
+def test_people_pane_author_is_redacted_and_not_reported_as_a_leak() -> None:
+    """The People pane keeps comment authors outside ``comments*.xml``."""
+    people = (
+        f'{_DECL}<w15:people {_W15}>'
+        '<w15:person w15:author="John Smith">'
+        '<w15:presenceInfo w15:providerId="None"/>'
+        "</w15:person></w15:people>"
+    )
+    raw = _package({"word/people.xml": people})
+    result = redact(raw, ENTITIES)
+
+    assert result.other_hits == result.counts["word/people.xml"] == 1
+    assert 'w15:author="John Smith"' not in result.updates["word/people.xml"]
+    assert 'w15:author="[PERSON_001]"' in result.updates["word/people.xml"]
+    assert scan_leaks(_library_repack(raw, result.updates), ["John Smith"]) == []
