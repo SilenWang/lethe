@@ -126,14 +126,21 @@ def _apply(
     return result
 
 
-def redact(raw: bytes, entities: list[core.Entity]) -> WriteResult:
+def redact(
+    raw: bytes,
+    entities: list[core.Entity],
+    *,
+    token_overrides: dict[str, str] | None = None,
+) -> WriteResult:
     """Detect across every text part, then replace per node with stable tokens."""
     # NUL (not whitespace) separates parts so the phone pattern cannot span two
     # unrelated paragraphs and invent an account number.
     corpus = "\x00".join(
         text.replace("\n", "\x00") for text in extract_all_text_parts(raw).values()
     )
-    items = core.assign_tokens(core.detect(corpus, entities))
+    items = core.apply_token_overrides(
+        core.assign_tokens(core.detect(corpus, entities)), token_overrides
+    )
     replace, token_to_real = core.build_replacer(items)
     payload = [
         {

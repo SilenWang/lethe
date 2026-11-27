@@ -106,11 +106,16 @@ def _entities(raw_entities: list[dict[str, object]]) -> list[core.Entity]:
 
 
 def _redact(
-    path: str, raw_entities: list[dict[str, object]], file_name: str
+    path: str,
+    raw_entities: list[dict[str, object]],
+    file_name: str,
+    token_overrides: dict[str, str] | None = None,
 ) -> str:
     raw = Path(path).read_bytes()
     if file_name.lower().endswith(".pptx"):
-        pptx_result = pptx_engine.redact(raw, _entities(raw_entities))
+        pptx_result = pptx_engine.redact(
+            raw, _entities(raw_entities), token_overrides=token_overrides
+        )
         Path("/tmp/final.pptx").write_bytes(pptx_result.output or raw)
         return _ok(
             final_path="/tmp/final.pptx",
@@ -122,7 +127,9 @@ def _redact(
             surfaces=pptx_result.surfaces,
         )
     if file_name.lower().endswith(".xlsx"):
-        xlsx_result = xlsx_engine.redact(raw, _entities(raw_entities))
+        xlsx_result = xlsx_engine.redact(
+            raw, _entities(raw_entities), token_overrides=token_overrides
+        )
         Path("/tmp/final.xlsx").write_bytes(xlsx_result.output)
         return _ok(
             final_path="/tmp/final.xlsx",
@@ -132,7 +139,9 @@ def _redact(
             hits=xlsx_result.hits,
             warnings=xlsx_result.warnings,
         )
-    result = docx_engine.redact(raw, _entities(raw_entities))
+    result = docx_engine.redact(
+        raw, _entities(raw_entities), token_overrides=token_overrides
+    )
     return _ok(
         updates=result.updates,
         tokens=result.tokens,
@@ -193,6 +202,7 @@ def dispatch(request_json: str) -> str:
                 str(request["path"]),
                 list(request.get("entities") or []),
                 str(request.get("file_name", "upload.docx")),
+                dict(request.get("token_overrides") or {}),
             )
         if op == "restore":
             return _restore(

@@ -359,6 +359,7 @@
       schemaVersion: SCHEMA_VERSION,
       createdAt: job.createdAt || nowIso(),
       sourceFiles: job.sourceFiles || [],
+      files: job.files || [],
       replacements: job.replacements || 0,
       passphraseProtected: !!passphrase,
       crypto: null,
@@ -402,6 +403,7 @@
           jobId: r.jobId,
           createdAt: r.createdAt || '',
           sourceFiles: r.sourceFiles || [],
+          files: r.files || [],
           replacements: r.replacements || 0,
           passphraseProtected: !!r.passphraseProtected
         };
@@ -526,13 +528,20 @@
 
   /** Download a stored result file again, straight from IndexedDB (no server
    * round trip). Rejects with a plain-language error when it is gone. */
-  function downloadOutput(jobId) {
+  function downloadOutput(jobId, fileName) {
     return getOne('outputs', jobId).then(function (row) {
       var files = (row && row.files) || [];
       if (!files.length) {
         throw new Error('This result file is no longer stored in this browser ' +
                         '(it was cleared, or it passed the retention limit). Add the original ' +
                         'file again to generate a fresh de-identified copy.');
+      }
+      if (fileName) {
+        files = files.filter(function (file) { return file.name === fileName; });
+        if (!files.length) {
+          throw new Error('That file is no longer stored in this browser. ' +
+                          'Generate the task again to recreate it.');
+        }
       }
       return files.map(function (f) {
         var url = URL.createObjectURL(f.blob);

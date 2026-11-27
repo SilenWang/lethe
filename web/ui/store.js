@@ -51,6 +51,25 @@ export async function getMapping(jobId, passphrase) {
   return window.lethStore.getMapping(jobId, passphrase);
 }
 
+export async function saveOutput(record) {
+  if (!storeAvailable()) throw new Error("Browser storage is unavailable.");
+  return window.lethStore.saveOutput(record);
+}
+
+export async function downloadOutput(jobId, fileName) {
+  if (!storeAvailable()) throw new Error("Browser storage is unavailable.");
+  return window.lethStore.downloadOutput(jobId, fileName);
+}
+
+export async function outputStats() {
+  if (!storeAvailable()) return { count: 0, jobIds: [], limit: 0 };
+  try {
+    return await window.lethStore.outputStats();
+  } catch {
+    return { count: 0, jobIds: [], limit: 0 };
+  }
+}
+
 export async function listJobs() {
   if (!storeAvailable()) return [];
   try {

@@ -473,6 +473,16 @@ def test_shell_attributes_take_their_copy_from_a_locale():
     assert description, "the meta description is gone"
     assert "data-i18n-content=" in description.group(0), \
         "the meta description is not translated"
+    # The file switchers a multi-file task adds are user-visible controls too:
+    # each must name itself through the locale, not a hardcoded English string.
+    for select_id, key in (("preview-file", "p1.preview.file_label"),
+                           ("result-file", "p1.generate.file_label"),
+                           ("history-file", "p1.history.file_label")):
+        node = re.search(rf'<select id="{select_id}"[^>]*>', html)
+        assert node, f"the {select_id} switcher is gone"
+        assert f'data-i18n-aria-label="{key}"' in node.group(0), \
+            f"{select_id} does not take its accessible name from {key}"
+        assert key in EN and key in ZH, f"{key} is missing from a locale"
     # i18n.js only rewrites the attributes it enumerates
     for attribute in ('["data-i18n-aria-label", "aria-label"]',
                       '["data-i18n-title", "title"]',
@@ -483,17 +493,24 @@ def test_shell_attributes_take_their_copy_from_a_locale():
 def test_language_switch_repaints_live_state():
     """A switch must repaint what is already on screen, not only the static
     shell: upload, preview, review, generated and restored results, history, the
-    job dictionary, the dictionary page, the runtime badge and the toast."""
+    job dictionary, the dictionary page, the runtime badge and the toast.
+
+    The upload/preview/review panes belong to one file of a task, so `repaint()`
+    redraws them through `renderTask()` — which paints the file that is active
+    right now — instead of the single-file `renderUploadFile()`.
+    """
     source = _p1_sources()
     body = re.search(r"function repaint\(\) \{.*?\n\}\n", source, re.S)
     assert body, "repaint() is gone — a language switch would leave stale copy"
     repaint = body.group(0)
-    for call in ("state.i18n.apply()", "onStatus(", "paintPreload(", "renderUploadFile(",
-                 "renderDegradations(", "renderInspection(", "renderPreview(",
-                 "renderReview(", "renderGenerate(", "renderHistory(",
-                 "paintJobDictionaryNote(", "renderRestore(", "renderDictionary(",
-                 "paintToast(", "fillTypeSelects("):
+    for call in ("state.i18n.apply()", "onStatus(", "paintPreload(", "renderTask(",
+                 "renderTaskFileList(", "renderTaskSummary(", "renderGenerate(",
+                 "paintGeneratedSaved(", "renderHistory(", "paintJobDictionaryNote(",
+                 "renderRestore(", "renderDictionary(", "paintToast(", "fillTypeSelects("):
         assert call in repaint, f"repaint() never refreshes {call}"
+    # The per-file panes come from the active file, never from another one.
+    assert "activeFile()" in repaint, \
+        "repaint() does not redraw the currently active task file"
     # and the picker actually calls it after switching
     handler = re.search(r'"lang-select"\)\.addEventListener\("change".*?\n  \}\);', source, re.S)
     assert handler, "the language picker lost its change handler"

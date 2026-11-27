@@ -190,6 +190,7 @@ async function runWrite(id, op, bytes, options, fileName) {
     file_name: fileName,
     entities: options.entities || [],
     token_map: options.token_map || {},
+    token_overrides: options.token_overrides || {},
   });
   if (!plan.ok) return plan;
   if (plan.final_path) {
@@ -250,6 +251,7 @@ async function runPartDirectWrite(id, op, bytes, options, fileName) {
     file_name: fileName,
     entities: options.entities || [],
     token_map: options.token_map || {},
+    token_overrides: options.token_overrides || {},
   });
   if (!plan.ok) return plan;
   if (!plan.final_path) {
