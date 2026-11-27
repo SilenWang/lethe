@@ -9,6 +9,7 @@ pipeline (gates before any document library) and is extended by
 from __future__ import annotations
 
 import json
+import re
 import time
 import zipfile
 from pathlib import Path
@@ -17,6 +18,10 @@ from lethe import core, docx_engine, gates, postprocess, pptx_engine, xlsx_engin
 
 PROTOCOL = 1
 PREVIEW_MAX_CHARS = 250_000
+# ``[PREFIX_001]`` split into (whole placeholder, prefix, 3+ digit index) so the
+# detector can require a known type prefix and the ``001`` fingerprint without
+# a second pass over the text.
+_PLACEHOLDER = re.compile(r"(\[([A-Z][A-Z0-9_]*?)_(\d{3,})\])")
 
 
 def _ok(**payload: object) -> str:
@@ -35,7 +40,56 @@ def _echo(options: dict[str, object]) -> str:
     return _ok(payload=options.get("payload", ""), protocol=PROTOCOL)
 
 
-def _inspect(path: str, file_name: str) -> str:
+def detect_redaction_patterns(
+    text_parts: dict[str, str],
+    token_types: list[str] | None = None,
+) -> dict[str, object] | None:
+    """Report only a placeholder stream that Lethe itself most likely wrote.
+
+    A bare ``[UPPERCASE_123]`` shape is far too common in ordinary prose
+    (``[ISO_9001]``, ``[HTTP_404]``, ``[CLIENT]``, a citation marker) to warn
+    on, so the test is deliberately narrow.  A file is treated as already
+    de-identified when a placeholder carries
+
+    * a type prefix Lethe knows (its own fixed prefixes plus any custom token
+      type the user's dictionary defines), **and**
+    * either the first index ``001`` — Lethe always numbers a type from one, so
+      ``[PERSON_001]`` is a fingerprint, not a coincidence — or at least three
+      distinct tokens, which is the shape of a systematic replacement pass.
+
+    Anything outside that stays silent: a false alarm on an untouched document
+    is worse than the rare miss, because it teaches the user to click through
+    the warning.
+    """
+    prefixes = {
+        core.TYPE_PREFIX.get(name.upper(), name.upper())
+        for name in (token_types or [])
+        if str(name).strip()
+    } | set(core.TYPE_PREFIX.values()) | {"OTHER"}
+
+    counts: dict[str, int] = {}
+    starts_at_one = False
+    for text in text_parts.values():
+        for token, prefix, index in _PLACEHOLDER.findall(text):
+            if prefix not in prefixes:
+                continue
+            counts[token] = counts.get(token, 0) + 1
+            if index == "001":
+                starts_at_one = True
+    if not counts:
+        return None
+    if not starts_at_one and len(counts) < 3:
+        return None
+
+    examples = sorted(counts, key=lambda token: (-counts[token], token))[:5]
+    return {
+        "token_count": sum(counts.values()),
+        "distinct_count": len(counts),
+        "examples": examples,
+    }
+
+
+def _inspect(path: str, file_name: str, token_types: list[str] | None = None) -> str:
     """Run the four hard gates, then count package parts."""
     raw = Path(path).read_bytes()
     try:
@@ -87,6 +141,7 @@ def _inspect(path: str, file_name: str) -> str:
         warnings=[finding.render() for finding in report.warnings()],
         preview_text=preview[:PREVIEW_MAX_CHARS],
         preview_truncated=len(preview) > PREVIEW_MAX_CHARS,
+        redaction_warning=detect_redaction_patterns(text_parts, token_types),
     )
 
 
@@ -148,6 +203,9 @@ def _redact(
         items=result.items,
         counts=result.counts,
         hits=result.hits,
+        body_hits=result.body_hits,
+        comment_hits=result.comment_hits,
+        other_hits=result.other_hits,
     )
 
 
@@ -174,8 +232,15 @@ def _restore(path: str, token_map: dict[str, str], file_name: str) -> str:
             warnings=xlsx_result.warnings,
         )
     result = docx_engine.restore(raw, token_map)
-    return _ok(updates=result.updates, tokens=result.tokens, counts=result.counts,
-               hits=result.hits)
+    return _ok(
+        updates=result.updates,
+        tokens=result.tokens,
+        counts=result.counts,
+        hits=result.hits,
+        body_hits=result.body_hits,
+        comment_hits=result.comment_hits,
+        other_hits=result.other_hits,
+    )
 
 
 def _finish(source: str, library: str, tokens: list[str]) -> str:
@@ -196,7 +261,12 @@ def dispatch(request_json: str) -> str:
         if op == "echo":
             return _echo(options)
         if op == "inspect":
-            return _inspect(str(request["path"]), str(request.get("file_name", "upload.docx")))
+            token_types = request.get("token_types")
+            return _inspect(
+                str(request["path"]),
+                str(request.get("file_name", "upload.docx")),
+                [str(name) for name in token_types] if isinstance(token_types, list) else [],
+            )
         if op == "redact":
             return _redact(
                 str(request["path"]),

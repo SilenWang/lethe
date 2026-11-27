@@ -323,6 +323,23 @@ main { flex: 1; width: 100%; max-width: 1040px; margin: 0 auto; padding: 18px 22
 .toast-ok { background: var(--ok); color: #fff; }
 .toast-info { background: var(--accent-strong); color: #fff; }
 
+.warning-dialog {
+  width: min(560px, calc(100vw - 32px));
+  padding: 22px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+}
+.warning-dialog::backdrop { background: rgba(20, 15, 28, 0.55); }
+.warning-dialog h2 { color: var(--wait); }
+.warning-dialog p { margin: 10px 0; }
+.warning-dialog .token-examples {
+  font: 13px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
 [hidden] { display: none !important; }
 .preload {
   display: flex;

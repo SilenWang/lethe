@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import re
 import shutil
 import subprocess
 import sys
@@ -12,7 +14,10 @@ from pathlib import Path
 import pytest
 from _server import StaticServer
 
+from lethe.docx_engine import extract_all_text_parts
+
 REPO = Path(__file__).resolve().parents[2]
+TOKEN_RE = re.compile(r"\[[A-Z][A-Z0-9_]*_\d{3,}\]")
 
 try:
     from playwright.sync_api import sync_playwright
@@ -79,6 +84,34 @@ ROUNDTRIP = """async () => {
         tokens: red.result.tokens,
         restoredType: restored.type,
         restoredSize: restored.result && restored.result.size,
+    };
+}"""
+
+DOCX_COUNTS = """async () => {
+    const buf = await (await fetch("/samples/docx-001.docx")).arrayBuffer();
+    const bridge = window.p1.createBridge({});
+    await bridge.ready;
+    const result = await bridge.run({
+        op: "redact",
+        bytes: new Uint8Array(buf),
+        fileName: "comments.docx",
+        options: {
+            entities: [
+                {canonical: "John Smith", type: "PERSON", aliases: []},
+                {canonical: "Alice Chen", type: "PERSON", aliases: []},
+                {canonical: "Project Phoenix", type: "COUNTERPARTY", aliases: []},
+            ],
+        },
+    });
+    let binary = "";
+    for (let i = 0; i < result.bytes.length; i += 0x8000) {
+        binary += String.fromCharCode.apply(null, result.bytes.subarray(i, i + 0x8000));
+    }
+    bridge.dispose();
+    return {
+        hits: result.hits,
+        counts: result.counts,
+        bytesB64: btoa(binary),
     };
 }"""
 
@@ -189,6 +222,21 @@ def test_redact_then_restore_roundtrip(page) -> None:
     assert "[PERSON_001]" in outcome["tokens"]
     assert outcome["restoredType"] == "result", outcome
     assert outcome["restoredSize"] > 0
+
+
+def test_docx_comment_replacements_are_counted_and_exported(page) -> None:
+    outcome = page.evaluate(DOCX_COUNTS)
+    assert outcome["counts"]["word/document.xml"] > 0
+    assert outcome["counts"]["word/comments.xml"] == 5
+    assert outcome["hits"] == sum(outcome["counts"].values())
+
+    exported = base64.b64decode(outcome["bytesB64"])
+    parts = extract_all_text_parts(exported)
+    comments = parts["word/comments.xml"]
+    assert "John Smith" not in comments
+    assert "Alice Chen" not in comments
+    assert "[PERSON_" in comments
+    assert len(TOKEN_RE.findall("\n".join(parts.values()))) == outcome["hits"]
 
 
 def test_offline_cold_start_roundtrip(built: Path) -> None:

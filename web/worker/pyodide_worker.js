@@ -123,10 +123,26 @@ function callPython(payload) {
   }
 }
 
-async function runInspect(id, bytes, fileName) {
+// The Python side speaks snake_case; the UI reads camelCase like every other
+// field of the worker result, so translate the one nested payload here.
+function mapRedactionWarning(warning) {
+  if (!warning) return null;
+  return {
+    tokenCount: warning.token_count || 0,
+    distinctCount: warning.distinct_count || 0,
+    examples: Array.isArray(warning.examples) ? warning.examples : [],
+  };
+}
+
+async function runInspect(id, bytes, fileName, options = {}) {
   post(progress({ type: "progress", id, phase: "gates" }));
   pyodide.FS.writeFile("/tmp/input.docx", bytes);
-  const gated = callPython({ op: "inspect", path: "/tmp/input.docx", file_name: fileName });
+  const gated = callPython({
+    op: "inspect",
+    path: "/tmp/input.docx",
+    file_name: fileName,
+    token_types: options.tokenTypes || [],
+  });
   if (!gated.ok) return gated;
   if (/\.(xlsx|pptx)$/i.test(fileName)) {
     pyodide.runPython(`
@@ -144,6 +160,7 @@ except OSError:
       warnings: gated.warnings,
       previewText: gated.preview_text || "",
       previewTruncated: !!gated.preview_truncated,
+      redactionWarning: mapRedactionWarning(gated.redaction_warning),
       docxWasm: docxWasmReady,
       heapBytes: heapBytes(),
     };
@@ -172,6 +189,7 @@ except OSError:
     warnings: gated.warnings,
     previewText: gated.preview_text || "",
     previewTruncated: !!gated.preview_truncated,
+    redactionWarning: mapRedactionWarning(gated.redaction_warning),
     docxWasm: true,
     heapBytes: heapBytes(),
   };
@@ -235,6 +253,9 @@ async function runWrite(id, op, bytes, options, fileName) {
     items: plan.items,
     counts: plan.counts,
     hits: plan.hits,
+    bodyHits: plan.body_hits || 0,
+    commentHits: plan.comment_hits || 0,
+    otherHits: plan.other_hits || 0,
     size: output.byteLength,
     docxWasm: true,
     heapBytes: heapBytes(),
@@ -305,7 +326,7 @@ async function handleRun(message) {
       return;
     }
     if (op === "inspect") {
-      const result = await runInspect(id, bytes, message.fileName);
+      const result = await runInspect(id, bytes, message.fileName, message.options || {});
       if (!result.ok) {
         post({ type: "error", id, ...result });
         return;
