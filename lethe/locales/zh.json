@@ -441,5 +441,15 @@
   "p1.storage.line": "本浏览器已存 {entities} 个实体 · {jobs} 个任务",
   "p1.storage.unavailable": "浏览器存储不可用——仍可处理文件，但还原密钥无法保存。",
   "p1.offline.ready": "离线就绪——应用壳与运行时已缓存在本机。",
-  "p1.privacy": "文档、令牌与结果都不会离开本浏览器。"
+  "p1.privacy": "文档、令牌与结果都不会离开本浏览器。",
+  "p1.doc_title": "Lethe — 文档脱敏工具",
+  "p1.meta.description": "本地、可逆的文档脱敏工具。文档在本浏览器内处理，从不上传。",
+  "p1.workflow": "操作流程",
+  "p1.restore.failed": "还原该文档失败：{error}",
+  "p1.restore.wrong_passphrase": "口令错误，或该任务的还原密钥已损坏。",
+  "p1.restore.result_gone": "该结果文件已不在本浏览器中（已被清除或超出保留上限）。",
+  "p1.history.job_missing": "该任务已不在本浏览器中。",
+  "p1.history.not_protected": "该任务未设置口令，请把口令留空。",
+  "p1.history.cant_load": "加载该任务的词表失败：{error}",
+  "p1.dictionary.cant_save": "词条保存失败：{error}"
 }

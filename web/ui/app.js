@@ -27,6 +27,10 @@ const state = {
   i18n: null,
   bridge: null,
   runtime: "initializing",
+  statusEvent: null,
+  phase: "",
+  preload: null,
+  gate: null,
   busy: false,
   file: null,
   inspection: null,
@@ -39,11 +43,14 @@ const state = {
   dictByKey: new Map(),
   disabledEntities: new Set(),
   generated: null,
+  generatedSaved: null,
   restoreFile: null,
   restored: null,
+  restoreSummary: null,
   jobs: [],
   selectedJobId: "",
   jobMapping: null,
+  jobDictNote: null,
   jobDictRequest: 0,
   restoreRequest: 0,
   storageOk: false,
@@ -55,18 +62,53 @@ const t = (key, vars) => state.i18n.t(key, vars);
 
 // ---------------------------------------------------------------- chrome
 
-function toast(message, kind = "info", ms = 7000) {
+// Every transient message is kept as a locale key (plus its values) rather than
+// as finished text, so a language switch can repaint the toast that is still on
+// screen instead of leaving the previous language's sentence behind.
+let toastSpec = null;
+
+function showToast(spec) {
+  // An error that is still on screen outranks an informational update. Decide
+  // that from semantic state, before replacing the current message.
+  if (spec.kind !== "error" && toastSpec?.visible && toastSpec.kind === "error") return;
+  clearTimeout(paintToast.timer);
+  toastSpec = { ...spec, visible: true };
+  paintToast();
+}
+
+function toastKey(key, vars, kind = "info", ms = 7000) {
+  showToast({ key, vars, kind, ms });
+}
+
+// Composite messages (a localised code sentence plus its gate findings) keep
+// their builder so the toast repaints in the new language too.
+function toastBuild(build, kind, ms = 0) {
+  showToast({ render: build, kind, ms });
+}
+
+function paintToast() {
   const el = $("toast");
-  if (kind !== "error" && !el.hidden && el.classList.contains("toast-error")) return;
-  el.textContent = message;
+  if (!toastSpec?.visible) {
+    el.hidden = true;
+    return;
+  }
+  const { key, vars, render, kind, ms } = toastSpec;
+  el.textContent = key ? t(key, vars) : render();
   el.className = `toast toast-${kind}`;
   el.hidden = false;
-  clearTimeout(toast.timer);
-  if (ms) toast.timer = setTimeout(() => { el.hidden = true; }, ms);
+  clearTimeout(paintToast.timer);
+  if (ms) {
+    paintToast.timer = setTimeout(hideToast, ms);
+  }
 }
 
 function hideToast() {
-  $("toast").hidden = true;
+  clearTimeout(paintToast.timer);
+  paintToast.timer = null;
+  toastSpec = null;
+  const el = $("toast");
+  el.hidden = true;
+  el.textContent = "";
 }
 
 function showPanel(name) {
@@ -107,10 +149,12 @@ function setRunning(running) {
 }
 
 function setPhase(phase) {
+  state.phase = phase || "";
   if (phase) $("progress-label").textContent = t(`p1.progress.${phase}`);
 }
 
-function onStatus(event) {
+function onStatus(event, notify = true) {
+  state.statusEvent = event;
   state.runtime = event.state;
   const badge = $("runtime-badge");
   badge.className = "badge";
@@ -127,13 +171,15 @@ function onStatus(event) {
       "betteroffice-pptx": "p1.init.pptx",
     };
     badge.textContent = t(initKeys[event.phase] || "p1.runtime.initializing");
-    if (event.reason && event.reason !== "init") {
-      toast(t("p1.runtime.rebuilding"), "info", 0);
+    if (notify && event.reason && event.reason !== "init") {
+      toastKey("p1.runtime.rebuilding", null, "info", 0);
     }
   } else {
     badge.classList.add("badge-bad");
     badge.textContent = t("p1.runtime.failed");
-    if (event.reason) toast(t("p1.error.INIT_FAILED", { error: event.reason }), "error", 0);
+    if (notify && event.reason) {
+      toastKey("p1.error.INIT_FAILED", { error: event.reason }, "error", 0);
+    }
   }
   updateFileButtons();
 }
@@ -145,19 +191,45 @@ function showPreload(done, total) {
   const bar = $("preload-bar");
   const text = $("preload-text");
   if (!panel || !bar || !text) return;
-  panel.hidden = false;
-  $("preload-retry").hidden = true;
-  bar.max = Math.max(total || 1, 1);
-  bar.value = done || 0;
-  text.textContent = total
-    ? t("p1.preload.progress", { done: done || 0, total })
-    : t("p1.preload.starting");
+  state.preload = { done: done || 0, total: total || 0, visible: true };
+  paintPreload();
+}
+
+function paintPreload() {
+  const bar = $("preload-bar");
+  const text = $("preload-text");
+  if (!bar || !text || !state.preload?.visible) {
+    $("preload-panel").hidden = true;
+    return;
+  }
+  const { done, total, error, finished } = state.preload;
+  $("preload-panel").hidden = false;
+  $("preload-retry").hidden = !error;
+  if (error) {
+    text.textContent = t("p1.preload.failed", { error });
+    return;
+  }
+  if (finished) {
+    text.textContent = t("p1.preload.done");
+    return;
+  }
+  if (total) {
+    bar.max = Math.max(total, 1);
+    bar.value = done;
+    text.textContent = t("p1.preload.progress", { done, total });
+  } else {
+    text.textContent = t("p1.preload.starting");
+  }
 }
 
 function failPreload(message) {
-  $("preload-panel").hidden = false;
-  $("preload-text").textContent = t("p1.preload.failed", { error: message });
-  $("preload-retry").hidden = false;
+  state.preload = { done: 0, total: 0, error: message, visible: true };
+  paintPreload();
+}
+
+function hidePreload() {
+  if (state.preload) state.preload.visible = false;
+  $("preload-panel").hidden = true;
 }
 
 async function preloadRuntime() {
@@ -180,9 +252,10 @@ async function preloadRuntime() {
         reject(error);
         return;
       }
-      $("preload-text").textContent = t("p1.preload.done");
-      setTimeout(() => { $("preload-panel").hidden = true; }, 1500);
-      toast(t("p1.offline.ready"), "ok", 5000);
+      state.preload = { done: 0, total: 0, finished: true, visible: true };
+      paintPreload();
+      setTimeout(hidePreload, 1500);
+      toastKey("p1.offline.ready", null, "ok", 5000);
       resolve();
     };
     const onMessage = (event) => {
@@ -241,12 +314,40 @@ async function runOp(args) {
 
 function reportError(error) {
   const code = error?.code || "INTERNAL";
-  const parts = [t(errorKey(code), { error: error?.message || "" })];
-  parts.push(...gateFindings(error?.detail));
-  if (code === "TOO_LARGE") {
-    parts.push(t("gate.tip.split"), t("gate.tip.convert"), t("gate.tip.machine"));
+  const build = () => {
+    const parts = [t(errorKey(code), { error: error?.message || "" })];
+    parts.push(...gateFindings(error?.detail));
+    if (code === "TOO_LARGE") {
+      parts.push(t("gate.tip.split"), t("gate.tip.convert"), t("gate.tip.machine"));
+    }
+    return parts.join(" · ");
+  };
+  toastBuild(build, code === "CANCELLED" ? "info" : "error", 0);
+}
+
+// Browser-store failures are written in English by client-store.js / store.js.
+// Showing `error.message` verbatim would put English prose into a Chinese page,
+// so the ones a user can actually hit map to their own locale key; anything else
+// is reported through a localised wrapper sentence with the detail appended.
+const STORE_ERROR_KEYS = [
+  ["Wrong passphrase, or the stored mapping is corrupted.", "p1.restore.wrong_passphrase"],
+  ["That conversion is no longer in this browser.", "p1.history.job_missing"],
+  ["This conversion is not passphrase-protected", "p1.history.not_protected"],
+  ["This result file is no longer stored in this browser", "p1.restore.result_gone"],
+  ["Browser storage is unavailable", "p1.storage.unavailable"],
+];
+
+function storeErrorSpec(error, fallbackKey) {
+  const message = String(error?.message || error || "");
+  for (const [prefix, key] of STORE_ERROR_KEYS) {
+    if (message.startsWith(prefix)) return { key, vars: null };
   }
-  toast(parts.join(" · "), code === "CANCELLED" ? "info" : "error", 0);
+  return { key: fallbackKey, vars: { error: message } };
+}
+
+function storeErrorText(error, fallbackKey) {
+  const spec = storeErrorSpec(error, fallbackKey);
+  return t(spec.key, spec.vars);
 }
 
 function gateFindings(detail) {
@@ -274,31 +375,27 @@ function updateFileButtons() {
 function pickFile(file) {
   if (state.busy) {
     $("upload-input").value = "";
-    return toast(t("p1.error.BUSY"), "info");
+    return toastKey("p1.error.BUSY", null, "info");
   }
-  if (!isSupported(file)) return toast(t("p1.upload.wrong_type"), "error");
+  if (!isSupported(file)) return toastKey("p1.upload.wrong_type", null, "error");
   const gate = gateLevel(file.size);
   if (gate.level === "reject") {
     clearFile();
-    return toast(t("gate.file_reject", { size_mb: gate.size, max_mb: 50 }), "error", 0);
+    return toastKey("gate.file_reject", { size_mb: gate.size, max_mb: 50 }, "error", 0);
   }
   Object.assign(state, {
     file,
     inspection: null,
     detection: null,
     generated: null,
+    generatedSaved: null,
     selected: new Set(),
     types: new Map(),
     manualEntities: [],
+    gate,
   });
   showWarnings([]);
-  $("upload-file").hidden = false;
-  $("upload-file").textContent = t("p1.upload.selected", { name: file.name, size: humanSize(file.size) });
-  $("upload-note").hidden = gate.level !== "warn";
-  if (gate.level === "warn") {
-    $("upload-note").textContent = t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 }) +
-      " " + t("p1.upload.large_note");
-  }
+  renderUploadFile();
   $("upload-inspect").hidden = true;
   $("preview-card").hidden = true;
   $("review-card").hidden = true;
@@ -314,7 +411,9 @@ function clearFile() {
     inspection: null,
     detection: null,
     generated: null,
+    generatedSaved: null,
     manualEntities: [],
+    gate: null,
   });
   $("upload-file").hidden = true;
   $("upload-note").hidden = true;
@@ -329,6 +428,25 @@ function clearFile() {
   $("upload-input").value = "";
   showWarnings([]);
   updateFileButtons();
+}
+
+// The picked file's line and its over-35-MB notice are repainted on a language
+// switch, so both are derived from `state.file` / `state.gate` rather than
+// written once and left in the previous language.
+function renderUploadFile() {
+  const file = state.file;
+  if (!file) return;
+  $("upload-file").hidden = false;
+  $("upload-file").textContent = t("p1.upload.selected", {
+    name: file.name,
+    size: humanSize(file.size),
+  });
+  const gate = state.gate;
+  $("upload-note").hidden = gate?.level !== "warn";
+  if (gate?.level === "warn") {
+    $("upload-note").textContent =
+      `${t("gate.file_warn", { size_mb: gate.size, warn_mb: 35 })} ${t("p1.upload.large_note")}`;
+  }
 }
 
 function renderDegradations(file) {
@@ -399,19 +517,34 @@ function bindDropzone(zone, input, onFile) {
 }
 
 function showInspection(result, file) {
+  state.inspection = result;
+  renderInspection(file);
+}
+
+// The "package checked" line is part of the visible upload state, so it is
+// rebuilt from `state.inspection` when the interface language changes.
+function renderInspection(file = state.file) {
+  const result = state.inspection;
+  const line = $("upload-inspect");
+  if (!result || !file) {
+    line.hidden = true;
+    return;
+  }
   const partsKey = isXlsx(file)
     ? "p1.upload.parts_xlsx"
     : isPptx(file)
       ? "p1.upload.parts_pptx"
       : "p1.upload.parts";
-  $("upload-inspect").hidden = false;
-  $("upload-inspect").textContent = `${t("p1.upload.checked")} ` +
-    t(partsKey, { parts: result.parts, paragraphs: result.paragraphs || 0 });
+  line.hidden = false;
+  line.textContent = `${t("p1.upload.checked")} ${t(partsKey, {
+    parts: result.parts,
+    paragraphs: result.paragraphs || 0,
+  })}`;
 }
 
 async function inspectFile() {
   const sourceFile = state.file;
-  if (!sourceFile) return toast(t("p1.upload.need_file"), "error");
+  if (!sourceFile) return toastKey("p1.upload.need_file", null, "error");
   try {
     const inspection = await runOp({ op: "inspect", file: sourceFile });
     if (sourceFile !== state.file) return;
@@ -483,7 +616,7 @@ function renderPreview(text, items) {
 
 async function detect() {
   const sourceFile = state.file;
-  if (!sourceFile) return toast(t("p1.upload.need_file"), "error");
+  if (!sourceFile) return toastKey("p1.upload.need_file", null, "error");
   try {
     await runBusy(async () => {
       const inspection = await runWorker({ op: "inspect", file: sourceFile });
@@ -513,7 +646,7 @@ async function detect() {
       renderPreview(state.detection.previewText, items);
       renderReview();
       $("review-card").hidden = false;
-      toast(t("p1.review.selected", { count: state.selected.size, total: items.length }), "info", 3000);
+      toastKey("p1.review.selected", { count: state.selected.size, total: items.length }, "info", 3000);
     });
   } catch (error) {
     reportError(error);
@@ -616,9 +749,9 @@ async function generate() {
   const detection = state.detection;
   const sourceFile = detection?.file;
   const all = state.detection?.items || [];
-  if (!sourceFile) return toast(t("p1.upload.need_file"), "error");
+  if (!sourceFile) return toastKey("p1.upload.need_file", null, "error");
   const chosen = all.filter((item) => state.selected.has(item.canonical));
-  if (!chosen.length) return toast(t("p1.review.none_selected"), "error");
+  if (!chosen.length) return toastKey("p1.review.none_selected", null, "error");
   const typeChanged = all.some((item) => state.types.get(item.canonical) !== item.type);
   const entities = chosen.map((item) => ({
     canonical: item.canonical,
@@ -646,6 +779,9 @@ async function generate() {
       checked: new Set(chosen.map((item) => item.canonical)),
     };
     renderGenerate();
+    if (result.bytes?.byteLength > RECYCLE_BYTES) {
+      toastKey("p1.upload.large_note", null, "info", 0);
+    }
     $("generate-card").hidden = false;
     await persistJob(jobId, mapping, sourceFile);
     if ($("save-names").checked) await saveSelectedNames(chosen);
@@ -656,7 +792,6 @@ async function generate() {
 }
 
 async function persistJob(jobId, mapping, sourceFile) {
-  const node = $("generate-saved");
   try {
     await store.saveJob({
       jobId,
@@ -667,11 +802,21 @@ async function persistJob(jobId, mapping, sourceFile) {
       passphrase: "",
     });
     state.storageOk = true;
-    node.textContent = t("p1.generate.saved");
+    state.generatedSaved = { key: "p1.generate.saved", vars: null };
     await loadJobs();
   } catch (error) {
-    node.textContent = t("p1.generate.unsaved", { error: error?.message || error });
+    state.generatedSaved = storeErrorSpec(error, "p1.generate.unsaved");
   }
+  paintGeneratedSaved();
+}
+
+// The saved / not-saved line outlives the run, so it is kept as a key + values
+// and repainted on a language switch rather than frozen in one language.
+function paintGeneratedSaved() {
+  const node = $("generate-saved");
+  if (!node) return;
+  const spec = state.generatedSaved;
+  node.textContent = spec ? t(spec.key, spec.vars) : "";
 }
 
 function renderGenerate() {
@@ -682,7 +827,7 @@ function renderGenerate() {
     tokens: out.tokens,
   });
   $("generate-job").textContent = `${t("p1.generate.job")}: ${out.jobId}`;
-  if (out.bytes?.byteLength > RECYCLE_BYTES) toast(t("p1.upload.large_note"), "info", 0);
+  paintGeneratedSaved();
 }
 
 function download(bytes, name) {
@@ -757,20 +902,30 @@ async function selectJob(job) {
   state.selectedJobId = job.jobId;
   state.jobMapping = null;
   state.restored = null;
+  state.restoreSummary = null;
+  state.jobDictNote = null;
   $("restore-result").hidden = true;
   $("job-dict-rows").textContent = "";
   renderHistory();
   if (job.passphraseProtected && !$("restore-passphrase").value) {
-    showJobDictionaryNote(t("p1.history.passphrase_required"));
+    showJobDictionaryNote({ key: "p1.history.passphrase_required", vars: null });
     return;
   }
   await loadHistoryDictionary(job.jobId);
 }
 
-function showJobDictionaryNote(message) {
+// The note under the job dictionary is kept as a key + values so a language
+// switch repaints it; `null` hides it.
+function showJobDictionaryNote(spec) {
+  state.jobDictNote = spec;
+  paintJobDictionaryNote();
+}
+
+function paintJobDictionaryNote() {
   const note = $("job-dict-note");
-  note.hidden = !message;
-  note.textContent = message || "";
+  const spec = state.jobDictNote;
+  note.hidden = !spec;
+  note.textContent = spec ? t(spec.key, spec.vars) : "";
 }
 
 async function loadHistoryDictionary(jobId = state.selectedJobId) {
@@ -793,12 +948,12 @@ async function loadHistoryDictionary(jobId = state.selectedJobId) {
       }
       body.appendChild(tr);
     }
-    showJobDictionaryNote(entries.length ? "" : t("p1.history.no_dictionary"));
+    showJobDictionaryNote(entries.length ? null : { key: "p1.history.no_dictionary", vars: null });
   } catch (error) {
     if (request !== state.jobDictRequest || jobId !== state.selectedJobId) return;
     state.jobMapping = null;
     $("job-dict-rows").textContent = "";
-    showJobDictionaryNote(String(error?.message || error));
+    showJobDictionaryNote(storeErrorSpec(error, "p1.history.cant_load"));
   }
 }
 
@@ -810,12 +965,12 @@ function updateRestoreButton() {
 function pickRestoreFile(file) {
   if (state.busy) {
     $("restore-input").value = "";
-    return toast(t("p1.error.BUSY"), "info");
+    return toastKey("p1.error.BUSY", null, "info");
   }
-  if (!isSupported(file)) return toast(t("p1.upload.wrong_type"), "error");
+  if (!isSupported(file)) return toastKey("p1.upload.wrong_type", null, "error");
   const gate = gateLevel(file.size);
   if (gate.level === "reject") {
-    return toast(t("gate.file_reject", { size_mb: gate.size, max_mb: 50 }), "error", 0);
+    return toastKey("gate.file_reject", { size_mb: gate.size, max_mb: 50 }, "error", 0);
   }
   state.restoreFile = file;
   state.restoreRequest += 1;
@@ -834,8 +989,8 @@ async function restore() {
   const file = state.restoreFile;
   const passphrase = $("restore-passphrase").value;
   const request = ++state.restoreRequest;
-  if (!jobId) return toast(t("p1.restore.need_job"), "error");
-  if (!file) return toast(t("p1.restore.need_file"), "error");
+  if (!jobId) return toastKey("p1.restore.need_job", null, "error");
+  if (!file) return toastKey("p1.restore.need_file", null, "error");
   const stillCurrent = () =>
     request === state.restoreRequest && jobId === state.selectedJobId && file === state.restoreFile;
   try {
@@ -854,13 +1009,18 @@ async function restore() {
       jobId,
       request,
     };
-    $("restore-summary").textContent = t("p1.restore.ready", { count: state.restored.hits });
+    renderRestore();
     $("restore-result").hidden = false;
   } catch (error) {
     if (!stillCurrent()) return;
     if (error?.code) reportError(error);
-    else toast(String(error?.message || error), "error", 0);
+    else toastBuild(() => storeErrorText(error, "p1.restore.failed"), "error", 0);
   }
+}
+
+function renderRestore() {
+  if (!state.restored) return;
+  $("restore-summary").textContent = t("p1.restore.ready", { count: state.restored.hits });
 }
 
 // ---------------------------------------------------------- dictionary page
@@ -933,15 +1093,15 @@ function renderDictionary() {
 
 async function addDictionaryTerm() {
   const name = $("dict-name").value.trim();
-  if (!name) return toast(t("p1.dictionary.need_name"), "error");
+  if (!name) return toastKey("p1.dictionary.need_name", null, "error");
   try {
     await store.mergeUserEntities([{ canonical: name, type: $("dict-type").value, aliases: [] }]);
     $("dict-name").value = "";
     await refreshDict();
     await refreshStorageLine();
-    toast(t("p1.dictionary.saved", { name }), "ok");
+    toastKey("p1.dictionary.saved", { name }, "ok");
   } catch (error) {
-    toast(String(error?.message || error), "error", 0);
+    toastBuild(() => storeErrorText(error, "p1.dictionary.cant_save"), "error", 0);
   }
 }
 
@@ -970,6 +1130,39 @@ function fillTypeSelects() {
 
 // ------------------------------------------------------------------ wiring
 
+// Re-render every piece of state that is already on screen in the newly chosen
+// language: the static shell (via i18n.apply), the runtime badge and phase, the
+// preload banner, the upload/preview/review panes, generated and restored
+// results, history, the job dictionary and the dictionary page. Without this a
+// switch only retranslated the shell and left the live panes in the old
+// language.
+function repaint() {
+  state.i18n.apply();
+  if (state.statusEvent) onStatus(state.statusEvent, false);
+  else $("runtime-badge").textContent = t("p1.runtime.initializing");
+  if (state.phase) $("progress-label").textContent = t(`p1.progress.${state.phase}`);
+  if (state.preload) paintPreload();
+  if (state.file) {
+    renderUploadFile();
+    renderDegradations(state.file);
+    renderInspection(state.file);
+  }
+  if (state.detection) {
+    showWarnings(state.detection.warnings);
+    renderPreview(state.detection.previewText, state.detection.items);
+  } else if (state.inspection) {
+    renderPreview(state.inspection.previewText || "", []);
+  }
+  if (state.detection) renderReview();
+  renderGenerate();
+  renderHistory();
+  paintJobDictionaryNote();
+  if (state.restored) renderRestore();
+  renderDictionary();
+  paintToast();
+  fillTypeSelects();
+}
+
 async function boot() {
   state.i18n = await createI18n();
   state.i18n.apply();
@@ -978,7 +1171,7 @@ async function boot() {
   state.customTypesList = await store.getUserTokenTypes();
   state.disabledEntities = store.getDisabledEntities();
   fillTypeSelects();
-  if (!state.storageOk && init.error) toast(t("p1.storage.unavailable"), "info");
+  if (!state.storageOk && init.error) toastKey("p1.storage.unavailable", null, "info");
 
   for (const tab of document.querySelectorAll(".step")) {
     tab.addEventListener("click", () => showPanel(tab.dataset.panel));
@@ -1023,28 +1216,19 @@ async function boot() {
   $("dict-add").addEventListener("click", addDictionaryTerm);
   $("cancel-btn").addEventListener("click", () => {
     state.bridge.cancel();
-    toast(t("p1.cancelled"), "info");
+    toastKey("p1.cancelled", null, "info");
   });
   $("preload-retry").addEventListener("click", () => {
     preloadRuntime().catch((error) => failPreload(error?.message || String(error)));
   });
   $("runtime-retry").addEventListener("click", () => {
     state.bridge?.restart().catch((error) => {
-      toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
+      toastKey("p1.error.INIT_FAILED", { error: error?.message || error }, "error", 0);
     });
   });
   $("lang-select").addEventListener("change", async (event) => {
     await state.i18n.setLang(event.target.value);
-    onStatus({ state: state.runtime });
-    if (state.file) renderDegradations(state.file);
-    if (state.detection) {
-      showWarnings(state.detection.warnings);
-      renderPreview(state.detection.previewText, state.detection.items);
-    }
-    renderReview();
-    renderGenerate();
-    renderHistory();
-    renderDictionary();
+    repaint();
     refreshStorageLine().catch(() => {});
   });
 
@@ -1073,10 +1257,12 @@ async function boot() {
   refreshStorageLine().catch(() => {});
   state.bridge = createBridge({ workerUrl: "./worker/pyodide_worker.js", onStatus });
   state.bridge.ready.catch((error) => {
-    toast(t("p1.error.INIT_FAILED", { error: error?.message || error }), "error", 0);
+    toastKey("p1.error.INIT_FAILED", { error: error?.message || error }, "error", 0);
   });
   window.addEventListener("online", hideToast);
   updateFileButtons();
 }
 
-boot().catch((error) => toast(String(error?.message || error), "error", 0));
+boot().catch((error) =>
+  toastBuild(() => storeErrorText(error, "p1.error.INTERNAL"), "error", 0),
+);

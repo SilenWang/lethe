@@ -146,18 +146,23 @@ def test_every_locale_key_is_used():
     assert not unused, f"locale keys never used by the app: {unused}"
 
 
+def _p1_sources() -> str:
+    """Every product source of the static P1 app (not vendored assets)."""
+    ui = os.path.join(ROOT, "web", "ui")
+    sources = [open(os.path.join(ROOT, "web", "index.html"), encoding="utf-8").read()]
+    for name in sorted(os.listdir(ui)):
+        if name.endswith(".js"):
+            sources.append(open(os.path.join(ui, name), encoding="utf-8").read())
+    return "\n".join(sources)
+
+
 def _p1_ui_keys() -> set[str]:
     """Keys the static P1 UI resolves from web/ui + web/index.html.
 
     The P1 line is plain ES modules, so its keys are string literals and
     template prefixes rather than Python ``tr(...)`` calls.
     """
-    ui = os.path.join(ROOT, "web", "ui")
-    sources = [open(os.path.join(ROOT, "web", "index.html"), encoding="utf-8").read()]
-    for name in sorted(os.listdir(ui)):
-        if name.endswith(".js"):
-            sources.append(open(os.path.join(ui, name), encoding="utf-8").read())
-    source = "\n".join(sources)
+    source = _p1_sources()
     keys = set(re.findall(r"'(p1\.[\w.]+)'", source))
     keys |= set(re.findall(r'"(p1\.[\w.]+)"', source))
     # Template prefixes: `p1.error.${code}`, `p1.progress.${phase}`, `p1.source.${src}`.
@@ -431,3 +436,122 @@ def test_unknown_degradation_code_falls_back_to_a_generic_note():
     for lang, data in (("en", EN), ("zh", ZH)):
         assert data.get("p1.degradations.unknown", "").strip(), f"{lang} lacks the generic note"
     assert "p1.degradations.unknown" not in _format_object("DEGRADATION_CODE_KEYS")
+
+
+# ------------------------------------------------ P1 UI: switch-time coverage
+def test_every_p1_ui_key_resolves():
+    """The static app is not parsed by ``ast``, so its keys get their own
+    forward check: every ``p1.*`` literal it resolves must exist in both
+    locales, or the panel silently renders the bare key."""
+    missing = sorted(k for k in _p1_ui_keys() if k not in EN or k not in ZH)
+    assert not missing, f"P1 keys missing from a locale: {missing}"
+
+
+def test_translator_falls_back_to_english_then_the_key():
+    """A missing key must degrade predictably: the English string when the
+    active locale lacks it, and the key itself when neither has it. That is what
+    keeps a partially translated build readable instead of blank."""
+    source = _p1_sources()
+    assert "table[key] ?? en[key]" in source, "the en fallback was removed"
+    assert "if (template === undefined) return key;" in source, \
+        "an unknown key must render itself, not 'undefined'"
+
+
+def test_shell_attributes_take_their_copy_from_a_locale():
+    """Attributes are user-visible copy too. Every static aria-label / title /
+    meta description in the shell must declare the ``data-i18n-*`` attribute
+    that rewrites it, so a switch cannot leave English behind in the tab, the
+    tablist or the language picker."""
+    html = open(os.path.join(ROOT, "web", "index.html"), encoding="utf-8").read()
+    for line in html.splitlines():
+        if "aria-label=" in line and "data-i18n-aria-label" not in line:
+            assert not re.search(r'aria-label\s*=\s*"', line), \
+                f"untranslated aria-label: {line.strip()!r}"
+    title = re.search(r"<title[^>]*>", html)
+    assert title and "data-i18n=" in title.group(0), "<title> is not translated"
+    description = re.search(r'<meta\s[^>]*name="description"[^>]*>', html, re.S)
+    assert description, "the meta description is gone"
+    assert "data-i18n-content=" in description.group(0), \
+        "the meta description is not translated"
+    # i18n.js only rewrites the attributes it enumerates
+    for attribute in ('["data-i18n-aria-label", "aria-label"]',
+                      '["data-i18n-title", "title"]',
+                      '["data-i18n-content", "content"]'):
+        assert attribute in _p1_sources(), f"i18n.js does not rewrite {attribute}"
+
+
+def test_language_switch_repaints_live_state():
+    """A switch must repaint what is already on screen, not only the static
+    shell: upload, preview, review, generated and restored results, history, the
+    job dictionary, the dictionary page, the runtime badge and the toast."""
+    source = _p1_sources()
+    body = re.search(r"function repaint\(\) \{.*?\n\}\n", source, re.S)
+    assert body, "repaint() is gone — a language switch would leave stale copy"
+    repaint = body.group(0)
+    for call in ("state.i18n.apply()", "onStatus(", "paintPreload(", "renderUploadFile(",
+                 "renderDegradations(", "renderInspection(", "renderPreview(",
+                 "renderReview(", "renderGenerate(", "renderHistory(",
+                 "paintJobDictionaryNote(", "renderRestore(", "renderDictionary(",
+                 "paintToast(", "fillTypeSelects("):
+        assert call in repaint, f"repaint() never refreshes {call}"
+    # and the picker actually calls it after switching
+    handler = re.search(r'"lang-select"\)\.addEventListener\("change".*?\n  \}\);', source, re.S)
+    assert handler, "the language picker lost its change handler"
+    assert "repaint()" in handler.group(0), "a switch does not call repaint()"
+
+
+def test_toasts_and_notes_survive_a_switch():
+    """Messages that are still on screen are kept as builders/keys, so a switch
+    re-renders them rather than leaving the old language's sentence visible."""
+    source = _p1_sources()
+    assert "showToast({ key, vars, kind, ms })" in source, \
+        "toastKey() no longer keeps its semantic key and values"
+    assert "toastSpec = { ...spec, visible: true };" in source, \
+        "toast visibility is no longer explicit state"
+    assert "el.textContent = key ? t(key, vars) : render();" in source, \
+        "paintToast() stops resolving the semantic copy"
+    assert "toastSpec = null;" in source, "hideToast() leaves a hidden toast repaintable"
+    assert "function paintJobDictionaryNote()" in source, \
+        "the job dictionary note is no longer repaintable"
+
+
+def test_repaint_preserves_hidden_state_and_localizes_save_errors():
+    """A repaint updates currently visible content; it must not turn hidden or
+    completed messages back on, and a store failure must not embed English."""
+    source = _p1_sources()
+    assert "onStatus(state.statusEvent, false)" in source, \
+        "repainting the runtime badge can recreate a transient status toast"
+    assert "if (!toastSpec?.visible)" in source, \
+        "a hidden toast is not guarded during repaint"
+    assert "if (!bar || !text || !state.preload?.visible)" in source, \
+        "a hidden preload panel is reopened during repaint"
+    assert 'state.generatedSaved = storeErrorSpec(error, "p1.generate.unsaved");' in source, \
+        "the save-failure line still embeds the raw English store error"
+    assert 'return { key: fallbackKey, vars: { error: message } };' in source, \
+        "unknown store errors no longer keep a localized wrapper plus technical detail"
+
+
+def test_browser_store_errors_map_to_locale_keys():
+    """client-store.js and store.js throw fixed English sentences; the UI must
+    translate the ones a user can hit instead of showing them raw."""
+    with open(os.path.join(ROOT, "lethe", "web_static", "client-store.js"), encoding="utf-8") as fh:
+        client = fh.read()
+    with open(os.path.join(ROOT, "web", "ui", "store.js"), encoding="utf-8") as fh:
+        store = fh.read()
+    source = _p1_sources()
+    block = re.search(r"const STORE_ERROR_KEYS = \[(.*?)\n\];", source, re.S)
+    assert block, "STORE_ERROR_KEYS is gone"
+    mapped = dict(re.findall(r'\["([^"]+)", "([\w.]+)"\]', block.group(1)))
+    for prefix, key in mapped.items():
+        assert prefix in client or prefix in store, \
+            f"{prefix!r} is mapped but no store throws it"
+        assert key in EN and key in ZH, f"{prefix!r} maps to a missing key {key}"
+    # the sentences users can actually reach are all covered
+    for sentence in ("Wrong passphrase, or the stored mapping is corrupted.",
+                     "That conversion is no longer in this browser.",
+                     "This conversion is not passphrase-protected",
+                     "This result file is no longer stored in this browser",
+                     "Browser storage is unavailable"):
+        assert sentence in client or sentence in store, f"stale mapping: {sentence!r}"
+        assert any(sentence.startswith(prefix) for prefix in mapped), \
+            f"untranslated store error: {sentence!r}"
