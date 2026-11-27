@@ -15,6 +15,7 @@ mypy = ">=1.11"
 playwright = ">=1.47"
 pillow = ">=10"
 lxml = ">=6.0"
+pyyaml = ">=6.0.4, <7"
 
 [tasks]
 # ---- P0 gates: every command below is what the five CI jobs run -------------

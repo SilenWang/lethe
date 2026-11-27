@@ -259,6 +259,11 @@ deleted); a legacy install's `entities.json`, `token_types.json` and `vault/` ar
 into the browser once via Settings → Migrate old server-side data and then archived in
 place.
 
+The contributor-editable preset dictionary lives in `dictionary/entities.yaml`;
+see `dictionary/README.md` for its schema, encoding, validation rules and the
+signed-pack rebuild steps. `pixi run dictionary-check` rejects an edited YAML
+that was not rebuilt into the signed pack.
+
 ## Limitations
 
 - **The review step is the safety net, not the AI.** The NLP *suggestions* are a

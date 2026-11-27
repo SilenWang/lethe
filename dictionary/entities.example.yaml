@@ -1,0 +1,9 @@
+# Minimal synthetic example. Copy the structure, not these placeholder values.
+schemaVersion: 1
+entities:
+  - canonical: Example Person
+    type: PERSON
+    aliases:
+      - Example P.
+    shard: people
+    tier: full

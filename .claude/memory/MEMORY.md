@@ -6,3 +6,4 @@ One line per memory. Read the linked file for the full fact.
 - [restore-tab](restore-tab.md) — the Restore tab: manual re-identify for docs tokenised outside Lethe
 - [email-ingestion](email-ingestion.md) — .eml/.msg/.html in → de-identified Word out; extract-msg is a base dep
 - [testing-and-ci](testing-and-ci.md) — pytest + GitHub Actions CI; openpyxl emits inline (not shared) xlsx strings
+- [dictionary-source](dictionary-source.md) — preset glossary lives in `dictionary/entities.yaml`; dictionary-check compares it to the signed pack

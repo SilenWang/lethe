@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 from pathlib import Path
 
 import pytest
+import yaml
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -52,7 +54,11 @@ def signing_keys(tmp_path: Path) -> tuple[Path, Path, Path]:
 
 def _source(path: Path, rows: list[dict[str, object]]) -> Path:
     path.write_text(
-        "\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n",
+        yaml.safe_dump(
+            {"schemaVersion": 1, "entities": rows},
+            allow_unicode=True,
+            sort_keys=False,
+        ),
         encoding="utf-8",
     )
     return path
@@ -64,7 +70,7 @@ def _build(
     rows: list[dict[str, object]] | None = None,
 ) -> tuple[Path, tuple[Path, Path, Path]]:
     signing_key, public_key, config = signing_keys
-    source = _source(tmp_path / "entities.jsonl", rows or SOURCE_ROWS)
+    source = _source(tmp_path / "entities.yaml", rows or SOURCE_ROWS)
     out = tmp_path / "web" / "dictionary"
     build_dictionary.build_dictionary(
         source,
@@ -114,8 +120,221 @@ def test_shipped_pack_verifies_and_core_is_bounded() -> None:
         REPO / "web" / "lib" / "dictionary-config.js",
     )
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+    entities = build_dictionary._load_entities(build_dictionary.DEFAULT_SOURCE)
+    rebuilt, payloads = build_dictionary._manifest_from_entities(
+        entities, manifest["packVersion"], manifest["createdAt"]
+    )
+    assert rebuilt == manifest
+    for relative, payload in payloads.items():
+        assert (out / relative).read_bytes() == payload
     assert manifest["coreGzipBytes"] <= 150 * 1024
     assert manifest["totalGzipBytes"] <= 8 * 1024 * 1024
+
+
+def test_editing_yaml_changes_the_built_preset_entities(
+    tmp_path: Path, signing_keys: tuple[Path, Path, Path]
+) -> None:
+    signing_key, public_key, config = signing_keys
+    source = _source(tmp_path / "entities.yaml", SOURCE_ROWS)
+    out = tmp_path / "web" / "dictionary"
+
+    build_dictionary.build_dictionary(
+        source,
+        out,
+        signing_key,
+        "2026.11.25.1",
+        "2026-11-25T00:00:00Z",
+        public_key,
+        config,
+    )
+    before = [
+        json.loads(line)
+        for path in sorted((out / "packs").rglob("*.jsonl.gz"))
+        for line in gzip.decompress(path.read_bytes()).splitlines()
+    ]
+    assert {row["canonical"] for row in before} == {
+        "Alpha Holdings",
+        "Beta Person",
+    }
+
+    _source(
+        source,
+        [
+            *SOURCE_ROWS,
+            {
+                "canonical": "Gamma Project",
+                "shard": "projects",
+                "tier": "full",
+                "type": "PROJECT",
+            },
+        ],
+    )
+    build_dictionary.build_dictionary(
+        source,
+        out,
+        signing_key,
+        "2026.11.25.2",
+        "2026-11-25T01:00:00Z",
+        public_key,
+        config,
+    )
+    after = [
+        json.loads(line)
+        for path in sorted((out / "packs").rglob("*.jsonl.gz"))
+        for line in gzip.decompress(path.read_bytes()).splitlines()
+    ]
+    assert {row["canonical"] for row in after} == {
+        "Alpha Holdings",
+        "Beta Person",
+        "Gamma Project",
+    }
+
+
+def test_minimal_example_yaml_loads() -> None:
+    entities = build_dictionary._load_entities(
+        REPO / "dictionary" / "entities.example.yaml"
+    )
+    assert entities == [
+        {
+            "aliases": ["Example P."],
+            "canonical": "Example Person",
+            "shard": "people",
+            "tier": "full",
+            "type": "PERSON",
+        }
+    ]
+
+
+def test_missing_yaml_source_reports_the_path(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.yaml"
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"cannot read glossary source .*missing\.yaml",
+    ):
+        build_dictionary._load_entities(missing)
+
+
+def test_malformed_yaml_reports_line_and_column(tmp_path: Path) -> None:
+    source = tmp_path / "entities.yaml"
+    source.write_text("schemaVersion: 1\nentities: [\n", encoding="utf-8")
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"invalid YAML in .*line \d+, column \d+",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_invalid_entity_reports_its_index(tmp_path: Path) -> None:
+    source = _source(
+        tmp_path / "entities.yaml",
+        [{"canonical": "", "type": "PERSON"}],
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"entities\[0\]: canonical must be a non-empty string",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def _write(path: Path, text: str, encoding: str = "utf-8") -> Path:
+    path.write_bytes(text.encode(encoding))
+    return path
+
+
+def test_duplicate_yaml_key_is_rejected_with_its_position(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    canonical: Omega\n"
+        "    type: PERSON\n",
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"duplicate key 'canonical' at line 4, column \d+",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_duplicate_top_level_key_is_rejected(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        "entities:\n"
+        "  - canonical: Beta\n"
+        "    type: PERSON\n",
+    )
+    with pytest.raises(build_dictionary.DictionaryError, match="duplicate key 'entities'"):
+        build_dictionary._load_entities(source)
+
+
+def test_utf8_bom_is_tolerated(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "\ufeffschemaVersion: 1\nentities:\n  - canonical: Alpha\n    type: PERSON\n",
+    )
+    assert build_dictionary._load_entities(source)[0]["canonical"] == "Alpha"
+
+
+def test_non_utf8_source_reports_the_offending_byte(tmp_path: Path) -> None:
+    source = tmp_path / "entities.yaml"
+    source.write_bytes(
+        "schemaVersion: 1\nentities:\n  - canonical: 张三\n    type: PERSON\n".encode("gbk")
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"must be UTF-8; byte 0x[0-9a-f]{2} at offset \d+",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_verify_rejects_a_source_edited_without_rebuilding(
+    tmp_path: Path, signing_keys: tuple[Path, Path, Path]
+) -> None:
+    out, keys = _build(tmp_path, signing_keys)
+    source = tmp_path / "entities.yaml"
+    build_dictionary.verify_dictionary(out, keys[1], keys[2], source=source)
+
+    _source(
+        source,
+        [
+            *SOURCE_ROWS,
+            {
+                "canonical": "Gamma Project",
+                "shard": "projects",
+                "tier": "full",
+                "type": "PROJECT",
+            },
+        ],
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"does not match the signed pack .*run .*dictionary-build",
+    ):
+        build_dictionary.verify_dictionary(out, keys[1], keys[2], source=source)
+
+
+def test_verify_rejects_an_invalid_source_before_the_pack(
+    tmp_path: Path, signing_keys: tuple[Path, Path, Path]
+) -> None:
+    out, keys = _build(tmp_path, signing_keys)
+    _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\nentities:\n  - canonical: Alpha\n    canonical: Beta\n"
+        "    type: PERSON\n",
+    )
+    with pytest.raises(build_dictionary.DictionaryError, match="duplicate key"):
+        build_dictionary.verify_dictionary(
+            out, keys[1], keys[2], source=tmp_path / "entities.yaml"
+        )
+
+
+def test_shipped_pack_matches_the_editable_source() -> None:
+    build_dictionary.verify_source_matches_pack()
 
 
 def test_tampered_shard_is_rejected(
@@ -163,3 +382,126 @@ def test_non_preset_layer_is_rejected_on_verification(
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(build_dictionary.DictionaryError, match="signature|preset"):
         build_dictionary.verify_dictionary(out, signing_keys[1], signing_keys[2])
+
+
+def test_missing_aliases_defaults_to_an_empty_list(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\nentities:\n  - canonical: Alpha\n    type: PERSON\n",
+    )
+    assert build_dictionary._load_entities(source)[0]["aliases"] == []
+
+
+def test_explicit_empty_string_aliases_is_rejected_with_its_path(
+    tmp_path: Path,
+) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        '    aliases: ""\n',
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"entities\[0\]: aliases must be a list of strings, got an empty string",
+    ):
+        build_dictionary._load_entities(source)
+
+
+@pytest.mark.parametrize(
+    ("label", "rendered", "described"),
+    [
+        ("null", "null", "null"),
+        ("number", "42", "number 42"),
+        ("mapping", "{a: b}", "a mapping"),
+        ("boolean", "true", "boolean True"),
+    ],
+)
+def test_explicit_non_list_aliases_is_rejected_with_its_type(
+    tmp_path: Path, label: str, rendered: str, described: str
+) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        f"    aliases: {rendered}\n",
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=rf"entities\[0\]: aliases must be a list of strings, got {described}",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_non_string_alias_reports_its_index_and_type(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        "    aliases:\n"
+        "      - ALPHA\n"
+        "      - 7\n",
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"entities\[0\]: aliases\[1\] must be a string, got number 7",
+    ):
+        build_dictionary._load_entities(source)
+
+
+def test_valid_alias_list_is_trimmed_and_deduplicated(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - canonical: Alpha\n"
+        "    type: PERSON\n"
+        "    aliases:\n"
+        "      - \"  ALPHA \"\n"
+        "      - alpha\n"
+        "      - \"  \"\n"
+        "      - A. Holdings\n",
+    )
+    assert build_dictionary._load_entities(source)[0]["aliases"] == ["A. Holdings"]
+
+
+def test_merge_key_is_not_reported_as_a_duplicate(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - <<: &base\n"
+        "      type: PERSON\n"
+        "      shard: people\n"
+        "    canonical: Alpha\n"
+        "    aliases: [A. Holdings]\n",
+    )
+    entity = build_dictionary._load_entities(source)[0]
+    assert entity["canonical"] == "Alpha"
+    assert entity["type"] == "PERSON"
+    assert entity["shard"] == "people"
+    assert entity["aliases"] == ["A. Holdings"]
+
+
+def test_merge_key_still_reports_real_duplicates(tmp_path: Path) -> None:
+    source = _write(
+        tmp_path / "entities.yaml",
+        "schemaVersion: 1\n"
+        "entities:\n"
+        "  - <<: &base\n"
+        "      type: PERSON\n"
+        "    canonical: Alpha\n"
+        "    canonical: Beta\n"
+        "    type: PERSON\n",
+    )
+    with pytest.raises(
+        build_dictionary.DictionaryError,
+        match=r"duplicate key 'canonical' at line 6",
+    ):
+        build_dictionary._load_entities(source)

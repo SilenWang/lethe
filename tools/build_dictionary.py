@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import yaml
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -31,21 +32,43 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_SOURCE = REPO / "dictionary" / "entities.jsonl"
+DEFAULT_SOURCE = REPO / "dictionary" / "entities.yaml"
 DEFAULT_OUT = REPO / "web" / "dictionary"
 DEFAULT_PUBLIC_KEY = REPO / "dictionary" / "public-key.pem"
 CONFIG = REPO / "web" / "lib" / "dictionary-config.js"
 
 MANIFEST_SCHEMA = "lethe-dictionary-manifest"
 MANIFEST_SCHEMA_VERSION = 1
+SOURCE_SCHEMA_VERSION = 1
 VERSION_RE = re.compile(r"^\d{4}\.\d{2}\.\d{2}\.\d+$")
 SHARD_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 CORE_LIMIT = 150 * 1024
 TOTAL_LIMIT = 8 * 1024 * 1024
+ENTITY_KEYS = {"canonical", "type", "aliases", "shard", "tier"}
 
 
 class DictionaryError(ValueError):
     """The source tree or built pack violates the distribution contract."""
+
+
+_MISSING = object()
+
+
+def _describe_value(value: Any) -> str:
+    """Name a YAML value for a diagnostic, distinguishing absent from invalid."""
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return f"boolean {value}"
+    if isinstance(value, (int, float)):
+        return f"number {value}"
+    if isinstance(value, str):
+        return "an empty string" if not value.strip() else f"string {value!r}"
+    if isinstance(value, dict):
+        return "a mapping"
+    if isinstance(value, list):
+        return "a list"
+    return type(value).__name__
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -120,31 +143,56 @@ def _write_config_public_key(raw: bytes, config_path: Path = CONFIG) -> None:
     config_path.write_text(source, encoding="utf-8")
 
 
-def _normalise_entity(row: Any, line_no: int) -> dict[str, Any]:
+def _normalise_entity(row: Any, location: str) -> dict[str, Any]:
     if not isinstance(row, dict):
-        raise DictionaryError(f"line {line_no}: expected a JSON object")
-    canonical = str(row.get("canonical") or "").strip()
+        raise DictionaryError(f"{location}: expected a YAML mapping")
+    unknown = sorted(str(field) for field in set(row) - ENTITY_KEYS)
+    if unknown:
+        raise DictionaryError(f"{location}: unknown field(s): {', '.join(unknown)}")
+    canonical_value = row.get("canonical")
+    if not isinstance(canonical_value, str):
+        raise DictionaryError(f"{location}: canonical must be a non-empty string")
+    canonical = canonical_value.strip()
     if not canonical:
-        raise DictionaryError(f"line {line_no}: canonical is required")
-    entity_type = str(row.get("type") or "").strip().upper()
+        raise DictionaryError(f"{location}: canonical must be a non-empty string")
+    type_value = row.get("type")
+    if not isinstance(type_value, str):
+        raise DictionaryError(f"{location}: type must be a non-empty string")
+    entity_type = type_value.strip().upper()
     if not entity_type:
-        raise DictionaryError(f"line {line_no}: type is required")
-    aliases = row.get("aliases") or []
-    if not isinstance(aliases, list):
-        raise DictionaryError(f"line {line_no}: aliases must be an array")
+        raise DictionaryError(f"{location}: type must be a non-empty string")
+    aliases_value = row.get("aliases", _MISSING)
+    if aliases_value is _MISSING:
+        aliases: list[Any] = []
+    elif isinstance(aliases_value, list):
+        aliases = aliases_value
+    else:
+        raise DictionaryError(
+            f"{location}: aliases must be a list of strings, got {_describe_value(aliases_value)}"
+        )
     clean_aliases: list[str] = []
     seen = {canonical.casefold()}
-    for alias in aliases:
-        value = str(alias).strip()
+    for index, alias in enumerate(aliases):
+        if not isinstance(alias, str):
+            raise DictionaryError(
+                f"{location}: aliases[{index}] must be a string, got {_describe_value(alias)}"
+            )
+        value = alias.strip()
         if value and value.casefold() not in seen:
             clean_aliases.append(value)
             seen.add(value.casefold())
-    shard = str(row.get("shard") or "full").strip()
+    shard_value = row.get("shard", "full")
+    if not isinstance(shard_value, str):
+        raise DictionaryError(f"{location}: shard must be a string")
+    shard = shard_value.strip()
     if not SHARD_RE.fullmatch(shard):
-        raise DictionaryError(f"line {line_no}: invalid shard id {shard!r}")
-    tier = str(row.get("tier") or "full").strip()
+        raise DictionaryError(f"{location}: invalid shard id {shard!r}")
+    tier_value = row.get("tier", "full")
+    if not isinstance(tier_value, str):
+        raise DictionaryError(f"{location}: tier must be core or full")
+    tier = tier_value.strip()
     if tier not in {"core", "full"}:
-        raise DictionaryError(f"line {line_no}: tier must be core or full")
+        raise DictionaryError(f"{location}: tier must be core or full")
     return {
         "canonical": canonical,
         "type": entity_type,
@@ -154,28 +202,94 @@ def _normalise_entity(row: Any, line_no: int) -> dict[str, Any]:
     }
 
 
+class _DuplicateKeyError(ValueError):
+    """A YAML mapping repeats a key; ``safe_load`` would silently keep the last."""
+
+    def __init__(self, key: str, node: Any) -> None:
+        super().__init__(key)
+        self.key = key
+        self.line = node.start_mark.line + 1
+        self.column = node.start_mark.column + 1
+
+
+class _StrictLoader(yaml.SafeLoader):
+    """SafeLoader that rejects duplicate mapping keys instead of dropping one.
+
+    A repeated ``canonical`` or ``tier`` in an edited glossary is almost always
+    a mistake, and silently keeping the last value would make the built pack
+    disagree with what the editor sees.
+
+    Explicit keys are checked before merge keys are expanded: a ``<<: *base``
+    merge legitimately shares names with the keys it provides, so only repeats
+    among the keys written in the same mapping are errors.
+    """
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> Any:
+        seen: set[str] = set()
+        for key_node, _value_node in node.value:
+            if not isinstance(key_node, yaml.ScalarNode):
+                continue
+            key = str(key_node.value)
+            if key == "<<":
+                continue
+            if key in seen:
+                raise _DuplicateKeyError(key, key_node)
+            seen.add(key)
+        self.flatten_mapping(node)
+        return super().construct_mapping(node, deep=deep)
+
+
 def _load_entities(path: Path) -> list[dict[str, Any]]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        raw = path.read_bytes()
     except OSError as exc:
-        raise DictionaryError(f"cannot read source {path}: {exc}") from exc
+        raise DictionaryError(f"cannot read glossary source {path}: {exc}") from exc
+    try:
+        source = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise DictionaryError(
+            f"{path}: glossary source must be UTF-8; byte 0x{raw[exc.start]:02x} "
+            f"at offset {exc.start} is not valid UTF-8 (re-save the file as UTF-8)"
+        ) from exc
+    try:
+        document = yaml.load(source, Loader=_StrictLoader)
+    except _DuplicateKeyError as exc:
+        raise DictionaryError(
+            f"{path}: duplicate key {exc.key!r} at line {exc.line}, column {exc.column}"
+        ) from exc
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        location = ""
+        if mark is not None:
+            location = f" at line {mark.line + 1}, column {mark.column + 1}"
+        problem = getattr(exc, "problem", None) or str(exc)
+        raise DictionaryError(f"invalid YAML in {path}{location}: {problem}") from exc
+    if not isinstance(document, dict):
+        raise DictionaryError(f"{path}: top level must be a YAML mapping")
+    unknown = sorted(str(field) for field in set(document) - {"schemaVersion", "entities"})
+    if unknown:
+        raise DictionaryError(f"{path}: unknown top-level field(s): {', '.join(unknown)}")
+    version = document.get("schemaVersion")
+    if type(version) is not int or version != SOURCE_SCHEMA_VERSION:
+        raise DictionaryError(
+            f"{path}: schemaVersion must be {SOURCE_SCHEMA_VERSION}"
+        )
+    raw_entities = document.get("entities")
+    if not isinstance(raw_entities, list):
+        raise DictionaryError(f"{path}: entities must be a list")
+    if not raw_entities:
+        raise DictionaryError(f"{path}: entities must contain at least one entry")
     entities: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for line_no, line in enumerate(lines, 1):
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        try:
-            raw = json.loads(line)
-        except ValueError as exc:
-            raise DictionaryError(f"line {line_no}: invalid JSON: {exc}") from exc
-        row = _normalise_entity(raw, line_no)
+    for index, raw in enumerate(raw_entities):
+        row = _normalise_entity(raw, f"{path}: entities[{index}]")
         key = row["canonical"].casefold()
         if key in seen:
-            raise DictionaryError(f"line {line_no}: duplicate canonical {row['canonical']!r}")
+            raise DictionaryError(
+                f"{path}: entities[{index}]: duplicate canonical {row['canonical']!r}"
+            )
         seen.add(key)
         entities.append(row)
-    if not entities:
-        raise DictionaryError(f"source {path} contains no entities")
     return entities
 
 
@@ -315,12 +429,54 @@ def _load_manifest_and_signature(out: Path) -> tuple[dict[str, Any], bytes, byte
     return manifest, manifest_bytes, signature
 
 
+def verify_source_matches_pack(
+    source: Path = DEFAULT_SOURCE,
+    out: Path = DEFAULT_OUT,
+) -> None:
+    """Fail when the checked-in YAML glossary no longer matches the signed pack.
+
+    Editing ``dictionary/entities.yaml`` without rerunning
+    ``pixi run dictionary-build`` would ship a pack that disagrees with the
+    reviewed source, so the source is rebuilt in memory and compared byte for
+    byte with what the repository already contains.
+    """
+    entities = _load_entities(source)
+    manifest, _, _ = _load_manifest_and_signature(out)
+    created_at = manifest.get("createdAt")
+    if not isinstance(created_at, str) or not created_at:
+        raise DictionaryError("manifest has no createdAt timestamp")
+    rebuilt, payloads = _manifest_from_entities(
+        entities, manifest["packVersion"], created_at
+    )
+    if rebuilt != manifest:
+        raise DictionaryError(
+            f"{source} does not match the signed pack in {out}; run "
+            "`pixi run dictionary-build` to rebuild it"
+        )
+    for relative, payload in payloads.items():
+        path = out / relative
+        try:
+            built = path.read_bytes()
+        except OSError as exc:
+            raise DictionaryError(f"cannot read shard {relative}: {exc}") from exc
+        if built != payload:
+            raise DictionaryError(
+                f"shard {relative} does not match {source}; run "
+                "`pixi run dictionary-build` to rebuild it"
+            )
+
+
 def verify_dictionary(
     out: Path = DEFAULT_OUT,
     public_key_path: Path = DEFAULT_PUBLIC_KEY,
     config_path: Path = CONFIG,
+    source: Path | None = None,
 ) -> None:
-    """Verify the signed manifest, every shard and the shipped trust anchor."""
+    """Verify the signed manifest, every shard and the shipped trust anchor.
+
+    Passing ``source`` additionally proves the editable YAML glossary still
+    rebuilds to exactly the checked-in pack.
+    """
     public_key = _load_public_key(public_key_path)
     manifest, manifest_bytes, signature = _load_manifest_and_signature(out)
     try:
@@ -349,6 +505,8 @@ def verify_dictionary(
         for row in rows:
             if row.get("source") != "preset":
                 raise DictionaryError(f"shard {shard['id']} contains non-preset data")
+    if source is not None:
+        verify_source_matches_pack(source, out)
 
 
 def build_dictionary(
@@ -383,7 +541,7 @@ def build_dictionary(
         )
     )
     _write_config_public_key(_public_raw(public_key), config_path)
-    verify_dictionary(out, public_key_path, config_path)
+    verify_dictionary(out, public_key_path, config_path, source=source)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -399,8 +557,10 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.verify_only:
-            verify_dictionary(args.out, args.public_key)
-            print("dictionary-check: signature, sizes and shard hashes OK")
+            verify_dictionary(args.out, args.public_key, CONFIG, source=args.source)
+            print(
+                "dictionary-check: source, signature, sizes and shard hashes OK"
+            )
             return 0
         if not args.signing_key:
             parser.error("--signing-key is required unless --verify-only is used")

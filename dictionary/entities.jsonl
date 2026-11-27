@@ -1,8 +1,0 @@
-{"aliases":["ACP"],"canonical":"Acme Capital Partners","shard":"counterparties","tier":"core","type":"COUNTERPARTY"}
-{"aliases":["Meridian"],"canonical":"Meridian Holdings Pte Ltd","shard":"counterparties","tier":"full","type":"COUNTERPARTY"}
-{"aliases":["Riverstone"],"canonical":"Riverstone Energy","shard":"counterparties","tier":"full","type":"COUNTERPARTY"}
-{"canonical":"John Smith","shard":"people","tier":"core","type":"PERSON"}
-{"aliases":["J. Smith"],"canonical":"Jane Doe","shard":"people","tier":"full","type":"PERSON"}
-{"canonical":"Alice Chen","shard":"people","tier":"full","type":"PERSON"}
-{"canonical":"张宏伟","shard":"people-zh","tier":"full","type":"PERSON"}
-{"canonical":"上海华信资本管理有限公司","aliases":["华信资本"],"shard":"counterparties-zh","tier":"full","type":"COUNTERPARTY"}
